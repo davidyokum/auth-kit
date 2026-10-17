@@ -39,7 +39,8 @@ async function currentPath(): Promise<string | undefined> {
 /**
  * Converts an auth failure on a page into the right Next.js response: sign-in redirect for 401,
  * the authenticator setup page for missing TOTP, not-found (or forbidden) for 403 and 404. A 503
- * ("couldn't check") is rethrown so the error boundary says so honestly.
+ * ("couldn't check") is rethrown so the error boundary says so honestly: its digest survives Next's
+ * production error redaction, so the boundary can tell with `isAuthUnavailableError(error)`.
  */
 export async function handlePageAuthError(error: unknown, options: PageGuardOptions = {}): Promise<never> {
   if (!isAuthError(error) || error instanceof AuthUnavailableError) throw error;

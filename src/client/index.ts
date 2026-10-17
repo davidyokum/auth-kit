@@ -11,7 +11,7 @@
  * passkeys need the browser's WebAuthn prompt. The server side stays in `auth-kit/server`, which
  * enforces the same rules on every request (`requireUser` refuses a password user without an
  * authenticator; page guards send them to the setup page). This module imports nothing server-side
- * except `safeRedirect`, a pure function with no imports.
+ * except `safeRedirect` and `isAuthUnavailableError`, pure functions with no imports.
  */
 export {
   SIGN_IN_METHODS,
@@ -32,6 +32,9 @@ export { describeAuthError, type AuthErrorInfo, type AuthErrorKind, type AuthErr
 export { buildOtpauthUri, formatSetupKey } from './totp.js';
 export { isBreachedPassword, PWNED_PASSWORDS_RANGE_URL, type BreachedPasswordCheck } from './breached.js';
 export { CognitoRequestError } from './cognito.js';
+// For error.tsx: tells auth-kit's "couldn't check" (503) apart from other server errors, in
+// production builds too (by digest). A pure function with no imports.
+export { isAuthUnavailableError, AUTH_UNAVAILABLE_DIGEST } from '../shared/unavailable.js';
 export {
   configureAuthClient,
   settle,

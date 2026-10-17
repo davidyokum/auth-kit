@@ -12,6 +12,9 @@
  *
  * Pages turn 401 into a redirect to sign-in. APIs answer with the status and a JSON body.
  */
+import { authUnavailableDigest } from '../shared/unavailable.js';
+
+export { AUTH_UNAVAILABLE_DIGEST, isAuthUnavailableError } from '../shared/unavailable.js';
 export type AuthErrorCode =
   | 'unauthenticated'
   | 'invalid_token'
@@ -88,11 +91,18 @@ export class NotFoundError extends AuthError {
   }
 }
 
-/** 503: the check couldn't run. Surfaces the reason instead of pretending the person is signed out or allowed. */
+/**
+ * 503: the check couldn't run. Surfaces the reason instead of pretending the person is signed out or
+ * allowed. Pages rethrow it to the error boundary; its `digest` (`AUTH_KIT_AUTH_UNAVAILABLE;<id>`)
+ * survives Next's production error redaction, so `isAuthUnavailableError(error)` works there too.
+ */
 export class AuthUnavailableError extends AuthError {
+  /** Kept by Next as the boundary's `error.digest`. A random reference per error, for the logs. */
+  readonly digest: string;
   constructor(message = 'Sign-in status is temporarily unavailable. Please try again.', options?: { cause?: unknown }) {
     super('auth_unavailable', 503, message, options);
     this.name = 'AuthUnavailableError';
+    this.digest = authUnavailableDigest();
   }
 }
 

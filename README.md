@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.1-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.1-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -354,21 +354,26 @@ export async function invite(previous: ActionResult | null, data: FormData) {
 ```tsx
 // app/admin/people/page.tsx (server component; admin pages are never cached)
 import { InviteForm, PeopleTable } from 'auth-kit/admin/ui';
+import { signInUrl } from 'auth-kit/server';
 import { changeRole, deleteUser, disable, enable, invite, resend, signOutEverywhere } from './actions';
 
 export const dynamic = 'force-dynamic';
+
+// "Sign in again to confirm": /sign-in?next=%2Fadmin%2Fpeople&reauth=1, which the sign-in page
+// (step 6) reads as a step-up and returns from to this page.
+const stepUpHref = signInUrl('/admin/people', { reauth: true });
 
 export default async function PeoplePage() {
   const user = await pages.requireCan('people.manage', { live: true });
   const viewer = { sub: user.sub, groups: [...user.groups], capabilities: [...user.capabilities] };
   return (
     <>
-      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref="/sign-in?step-up=1" />
+      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref={stepUpHref} />
       <PeopleTable
         people={await people.listPeople()}
         viewer={viewer}
         actions={{ resend, changeRole, disable, enable, signOutEverywhere, deleteUser }}
-        stepUpHref="/sign-in?step-up=1"
+        stepUpHref={stepUpHref}
       />
     </>
   );
@@ -388,9 +393,37 @@ The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResour
 | 403 | Signed in, and not allowed | `ForbiddenError` |
 | 403 | A password user without an authenticator code: send them to setup | `MfaEnrollmentRequiredError` |
 | 404 | The record isn't theirs (or doesn't exist; the route doesn't say which) | `NotFoundError` |
-| 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed | `AuthUnavailableError` |
+| 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed; on pages, the error boundary says so (`isAuthUnavailableError`) | `AuthUnavailableError` |
 
-Pages turn 401 into a sign-in redirect with a safe `next` path, missing TOTP into the setup page, and 403/404 into Next's not-found page.
+Pages turn 401 into a sign-in redirect with a safe `next` path (`&reauth=1` for step-up), missing TOTP into the setup page, and 403/404 into Next's not-found page.
+
+### "Couldn't check" on pages
+
+A 503 is never a sign-in redirect or a not-found page: page guards rethrow `AuthUnavailableError` to the nearest error boundary. In a production build Next replaces server errors with a generic one before the boundary sees it (no name, no message, only `digest`), so `AuthUnavailableError` carries a digest of its own, `AUTH_KIT_AUTH_UNAVAILABLE;<reference>`, which Next keeps. `isAuthUnavailableError(error)` from `auth-kit/client` reads it, in development and production alike:
+
+```tsx
+// app/error.tsx (and app/global-error.tsx, which catches errors thrown by the root layout)
+'use client';
+import { isAuthUnavailableError } from 'auth-kit/client';
+
+export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const unavailable = isAuthUnavailableError(error);
+  return (
+    <main>
+      <h1>{unavailable ? 'Can’t check your sign-in right now' : 'This page couldn’t load'}</h1>
+      <p>
+        {unavailable
+          ? 'The sign-in service didn’t answer, so this page stayed closed. Nothing was shown or changed.'
+          : 'Something failed on the server. Try again, and if it keeps happening, quote the reference below.'}
+      </p>
+      {error.digest && <p>Reference: {error.digest}</p>}
+      <button type="button" onClick={reset}>Try again</button>
+    </main>
+  );
+}
+```
+
+The reference matches the server's log line for that error. The page's own HTTP status is 500 (Next serves error boundaries as 500); the proxy answers 503 itself when it can't check, and route handlers wrapped in `withAuthErrors` answer 503 JSON.
 
 ## How the standard maps to the code
 
