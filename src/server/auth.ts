@@ -37,6 +37,8 @@ export interface ServerAuthOptions<G extends string = string, C extends string =
   cognito?: CognitoGateway;
   /** Preloaded JWKS (tests). Production fetches and caches the pool's keys. */
   jwks?: JwksLike;
+  /** Replaces the JWKS fetch (tests). */
+  jwksFetcher?: (uri: string) => Promise<unknown>;
   /** Token verifier override (tests). */
   verifier?: TokenVerifier;
   /** Milliseconds since the epoch (tests). */
@@ -159,6 +161,7 @@ export function createServerAuth<G extends string, C extends string>(
       userPoolId: pool.userPoolId,
       clientId: pool.clientId,
       ...(options.jwks !== undefined && { jwks: options.jwks }),
+      ...(options.jwksFetcher !== undefined && { jwksFetcher: options.jwksFetcher }),
     });
   const tokenSource = options.tokenSource ?? defaultTokenSource(pool.clientId);
   const requireTotp = options.requireTotpForPasswordUsers ?? true;

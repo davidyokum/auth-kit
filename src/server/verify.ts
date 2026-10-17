@@ -1,5 +1,6 @@
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { FetchError, JwksValidationError, JwtBaseError, NonRetryableFetchError } from 'aws-jwt-verify/error';
+import { SimpleJwksCache } from 'aws-jwt-verify/jwk';
 import type { JwksLike } from './jwks.js';
 import { type PoolConfig, resolvePoolConfig } from './config.js';
 import { AuthUnavailableError, UnauthenticatedError } from './errors.js';
@@ -53,6 +54,11 @@ export interface TokenVerifierOptions extends PoolConfig {
    * it out: keys are fetched once from the pool's `/.well-known/jwks.json` and cached in memory.
    */
   jwks?: JwksLike;
+  /**
+   * Replaces the HTTPS fetch of the pool's JWKS (tests, or a custom HTTP stack). Receives the JWKS
+   * URI and returns the parsed JSON. Errors it throws count as "couldn't check" (503).
+   */
+  jwksFetcher?: (uri: string) => Promise<unknown>;
 }
 
 /** Fetch and key-set problems mean "couldn't check" (503), not "bad token" (401). */
@@ -71,8 +77,27 @@ function toAuthError(error: unknown): Error {
 /** Builds a verifier bound to one pool and one app client. Reuse it: the JWKS cache lives inside. */
 export function createTokenVerifier(options: TokenVerifierOptions): TokenVerifier {
   const { userPoolId, clientId } = resolvePoolConfig(options);
-  const access = CognitoJwtVerifier.create({ userPoolId, clientId, tokenUse: 'access' });
-  const id = CognitoJwtVerifier.create({ userPoolId, clientId, tokenUse: 'id' });
+  const { jwksFetcher } = options;
+  // One key cache for both token types.
+  const jwksCache = new SimpleJwksCache(
+    jwksFetcher
+      ? {
+          fetcher: {
+            fetch: async (uri: string) => {
+              let body: unknown;
+              try {
+                body = await jwksFetcher(uri);
+              } catch (error) {
+                throw new FetchError(uri, error instanceof Error ? error.message : String(error));
+              }
+              return new TextEncoder().encode(JSON.stringify(body)).buffer as ArrayBuffer;
+            },
+          },
+        }
+      : undefined,
+  );
+  const access = CognitoJwtVerifier.create({ userPoolId, clientId, tokenUse: 'access' }, { jwksCache });
+  const id = CognitoJwtVerifier.create({ userPoolId, clientId, tokenUse: 'id' }, { jwksCache });
   if (options.jwks) {
     access.cacheJwks(options.jwks as Parameters<typeof access.cacheJwks>[0]);
     id.cacheJwks(options.jwks as Parameters<typeof id.cacheJwks>[0]);
