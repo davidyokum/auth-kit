@@ -188,6 +188,89 @@ describe('requireUser and the authenticator rule', () => {
   });
 });
 
+describe('getUser and the authenticator rule (L6)', () => {
+  it('returns null for a password user without an authenticator, so `if (!user)` gates stay safe', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'pw-only' }));
+    expect(await auth.getUser({ request: req })).toBeNull();
+  });
+
+  it('returns that person with allowMfaEnrollment (the setup page, a header showing who is signed in)', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    const user = await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })), allowMfaEnrollment: true });
+    expect(user?.sub).toBe('pw-only');
+  });
+
+  it('returns enrolled, passkey, and invitee users, sharing the cached factor answer with requireUser', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('pk', { configured: ['WEB_AUTHN'], mfa: [] });
+    const token = issuer.mintAccessToken({ sub: 'pk' });
+    expect((await auth.getUser({ request: bearer(token) }))?.sub).toBe('pk');
+    await auth.requireUser({ request: bearer(token) });
+    expect(cognito.calls.filter((c) => c.method === 'getUserAuthFactors')).toHaveLength(1);
+  });
+
+  it('returns null when Cognito says the session was revoked, and 503 when it cannot be reached', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('revoked', new UnauthenticatedError('invalid_token'));
+    expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'revoked' })) })).toBeNull();
+    cognito.setFactors('down', new AuthUnavailableError());
+    expect(await rejection(auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'down' })) }))).toBeInstanceOf(AuthUnavailableError);
+  });
+
+  it('skips the Cognito call when the rule is switched off', async () => {
+    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false });
+    cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) })).not.toBeNull();
+    expect(cognito.calls).toHaveLength(0);
+  });
+});
+
+describe('claim shape and the authenticator cache (L1)', () => {
+  it.each([
+    ['jti', { jti: undefined }],
+    ['sub', { sub: undefined }],
+    ['exp', { exp: undefined }],
+    ['iat', { iat: undefined }],
+    ['a string exp', { exp: '9999999999' }],
+    ['an empty username', { username: '' }],
+    ['non-string groups', { 'cognito:groups': 'superadmin' }],
+  ])('refuses a pool-signed token with missing or malformed %s', async (_label, claims) => {
+    const { auth, issuer } = harness();
+    const req = bearer(issuer.mintAccessToken({ claims }));
+    expect(await auth.getUser({ request: req })).toBeNull();
+    const error = await rejection(auth.requireUser({ request: req }));
+    expect((error as UnauthenticatedError).code).toBe('invalid_token');
+  });
+
+  it('never lets two people share a cached factor answer, even with the same token ID', async () => {
+    // The reverse of the review's probe: an enrolled person's answer must not admit a password-only one.
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('enrolled', { configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] });
+    cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    await auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'enrolled', claims: { jti: 'same-jti' } })) });
+    const error = await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only', claims: { jti: 'same-jti' } })) }));
+    expect(error).toBeInstanceOf(MfaEnrollmentRequiredError);
+    expect(cognito.calls.filter((c) => c.method === 'getUserAuthFactors')).toHaveLength(2);
+  });
+});
+
+describe('createServerAuth fails loudly on bad options', () => {
+  it.each([
+    [{ factorCheckTtlSeconds: Number.NaN }, /factorCheckTtlSeconds/],
+    [{ liveCheckTtlSeconds: -1 }, /liveCheckTtlSeconds/],
+    [{ stepUpMaxAgeSeconds: Infinity }, /stepUpMaxAgeSeconds/],
+    [{ factorLookup: 'token' }, /factorLookup/],
+    [{ requireTotpForPasswordUsers: 'yes' }, /requireTotpForPasswordUsers/],
+    [{ capabilities: {} }, /defineCapabilities/],
+    [{ factorLookUp: 'iam' }, /unknown option "factorLookUp"/],
+  ])('%j', (overrides, message) => {
+    expect(() => harness(overrides as never)).toThrow(message);
+  });
+});
+
 describe('requireCan and requireGroup', () => {
   it('allows a capability the groups grant and refuses one they do not (403)', async () => {
     const { auth, issuer } = harness();
@@ -307,10 +390,17 @@ describe('step-up (auth_time)', () => {
     expect(() => auth.requireRecentSignIn(user, 600)).not.toThrow();
   });
 
-  it('treats a missing auth_time as stale', async () => {
+  it('refuses a token with no auth_time outright (Cognito always issues one)', async () => {
     const { auth, issuer } = harness();
-    const user = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ claims: { auth_time: undefined } })) });
-    expect(() => auth.requireRecentSignIn(user)).toThrow(StepUpRequiredError);
+    const error = await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ claims: { auth_time: undefined } })) }));
+    expect(error).toBeInstanceOf(UnauthenticatedError);
+    expect((error as UnauthenticatedError).code).toBe('invalid_token');
+  });
+
+  it('still treats a non-numeric authTime as stale (defense in depth)', async () => {
+    const { auth, issuer } = harness();
+    const user = await auth.requireUser({ request: bearer(issuer.mintAccessToken()) });
+    expect(() => auth.requireRecentSignIn({ ...user, authTime: Number.NaN })).toThrow(StepUpRequiredError);
   });
 });
 

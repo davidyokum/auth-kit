@@ -17,8 +17,12 @@ export class TtlCache<K, V> {
     return entry.value;
   }
 
+  /** Stores `value` for `ttlMs`. A lifetime that isn't a positive finite number stores nothing (never "forever"). */
   set(key: K, value: V, ttlMs: number): void {
-    if (ttlMs <= 0) return;
+    if (!(ttlMs > 0) || !Number.isFinite(ttlMs)) {
+      this.entries.delete(key);
+      return;
+    }
     this.entries.delete(key);
     this.entries.set(key, { value, expiresAt: this.now() + ttlMs });
     while (this.entries.size > this.maxEntries) {
