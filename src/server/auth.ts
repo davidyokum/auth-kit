@@ -2,7 +2,7 @@ import { SESSION_POLICY } from '../shared/policy.js';
 import { TtlCache } from './cache.js';
 import type { Capabilities } from './capabilities.js';
 import { type CognitoGateway, type LiveUserState, createCognitoGateway, needsTotpEnrollment } from './cognito.js';
-import { type PoolConfig, resolvePoolConfig } from './config.js';
+import { type PoolConfig, type ResolvedPoolConfig, resolvePoolConfig } from './config.js';
 import { type RequestInput, nextHeadersContext, toRequestContext } from './context.js';
 import {
   ForbiddenError,
@@ -105,6 +105,10 @@ export interface RecordAccessRule<R, C extends string> {
 
 export interface ServerAuth<G extends string = string, C extends string = string> {
   readonly capabilities: Capabilities<G, C>;
+  /** The pool and app client this instance accepts tokens from. */
+  readonly pool: Readonly<ResolvedPoolConfig>;
+  /** Where this instance looks for tokens. */
+  readonly tokenSource: TokenSource;
   /** Verifies an access token: signature, expiry, issuer, audience (`client_id`), `token_use`. */
   verifyAccessToken(token: string): Promise<AccessTokenClaims>;
   /** The signed-in person, or `null`. Throws only `AuthUnavailableError` (couldn't check). */
@@ -292,6 +296,8 @@ export function createServerAuth<G extends string, C extends string>(
 
   return {
     capabilities,
+    pool: Object.freeze({ ...pool }),
+    tokenSource,
     verifyAccessToken: (token) => verifier.verifyAccessToken(token),
     getUser,
     requireUser,
