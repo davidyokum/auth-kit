@@ -4,16 +4,36 @@ import type { CookieReader, HeaderReader, RequestContext } from './tokens.js';
 /** Anything auth-kit can read a request from: a NextRequest, a plain Request, or a RequestContext. */
 export type RequestInput = RequestContext | Request | { headers: HeaderReader; cookies?: CookieReader };
 
-function parseCookieHeader(header: string | null): CookieReader {
+/**
+ * Parses a Cookie header exactly the way Next's `RequestCookies` does (`@edge-runtime/cookies`), so
+ * every layer reads the same session: the proxy and route handlers use Next's parser through
+ * `NextRequest.cookies` and `cookies()`, and a plain `Request` comes through here.
+ *
+ * - Pairs are split on `;` followed by any spaces; names aren't otherwise trimmed.
+ * - A pair without `=` is the name with the value `true`.
+ * - Values are percent-decoded once; a pair whose value can't be decoded is skipped.
+ * - When a name repeats, the **last** occurrence wins.
+ *
+ * Duplicates happen legitimately (Amplify cookies left at another path) and adversarially (a sibling
+ * subdomain setting `Domain=<parent>` cookies). Refusing them would lock people out over a stale
+ * cookie, so auth-kit agrees with Next instead, and sites on custom domains must not share a parent
+ * domain with apps they don't trust (see the README).
+ */
+export function parseCookieHeader(header: string | null): CookieReader {
   const jar = new Map<string, string>();
   if (header) {
-    for (const part of header.split(';')) {
-      const eq = part.indexOf('=');
-      if (eq <= 0) continue;
-      const name = part.slice(0, eq).trim();
-      const value = part.slice(eq + 1).trim();
-      // The first occurrence wins, matching how browsers order more specific cookies first.
-      if (name && !jar.has(name)) jar.set(name, value);
+    for (const pair of header.split(/; */)) {
+      if (!pair) continue;
+      const eq = pair.indexOf('=');
+      if (eq === -1) {
+        jar.set(pair, 'true');
+        continue;
+      }
+      try {
+        jar.set(pair.slice(0, eq), decodeURIComponent(pair.slice(eq + 1)));
+      } catch {
+        // Undecodable value: skipped, as Next does.
+      }
     }
   }
   return { get: (name) => (jar.has(name) ? { value: jar.get(name)! } : undefined) };
