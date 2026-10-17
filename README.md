@@ -114,7 +114,21 @@ const user = await pages.requireCan('people.manage', { live: true }); // re-read
 
 `getUser()` is for optional display (a header that says who's signed in). It applies the same authenticator rule as `requireUser()`, so a password user without TOTP comes back as `null` unless you pass `allowMfaEnrollment: true`. Gate with `requireUser` / `requireCan`, which also say *why* someone is refused.
 
-Route handlers that change data call `assertSameOrigin(request, { expectedOrigin: process.env.APP_ORIGIN })`. Set `expectedOrigin` to the site's public origin in production: the origin rebuilt from `request.url` may not match the browser's scheme behind a CDN.
+Route handlers that change data call `assertSameOrigin(request, { expectedOrigin })`, with `expectedOrigin` set from configuration **in every environment**:
+
+```ts
+// lib/origin.ts: never from request headers
+export const expectedOrigin =
+  process.env.NODE_ENV === 'development' ? 'http://reports.localhost:3000' : process.env.APP_ORIGIN; // localDevServer(...).url in dev
+
+// app/api/reports/route.ts
+export const POST = withAuthErrors(async (request: Request) => {
+  assertSameOrigin(request, { expectedOrigin });
+  // ...
+});
+```
+
+Without it, `Origin` is compared with the origin rebuilt from `request.url`, which can have the wrong scheme behind a CDN, and whose host `next dev` rewrites to `localhost` whatever the browser asked for (Next 16). So under `next dev`, and only when `request.url` and the `Host` header are both loopback, the check also accepts the origin the browser used (`http://<Host>`); a deployed build never takes that path.
 
 ```ts
 // A risky action (grant a role, export data): require a sign-in in the last 5 minutes
@@ -444,7 +458,7 @@ These were checked against the installed packages and AWS documentation, but not
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
 - **The WAF sign-in rule's header match.** Cognito forwards `x-amzn-cognito-operation-name` to WAF, but AWS doesn't document its value format. The rule matches case-insensitively on the operation name (and on `x-amz-target`). Run it in `count` mode first; the overall per-IP rule needs no header match.
 - **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. After a sandbox session refreshes, read both rules' samples (read-only) and tune the limits with refreshes in mind: `aws wafv2 get-sampled-requests --profile <profile> --scope REGIONAL --web-acl-arn <arn> --rule-metric-name <project>-sign-in-attempts-per-ip --time-window StartTime=<iso>,EndTime=<iso> --max-items 100` (and `<project>-requests-per-ip`).
-- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
+- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Choice-based sign-in without a managed-login domain.** AWS's overview says passwordless and passkey sign-in need one; other AWS pages say SDK apps don't. The preset doesn't create a domain.
 
 ## What the pool can't enforce

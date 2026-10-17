@@ -20,7 +20,7 @@
  * Cookies the app sets itself (preferences, flash messages, anything sensitive) use
  * `secureCookieOptions`: httpOnly, Secure, SameSite=Lax.
  */
-import { isPlainHttpLoopbackOrigin } from '../shared/loopback.js';
+import { isLoopbackHostname, isPlainHttpLoopbackOrigin } from '../shared/loopback.js';
 import { ForbiddenError } from './errors.js';
 import type { HeaderReader } from './tokens.js';
 
@@ -140,10 +140,12 @@ export interface OriginCheckRequest {
 
 export interface OriginCheckOptions {
   /**
-   * The site's public origin, e.g. `https://reports.example.org`. When set, `Origin` is compared with
-   * this instead of the origin rebuilt from `request.url`, whose scheme can differ from the browser's
+   * The site's public origin, e.g. `https://reports.example.org` (and `http://reports.localhost:3000`
+   * under `next dev`). When set, `Origin` is compared with this and only this (plus `allowedOrigins`).
+   * Set it in every environment, from configuration, never from request headers: without it the check
+   * falls back to the origin rebuilt from `request.url`, whose scheme can differ from the browser's
    * behind a CDN (whether Amplify Hosting's CloudFront → compute hop does is a verify-on-first-deploy
-   * item). Set it in production from configuration, never from request headers.
+   * item), and whose host `next dev` rewrites to `localhost`.
    */
   expectedOrigin?: string;
   /** Extra origins allowed to send state-changing requests, e.g. `https://admin.example.org`. */
@@ -166,13 +168,44 @@ function assertOrigin(value: string, label: string): string {
   return value;
 }
 
+/** A bare `host[:port]` as a browser sends it in `Host`: no user info, path, query, or spaces. */
+const BARE_HOST = /^(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::\d{1,5})?$/i;
+
+/**
+ * The origin the browser used, in local development only. Under `next dev`, Next rewrites
+ * `request.url`'s host to `localhost` whatever the browser asked for (seen with Next 16.4 bound to
+ * 127.0.0.1: `request.url` `http://localhost:3210/…` for `Host: 127.0.0.1:3210`), so the origin
+ * rebuilt from it never matches a page on `http://app.localhost:3000` or `http://127.0.0.1:3210`.
+ *
+ * So when `NODE_ENV` is `development` and both `request.url` and the `Host` header name this
+ * computer, `<request.url's scheme>//<Host>` also counts as the site's own origin. A loopback Host
+ * is required, so DNS rebinding (a page on attacker.example resolved to 127.0.0.1 sends
+ * `Host: attacker.example`) never matches. `process.env.NODE_ENV` is written literally: `next build`
+ * replaces it with "production" and drops this branch from every deployed build.
+ */
+function devLoopbackOrigin(request: OriginCheckRequest, url: URL): string | null {
+  if (typeof process === 'undefined' || process.env.NODE_ENV !== 'development') return null;
+  if (!isLoopbackHostname(url.hostname)) return null;
+  const host = request.headers.get('host')?.trim();
+  if (!host || !BARE_HOST.test(host)) return null;
+  let browser: URL;
+  try {
+    browser = new URL(`${url.protocol}//${host}`);
+  } catch {
+    return null;
+  }
+  return isLoopbackHostname(browser.hostname) && browser.origin !== 'null' ? browser.origin : null;
+}
+
 /**
  * True when a state-changing request comes from the app's own origin. Route handlers that change
  * data call this (server actions get Next's built-in origin check).
  *
  * - Safe methods (GET, HEAD, OPTIONS) pass. They must not change data.
- * - Otherwise the `Origin` header must equal the site's origin (`expectedOrigin`, else the origin of
- *   `request.url`) or an allowed origin. Scheme, host, and port all count.
+ * - Otherwise the `Origin` header must equal the site's origin or an allowed origin. Scheme, host,
+ *   and port all count. The site's origin is `expectedOrigin` when set (set it in every
+ *   environment). Without it, it's the origin of `request.url`, plus, under `next dev` on a loopback
+ *   host only, the origin the browser used (see `devLoopbackOrigin`).
  * - With no `Origin`, `Sec-Fetch-Site: same-origin` passes; anything else fails closed.
  * `X-Forwarded-Host` and `X-Forwarded-Proto` are never trusted. A malformed `expectedOrigin` or
  * `allowedOrigins` entry throws, so a typo fails loudly instead of refusing every request.
@@ -181,17 +214,21 @@ export function isSameOriginRequest(request: OriginCheckRequest, options: Origin
   const extra = (options.allowedOrigins ?? []).map((o) => assertOrigin(o, 'allowedOrigins entry'));
   const expected = options.expectedOrigin === undefined ? undefined : assertOrigin(options.expectedOrigin, 'expectedOrigin');
   if (SAFE_METHODS.has(request.method.toUpperCase())) return true;
-  let own: string;
+  const own: string[] = [];
   if (expected !== undefined) {
-    own = expected;
+    own.push(expected);
   } else {
+    let url: URL;
     try {
-      own = new URL(request.url).origin;
+      url = new URL(request.url);
     } catch {
       return false;
     }
+    own.push(url.origin);
+    const dev = devLoopbackOrigin(request, url);
+    if (dev !== null) own.push(dev);
   }
-  const allowed = new Set([own, ...extra]);
+  const allowed = new Set([...own, ...extra]);
   const origin = request.headers.get('origin');
   if (origin !== null) return origin !== 'null' && allowed.has(origin);
   return request.headers.get('sec-fetch-site') === 'same-origin';

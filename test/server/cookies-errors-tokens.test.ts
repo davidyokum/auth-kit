@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthUnavailableError,
   ForbiddenError,
@@ -109,6 +109,74 @@ describe('origin checks for state-changing route handlers', () => {
     const request = req('POST', { origin: 'https://admin.example.org' });
     expect(isSameOriginRequest(request, { allowedOrigins: ['https://admin.example.org'] })).toBe(true);
     expect(() => assertSameOrigin(request)).toThrow(ForbiddenError);
+  });
+});
+
+describe('the origin check under next dev, which rewrites request.url to localhost (#8)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  // What Next 16.4's `next dev --hostname 127.0.0.1` hands a route handler: request.url says
+  // localhost whatever the browser asked for; Host and Origin say what it actually used.
+  const devRequest = (host: string, origin: string | null, url = `http://localhost:${host.split(':').pop()}/api/tickets`) => ({
+    method: 'POST',
+    url,
+    headers: new Headers({ host, ...(origin !== null && { origin }) }),
+  });
+
+  it.each([
+    ['127.0.0.1 (the matrix server)', '127.0.0.1:3210', 'http://127.0.0.1:3210'],
+    ['one *.localhost name per app (the localhost guide)', 'app.localhost:3000', 'http://app.localhost:3000'],
+    ['plain localhost', 'localhost:3000', 'http://localhost:3000'],
+    ['IPv6 loopback', '[::1]:3000', 'http://[::1]:3000'],
+  ])('accepts a POST from the page itself on %s', (_label, host, origin) => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(isSameOriginRequest(devRequest(host, origin))).toBe(true);
+    expect(() => assertSameOrigin(devRequest(host, origin))).not.toThrow();
+  });
+
+  it('still refuses other origins, ports, and schemes', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'https://evil.example'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'http://other.localhost:3000'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'http://app.localhost:3001'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'https://app.localhost:3000'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'null'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', null))).toBe(false);
+  });
+
+  it('refuses DNS rebinding: a non-loopback Host never counts, even when Origin matches it', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(isSameOriginRequest(devRequest('attacker.example:3000', 'http://attacker.example:3000'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('localhost.attacker.example:3000', 'http://localhost.attacker.example:3000'))).toBe(false);
+    expect(isSameOriginRequest(devRequest('127.0.0.1.attacker.example:3000', 'http://127.0.0.1.attacker.example:3000'))).toBe(false);
+  });
+
+  it('refuses a Host that smuggles user info, a path, or a second host', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    for (const host of ['attacker.example@app.localhost:3000', 'app.localhost:3000/x', 'app.localhost:3000 evil', 'app.localhost:3000,evil.example']) {
+      const origin = `http://${host}`;
+      expect(isSameOriginRequest(devRequest(host, origin, 'http://localhost:3000/api/x')), host).toBe(false);
+    }
+  });
+
+  it('applies only when request.url itself is loopback', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'http://app.localhost:3000', 'https://app.example.org/api/x'))).toBe(false);
+  });
+
+  it('never applies outside development: production and test builds keep the strict request.url fallback', () => {
+    for (const env of ['production', 'test']) {
+      vi.stubEnv('NODE_ENV', env);
+      expect(isSameOriginRequest(devRequest('127.0.0.1:3210', 'http://127.0.0.1:3210')), env).toBe(false);
+      expect(isSameOriginRequest(devRequest('localhost:3210', 'http://localhost:3210')), env).toBe(true); // request.url's own origin
+    }
+  });
+
+  it('a configured expectedOrigin wins: only it (and allowedOrigins) count, in development too', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const request = devRequest('127.0.0.1:3210', 'http://127.0.0.1:3210');
+    expect(isSameOriginRequest(request, { expectedOrigin: 'http://app.localhost:3000' })).toBe(false);
+    expect(isSameOriginRequest(request, { expectedOrigin: 'http://127.0.0.1:3210' })).toBe(true);
+    expect(isSameOriginRequest(devRequest('app.localhost:3000', 'http://app.localhost:3000'), { expectedOrigin: 'http://app.localhost:3000' })).toBe(true);
   });
 });
 

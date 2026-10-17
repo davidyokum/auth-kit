@@ -106,6 +106,8 @@ export const proxy = withAuthProxy({ auth, publicRoutes: ['/', '/api/dev/sign-in
 
 `localDevServer({ app: 'reports', port: 3000 })` returns that command and the URL to open, `http://reports.localhost:3000`. Use a different name and port per app (and per worktree).
 
+Use that URL as `assertSameOrigin`'s `expectedOrigin` under `next dev` too (README step 3). `next dev` rewrites `request.url`'s host to `localhost` whatever the browser asked for, so the origin rebuilt from it never matches `http://reports.localhost:3000`; without `expectedOrigin`, the check falls back to the `Host` header in development (loopback hosts only).
+
 ## Every day
 
 ```sh
