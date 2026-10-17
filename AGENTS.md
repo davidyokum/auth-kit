@@ -28,7 +28,8 @@ npm run check   # typecheck + lint + test + build
 - `src/server` verification, guards, capabilities, redirects, cookies, errors, page guards
 - `src/proxy` `withAuthProxy`
 - `src/testing` auth matrix, test issuer, fakes
-- `src/client`, `src/admin`, `src/dev` phase-2 stubs with implemented pure checks
+- `src/client` sign-in screens, the authenticator gate, and My account (React client components on Amplify JS v6; ADR 0008)
+- `src/admin`, `src/dev` phase-2 stubs with implemented pure checks
 - `src/shared/policy.ts` every concrete setting (lifetimes, limits, roles, capabilities)
 - `docs/decisions` ADRs
 

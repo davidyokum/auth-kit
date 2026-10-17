@@ -13,8 +13,8 @@ export const SIGN_IN_METHODS: readonly SignInMethod[] = ['passkey', 'password', 
  *
  * `username webauthn` is the standard's token for the email field. With Cognito it lets a password
  * manager fill the email, but it can't surface saved passkeys in the autofill list: that needs a
- * WebAuthn challenge before the email is known, and Cognito only issues one for a named user (see
- * the README, "Passkey autofill").
+ * WebAuthn challenge before the email is known, and Cognito only issues one for a named user (ADR
+ * 0008).
  */
 export const SIGN_IN_AUTOCOMPLETE = {
   email: 'username webauthn',
