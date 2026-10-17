@@ -28,6 +28,8 @@ export {
   type RemovalCheck,
 } from './ladder.js';
 export { toSignInStep, methodsFromChallenges, type SignInStep } from './steps.js';
+// The same screens for every address (ADR 0018), for sites building their own sign-in screens.
+export { isFirstFactorUnavailable, decoyPasskeyPrompt, answerSimulatedCode, SIGN_IN_SESSION_MS } from './parity.js';
 export { describeAuthError, type AuthErrorInfo, type AuthErrorKind, type AuthErrorContext } from './messages.js';
 export { buildOtpauthUri, formatSetupKey } from './totp.js';
 export { isBreachedPassword, PWNED_PASSWORDS_RANGE_URL, type BreachedPasswordCheck } from './breached.js';

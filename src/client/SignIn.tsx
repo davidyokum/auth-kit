@@ -1,7 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { safeRedirect } from '../server/redirect.js';
 import {
-  chooseSignInMethod,
   completeNewPassword,
   confirmCode,
   confirmPassword,
@@ -18,6 +17,7 @@ import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode } from './ladder.js';
 import type { AuthErrorContext, AuthErrorInfo, AuthErrorKind } from './messages.js';
+import { answerSimulatedCode, decoyPasskeyPrompt, isFirstFactorUnavailable } from './parity.js';
 import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
 import type { SignInStep } from './steps.js';
 import {
@@ -64,9 +64,9 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
 type View =
   | { name: 'start' }
   | { name: 'password' }
-  | { name: 'choose-method'; methods: SignInMethod[] }
   | { name: 'challenge-password' }
-  | { name: 'email-code'; destination?: string }
+  /** "Check your email". `simulated`: nothing was sent (no account, or no emailed codes for it); the screen is the same. */
+  | { name: 'email-code'; simulated: boolean; sentAt: number }
   | { name: 'totp' }
   | { name: 'new-password' }
   | { name: 'totp-setup'; secret: string }
@@ -80,11 +80,36 @@ type View =
 const RESEND_COOLDOWN_MS = 30_000;
 const OFFER_KEY = 'auth-kit:passkey-offer-dismissed:';
 
-const METHOD_LABEL: Readonly<Record<SignInMethod, string>> = {
-  passkey: 'Use a passkey',
-  password: 'Use your password',
-  'email-code': 'Email me a code',
-};
+/** A step for the screens: Cognito's, or "check your email" when nothing was sent. */
+type ScreenStep = SignInStep | { step: 'email-code-simulated' };
+
+/** What an unknown address gets for a password: Cognito's own words under PreventUserExistenceErrors. */
+function passwordRefused(): Error {
+  const error = new Error('Incorrect username or password.');
+  error.name = 'NotAuthorizedException';
+  return error;
+}
+
+/**
+ * Starts a sign-in with one first factor and keeps the screens the same for every address (ADR 0018):
+ * when Cognito says this account can't use that factor (or offers a choice of others), the screens get
+ * what an unknown address gets: a passkey prompt that finds nothing, a password that doesn't match, or
+ * "check your email" with nothing sent. Cognito's list of the account's other factors is never shown.
+ */
+function firstFactor(method: SignInMethod, request: () => Promise<SignInStep>): () => Promise<ScreenStep> {
+  return async () => {
+    const step = await request();
+    if (!isFirstFactorUnavailable(method, step)) return step;
+    switch (method) {
+      case 'passkey':
+        return decoyPasskeyPrompt();
+      case 'password':
+        throw passwordRefused();
+      case 'email-code':
+        return { step: 'email-code-simulated' };
+    }
+  };
+}
 
 function offerDismissed(userId: string | undefined): boolean {
   if (!userId) return false;
@@ -113,6 +138,9 @@ function looksLikeEmail(email: string): boolean {
  * "Email me a code instead" as the backstop. Handles every step Cognito can return for the
  * standard's pools, then the after-sign-in steps: authenticator setup for password users, the first
  * credential after an invite, and a one-time "Save a passkey" offer.
+ *
+ * Until someone proves a factor, every address sees the same screens in the same order, whether it
+ * has an account or not and whatever factors that account has (ADR 0018).
  */
 export function SignIn(props: SignInProps) {
   const { classNames, passkeysEnabled, siteName } = props;
@@ -195,27 +223,22 @@ export function SignIn(props: SignInProps) {
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
-    (step: SignInStep) => {
+    (step: ScreenStep) => {
       switch (step.step) {
         case 'done':
           return void afterSignIn();
-        case 'choose-method': {
-          const methods = step.methods.filter((m) => (m === 'passkey' ? passkeysEnabled : m === 'email-code' ? emailCodeEnabled : true));
-          if (methods.length === 0) {
-            set({ error: "This account can't sign in here with the methods this site offers. Contact the site's admin." });
-            return go(passkeysEnabled ? { name: 'start' } : { name: 'password' });
-          }
-          set({ status: null });
-          return go({ name: 'choose-method', methods });
-        }
+        case 'choose-method':
+          // Never shown: a first-factor request maps it to that factor's own outcome (firstFactor).
+          set({ error: "This sign-in step isn't available here. Choose another way to sign in." });
+          return go(passkeysEnabled ? { name: 'start' } : { name: 'password' });
         case 'password':
           return go({ name: 'challenge-password' });
         case 'email-code':
-          set({
-            status: `We emailed a code to ${step.destination ?? 'your address'}. It works for 3 minutes.`,
-          });
+        case 'email-code-simulated':
+          // The typed address, never Cognito's masked one (an unknown address has none to show).
+          set({ status: `If ${email.trim()} has an account here, we've emailed it a code. It works for 3 minutes.` });
           setResendReady(false);
-          return go(step.destination ? { name: 'email-code', destination: step.destination } : { name: 'email-code' });
+          return go({ name: 'email-code', simulated: step.step === 'email-code-simulated', sentAt: Date.now() });
         case 'totp':
           return go({ name: 'totp' });
         case 'new-password':
@@ -235,7 +258,7 @@ export function SignIn(props: SignInProps) {
           return go(passkeysEnabled ? { name: 'start' } : { name: 'password' });
       }
     },
-    [afterSignIn, emailCodeEnabled, go, passkeysEnabled, set],
+    [afterSignIn, email, go, passkeysEnabled, set],
   );
 
   /** Errors that end the attempt send the person back to the start, keeping the email. */
@@ -247,7 +270,7 @@ export function SignIn(props: SignInProps) {
     [go, passkeysEnabled],
   );
 
-  async function attempt(task: () => Promise<SignInStep>, context: AuthErrorContext, busyStatus?: string) {
+  async function attempt(task: () => Promise<ScreenStep>, context: AuthErrorContext, busyStatus?: string) {
     const failed: { kind?: AuthErrorKind } = {};
     const result = await fb.run(task, {
       context,
@@ -278,7 +301,7 @@ export function SignIn(props: SignInProps) {
 
   function sendEmailCode() {
     if (!requireEmail()) return;
-    void attempt(() => requestEmailCode(email), 'sign-in', 'Sending a code…');
+    void attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', 'Sending a code…');
   }
 
   function backToStart() {
@@ -335,7 +358,7 @@ export function SignIn(props: SignInProps) {
   switch (view.name) {
     case 'start':
       body = (
-        <form noValidate onSubmit={onSubmit(() => requireEmail() && void attempt(() => signInWithPasskey(email), 'sign-in', 'Waiting for your passkey…'))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate onSubmit={onSubmit(() => requireEmail() && void attempt(firstFactor('passkey', () => signInWithPasskey(email)), 'sign-in', 'Waiting for your passkey…'))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           <Heading level={level} classNames={classNames}>
             {title}
           </Heading>
@@ -363,7 +386,9 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => requireEmail() && requireSecret('Enter your password.') && void attempt(() => signInWithPassword(email, secretValue), 'sign-in', 'Signing in…'))}
+          onSubmit={onSubmit(
+            () => requireEmail() && requireSecret('Enter your password.') && void attempt(firstFactor('password', () => signInWithPassword(email, secretValue)), 'sign-in', 'Signing in…'),
+          )}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
         >
@@ -407,40 +432,6 @@ export function SignIn(props: SignInProps) {
         </form>
       );
       break;
-    case 'choose-method':
-      body = (
-        <div {...slot(classNames, 'form')}>
-          <Heading level={level} classNames={classNames}>
-            Choose how to sign in
-          </Heading>
-          <Text classNames={classNames}>Pick one of the ways you can sign in to {siteName}.</Text>
-          <Actions classNames={classNames}>
-            {view.methods.map((method) => (
-              <Button
-                key={method}
-                variant="secondary"
-                classNames={classNames}
-                disabled={busy}
-                onClick={() =>
-                  void attempt(
-                    () => chooseSignInMethod(method),
-                    'sign-in',
-                    method === 'passkey' ? 'Waiting for your passkey…' : method === 'email-code' ? 'Sending a code…' : undefined,
-                  )
-                }
-              >
-                {METHOD_LABEL[method]}
-              </Button>
-            ))}
-          </Actions>
-          <Actions classNames={classNames}>
-            <Button variant="link" classNames={classNames} disabled={busy} onClick={backToStart}>
-              Start over
-            </Button>
-          </Actions>
-        </div>
-      );
-      break;
     case 'challenge-password':
       body = (
         <form noValidate onSubmit={onSubmit(() => requireSecret('Enter your password.') && void attempt(() => confirmPassword(secretValue), 'sign-in', 'Signing in…'))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
@@ -481,7 +472,8 @@ export function SignIn(props: SignInProps) {
               secretRef.current?.focus();
               return;
             }
-            void attempt(() => confirmCode(codeValue), 'code', 'Checking the code…');
+            const sentAt = view.sentAt;
+            void attempt(() => (view.simulated ? answerSimulatedCode(sentAt) : confirmCode(codeValue)), 'code', 'Checking the code…');
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -490,7 +482,10 @@ export function SignIn(props: SignInProps) {
             Check your email
           </Heading>
           <Text classNames={classNames}>
-            Enter the code we sent to {view.destination ?? 'your email address'}. It works for 3 minutes. If you don&apos;t see it, check your spam folder.
+            If {email.trim()} has an account here, we&apos;ve emailed it an 8-digit code. It works for 3 minutes.
+          </Text>
+          <Text classNames={classNames}>
+            No email after a minute? Check your spam folder, then send a new code. Accounts with an authenticator app can&apos;t get emailed codes: use your password or passkey instead.
           </Text>
           {codeField('Code')}
           <Actions classNames={classNames}>
