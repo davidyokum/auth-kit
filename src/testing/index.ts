@@ -46,6 +46,7 @@ export {
   type TestIssuerOptions,
   type MintOptions,
 } from './issuer.js';
+export { AWS_BLOCKED_ENV } from './aws-env.js';
 
 /**
  * A persona that sends Amplify's `ssr: true` cookies, the way a signed-in browser does.
