@@ -264,14 +264,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
 ```
 
 ```tsx
-// app/(app)/layout.tsx: the server enforces; the gate keeps the screens in step
+// app/(app)/layout.tsx: the server enforces the authenticator rule for every page below
 await pages.requireUser(); // a password user without an authenticator goes to /account/authenticator
-return <TOTPEnrollmentGate issuer="Example Reports">{children}</TOTPEnrollmentGate>;
+return children; // no TOTPEnrollmentGate here: the guard above already covers every page
 
-// app/account/page.tsx
+// app/account/page.tsx: the gate inside the page, after its own guard, around client UI
 await pages.requireUser();
-return <MyAccount issuer="Example Reports" passkeysEnabled={false} />;
+return (
+  <TOTPEnrollmentGate issuer="Example Reports" serverChecked>
+    <MyAccount issuer="Example Reports" passkeysEnabled={false} />
+  </TOTPEnrollmentGate>
+);
 ```
+
+`TOTPEnrollmentGate` is the screens' mirror of the server's rule, never the enforcement: React sends a client component's children to the browser whatever it renders, so only the server guard protects content. It always renders its children, on the server too, inside a wrapper that's `hidden` until the browser check passes (from the first paint with `serverChecked`), so it can't mask a nested page's `notFound()` or `redirect()`. Wrapping a layout's `children` adds nothing but a hidden page until a browser round trip to Cognito.
 
 The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true })` and renders `<AuthenticatorSetup issuer="…" onDone={…} />` from a small client component (function props such as `onDone`, `navigate`, `loadFactors`, and `renderQrCode` can't cross from a server component).
 
@@ -280,7 +286,7 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 | `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: first-factor choice, emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
 | `ChooseFirstCredential` | After an invite's emailed code: "Save a passkey", or "Set a password" (15+ characters) followed by the authenticator, which isn't optional. |
 | `AuthenticatorSetup` | Setup link, setup key, an optional QR code (`renderQrCode`, so the package stays dependency-free), then one code. |
-| `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. If the check can't run, the app stays hidden and the reason is shown with a retry. |
+| `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. Its children are always server-rendered (hidden until the check passes), so it never changes the page's status. Use it inside a page, after the page's guard, with `serverChecked`. Without `serverChecked`, if the check can't run, the app stays hidden and the reason is shown with a retry. |
 | `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. |
 | Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
 
@@ -440,7 +446,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Machine identities (IAM role, client credentials) | Server refuses machine tokens as people; scope checks not built | P2 |
 | **Sign-in** | | |
 | Passkey, password + TOTP, emailed code; `ALLOW_USER_AUTH` | Sign-in policy `WEB_AUTHN`/`PASSWORD`/`EMAIL_OTP`; client flows exactly `ALLOW_USER_AUTH` + refresh | Pkg (UI: `SignIn`) |
-| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors`; `TOTPEnrollmentGate`, `AuthenticatorSetup` | Pkg |
+| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors`, page guards redirect to setup; `TOTPEnrollmentGate` (screens only), `AuthenticatorSetup` | Pkg |
 | Passwords ≥ 15, no composition rules | Preset password policy | Pkg |
 | Breached-password check | Plus threat protection on Tier 3; a Have I Been Pwned range check before every new password the client saves | Pkg |
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |

@@ -36,7 +36,8 @@ export type AuthKitSlot =
   | 'list'
   | 'listItem'
   | 'code'
-  | 'link';
+  | 'link'
+  | 'content';
 
 export type AuthKitClassNames = Partial<Record<AuthKitSlot, string>>;
 

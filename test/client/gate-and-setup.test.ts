@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { createElement, StrictMode } from 'react';
+import { createElement, StrictMode, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthenticatorSetup, type ClientAuthFactors, TOTPEnrollmentGate } from '../../src/client/index.js';
 import { auth, awsError, resetAmplifyMocks, TEST_SECRET } from './amplify-mock.js';
@@ -14,46 +14,72 @@ vi.mock('aws-amplify/utils', async () => (await import('./amplify-mock.js')).uti
 beforeEach(() => resetAmplifyMocks());
 afterEach(() => cleanup());
 
-function gate(loadFactors: () => Promise<ClientAuthFactors>, extra: Record<string, unknown> = {}) {
+function gate(loadFactors: () => Promise<ClientAuthFactors>, extra: Record<string, unknown> = {}, child: ReturnType<typeof createElement> = createElement('p', null, 'The app')) {
   const onEnrolled = vi.fn();
-  render(createElement(TOTPEnrollmentGate, { issuer: 'Example Reports', loadFactors, onEnrolled, ...extra }, createElement('p', null, 'The app')));
+  render(createElement(TOTPEnrollmentGate, { issuer: 'Example Reports', loadFactors, onEnrolled, ...extra }, child));
   return { onEnrolled };
+}
+
+/** The app is always in the page (the gate never skips its children); "shown" means not inside a hidden wrapper. */
+function isShown(text: string): boolean {
+  const element = screen.getByText(text);
+  return element.closest('[hidden]') === null;
+}
+
+/** A child that counts its mounts, to see whether the gate remounts it. */
+function mountCounter() {
+  const mounts = { count: 0 };
+  function Counted() {
+    useEffect(() => {
+      mounts.count += 1;
+    }, []);
+    return createElement('p', null, 'The app');
+  }
+  return { mounts, element: createElement(Counted) };
 }
 
 describe('TOTPEnrollmentGate', () => {
   it('shows the app to people who don’t need an authenticator', async () => {
     gate(() => Promise.resolve({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] }));
-    expect(await screen.findByText('The app')).toBeTruthy();
+    await waitFor(() => expect(isShown('The app')).toBe(true));
   });
 
   it('shows the app to password users who already have one', async () => {
     gate(() => Promise.resolve({ configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] }));
-    expect(await screen.findByText('The app')).toBeTruthy();
+    await waitFor(() => expect(isShown('The app')).toBe(true));
   });
 
-  it('shows only setup to a password user without one, then the app', async () => {
+  it('shows only setup to a password user without one, then the app, mounted afresh', async () => {
     const user = userEvent.setup();
-    const { onEnrolled } = gate(() => Promise.resolve({ configured: ['PASSWORD', 'EMAIL_OTP'], mfa: [] }));
+    const counter = mountCounter();
+    const { onEnrolled } = gate(() => Promise.resolve({ configured: ['PASSWORD', 'EMAIL_OTP'], mfa: [] }), {}, counter.element);
     await screen.findByRole('heading', { name: 'Set up your authenticator' });
-    expect(screen.queryByText('The app')).toBeNull();
+    expect(isShown('The app')).toBe(false);
     expect(screen.getByText(/Example Reports also needs a code/)).toBeTruthy();
     await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
-    expect(await screen.findByText('The app')).toBeTruthy();
+    await waitFor(() => expect(isShown('The app')).toBe(true));
+    expect(screen.queryByRole('heading', { name: 'Set up your authenticator' })).toBeNull();
     expect(onEnrolled).toHaveBeenCalledTimes(1);
     expect(auth.fetchAuthSession).toHaveBeenCalledWith({ forceRefresh: true });
+    // Remounted after setup, so children such as MyAccount read the new state.
+    expect(counter.mounts.count).toBe(2);
   });
 
-  it('keeps the app hidden while checking, with a status (or the given fallback)', async () => {
+  it('keeps the app hidden while checking, with a status (or the given fallback), and doesn’t remount it on success', async () => {
     let resolve!: (f: ClientAuthFactors) => void;
-    gate(() => new Promise((r) => (resolve = r)));
+    const counter = mountCounter();
+    gate(() => new Promise((r) => (resolve = r)), {}, counter.element);
     expect(screen.getByRole('status').textContent).toBe('Checking your account…');
-    expect(screen.queryByText('The app')).toBeNull();
+    expect(isShown('The app')).toBe(false);
     resolve({ configured: ['WEB_AUTHN'], mfa: [] });
-    expect(await screen.findByText('The app')).toBeTruthy();
+    await waitFor(() => expect(isShown('The app')).toBe(true));
+    expect(screen.queryByText('Checking your account…')).toBeNull();
+    expect(counter.mounts.count).toBe(1);
     cleanup();
 
     gate(() => new Promise(() => undefined), { fallback: createElement('p', null, 'Loading…') });
     expect(screen.getByText('Loading…')).toBeTruthy();
+    expect(isShown('The app')).toBe(false);
   });
 
   it('fails closed: if the check can’t run, the app stays hidden and the reason is shown with a retry', async () => {
@@ -64,10 +90,48 @@ describe('TOTPEnrollmentGate', () => {
       .mockResolvedValueOnce({ configured: ['WEB_AUTHN'], mfa: [] });
     gate(loadFactors);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/couldn't check your sign-in settings.*connection/i));
-    expect(screen.queryByText('The app')).toBeNull();
+    expect(isShown('The app')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByText('The app')).toBeTruthy();
+    await waitFor(() => expect(isShown('The app')).toBe(true));
     expect(loadFactors).toHaveBeenCalledTimes(2);
+  });
+
+  it('marks its state for styling, and keeps the app in a content slot', async () => {
+    gate(() => Promise.resolve({ configured: ['WEB_AUTHN'], mfa: [] }), { classNames: { content: 'app-body' } });
+    const root = document.querySelector('[data-auth-kit="totp-gate"]')!;
+    await waitFor(() => expect(root.getAttribute('data-auth-kit-state')).toBe('open'));
+    const content = root.querySelector('[data-auth-kit-slot="content"]')!;
+    expect(content.className).toBe('app-body');
+    expect(content.hasAttribute('hidden')).toBe(false);
+    expect(content.textContent).toBe('The app');
+  });
+
+  describe('serverChecked (the page’s own guard already ran)', () => {
+    it('shows the app from the first render, before the browser check answers', async () => {
+      let resolve!: (f: ClientAuthFactors) => void;
+      const counter = mountCounter();
+      gate(() => new Promise((r) => (resolve = r)), { serverChecked: true }, counter.element);
+      expect(isShown('The app')).toBe(true);
+      expect(screen.queryByText('Checking your account…')).toBeNull();
+      resolve({ configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] });
+      await waitFor(() => expect(counter.mounts.count).toBe(1));
+      expect(isShown('The app')).toBe(true);
+    });
+
+    it('still switches to setup when the browser says the person needs an authenticator', async () => {
+      gate(() => Promise.resolve({ configured: ['PASSWORD'], mfa: [] }), { serverChecked: true });
+      await screen.findByRole('heading', { name: 'Set up your authenticator' });
+      expect(isShown('The app')).toBe(false);
+    });
+
+    it('keeps the app when the browser re-check can’t run: the server’s answer stands', async () => {
+      const loadFactors = vi.fn<() => Promise<ClientAuthFactors>>().mockRejectedValue(awsError('NetworkError'));
+      gate(loadFactors, { serverChecked: true });
+      await waitFor(() => expect(loadFactors).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(isShown('The app')).toBe(true);
+      expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    });
   });
 });
 
