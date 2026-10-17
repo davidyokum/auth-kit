@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertProductionBuild, checkProductionBuild, DEV_SIGNIN_MARKER } from '../../src/dev/index.js';
+import { assertProductionBuild, checkProductionBuild, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/index.js';
 
 let root: string;
 let build: string;
@@ -48,6 +48,16 @@ describe('checkProductionBuild', () => {
     const result = await checkProductionBuild({ buildDir: build });
     expect(result.ok).toBe(false);
     expect(result.findings).toEqual([{ kind: 'marker', file: join('server', 'chunks', 'ssr', 'abc123.js'), detail: expect.stringMatching(/marker/) }]);
+  });
+
+  it("fails when the auth matrix's server mode was bundled, and says what to do (#9)", async () => {
+    await fixture({ 'server/chunks/ssr/lib_auth_1f2e.js': `matrixServerOverrides.marker="${MATRIX_SERVER_MARKER}";` });
+    const result = await checkProductionBuild({ buildDir: build });
+    expect(result.ok).toBe(false);
+    expect(result.findings).toEqual([
+      { kind: 'marker', file: join('server', 'chunks', 'ssr', 'lib_auth_1f2e.js'), detail: expect.stringMatching(/server-mode marker.*withDevKit alias/) },
+    ]);
+    await expect(assertProductionBuild({ buildDir: build })).rejects.toThrow(/auth-kit\/testing\/matrix-server was bundled/);
   });
 
   it('fails when the persona menu reached a client chunk', async () => {

@@ -2,7 +2,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'cdk.out/**'] },
+  // test/e2e/app is a plain-JS Next app the e2e test builds and runs; Next owns its conventions.
+  { ignores: ['dist/**', 'coverage/**', 'node_modules/**', 'cdk.out/**', 'test/e2e/app/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

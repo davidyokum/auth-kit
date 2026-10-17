@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEV_SIGNIN_MARKER } from '../../src/dev/marker.js';
+import { DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/marker.js';
 
 const DIST = join(import.meta.dirname, '..', '..', 'dist');
 const enabled = process.env.AUTH_KIT_DIST_TESTS === '1';
@@ -31,6 +31,20 @@ describe.runIf(enabled)('the built package', () => {
     const files = graph(join(DIST, 'ribbon', 'index.js'));
     expect(files.size).toBeGreaterThan(1);
     for (const file of files) expect(readFileSync(file, 'utf8').includes(DEV_SIGNIN_MARKER), file).toBe(false);
+  });
+
+  it('no subpath that ships loads a file with either dev marker (sign-in, matrix server mode)', () => {
+    for (const entry of ['server/index.js', 'proxy/index.js', 'client/index.js', 'admin/index.js', 'admin/ui.js', 'admin/cdk.js', 'amplify/index.js', 'amplify/pre-sign-up.js', 'ribbon/index.js']) {
+      for (const file of graph(join(DIST, entry))) {
+        const code = readFileSync(file, 'utf8');
+        expect(code.includes(DEV_SIGNIN_MARKER) || code.includes(MATRIX_SERVER_MARKER), `${entry} → ${file}`).toBe(false);
+      }
+    }
+  });
+
+  it('auth-kit/testing/matrix-server carries its marker, so check-prod-build finds a leak', () => {
+    const files = [...graph(join(DIST, 'testing', 'matrix-server.js'))];
+    expect(files.some((f) => readFileSync(f, 'utf8').includes(MATRIX_SERVER_MARKER))).toBe(true);
   });
 
   it('auth-kit/dev and auth-kit/dev/menu do carry the marker, so the build check can find them', () => {

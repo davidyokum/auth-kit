@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 import { describe, expect, it } from 'vitest';
-import { DEV_POLICY, DEV_SIGN_IN_ROUTE, isDevServerPhase, withDevKit } from '../../src/dev/index.js';
+import { DEV_ALIAS, DEV_MATRIX_ALIAS, DEV_POLICY, DEV_SIGN_IN_ROUTE, isDevServerPhase, withDevKit } from '../../src/dev/index.js';
 
 describe('withDevKit (next.config)', () => {
   it('under next dev: .dev.ts routes count, and @/dev points at the on module', () => {
@@ -34,6 +34,40 @@ describe('withDevKit (next.config)', () => {
     const base: NextConfig = { reactStrictMode: true, turbopack: { resolveAlias: { '@/x': './x.ts' } }, webpack: (c: unknown) => c };
     const out: NextConfig = withDevKit('phase-development-server', base);
     expect(out.reactStrictMode).toBe(true);
+  });
+
+  it('takes several aliases: the localhost kit and the auth matrix server mode (#9)', () => {
+    const dev = withDevKit('phase-development-server', {}, { aliases: [DEV_ALIAS, DEV_MATRIX_ALIAS] });
+    expect(dev.turbopack.resolveAlias).toEqual({ '@/dev': './lib/dev/on.tsx', '@/dev-matrix': './lib/dev/matrix.on.ts' });
+    const build = withDevKit('phase-production-build', {}, { aliases: [DEV_ALIAS, DEV_MATRIX_ALIAS] });
+    expect(build.turbopack.resolveAlias).toEqual({ '@/dev': './lib/dev/off.tsx', '@/dev-matrix': './lib/dev/matrix.off.ts' });
+    expect(build.webpack({ resolve: { alias: {} } }, { dir: '/app/' }).resolve?.alias).toEqual({
+      '@/dev$': '/app/lib/dev/off.tsx',
+      '@/dev-matrix$': '/app/lib/dev/matrix.off.ts',
+    });
+    const arrayAliases = build.webpack({ resolve: { alias: [] } }, { dir: '/app' }).resolve?.alias;
+    expect(arrayAliases).toEqual([
+      { name: '@/dev', alias: '/app/lib/dev/off.tsx', onlyModule: true },
+      { name: '@/dev-matrix', alias: '/app/lib/dev/matrix.off.ts', onlyModule: true },
+    ]);
+  });
+
+  it('is harmless to call twice (the nested form older templates used)', () => {
+    const nested = withDevKit('phase-development-server', withDevKit('phase-development-server', {}), DEV_MATRIX_ALIAS);
+    expect(nested.pageExtensions).toEqual(['dev.tsx', 'dev.ts', 'dev.jsx', 'dev.js', 'tsx', 'ts', 'jsx', 'js']);
+    expect(nested.turbopack.resolveAlias).toEqual({ '@/dev': './lib/dev/on.tsx', '@/dev-matrix': './lib/dev/matrix.on.ts' });
+  });
+
+  it('refuses alias lists that would ship the wrong module', () => {
+    const run = (options: Parameters<typeof withDevKit>[2]) => () => withDevKit('phase-production-build', {}, options);
+    expect(run({ aliases: [DEV_ALIAS], alias: '@/x' })).toThrow(/either `aliases` or `alias`/);
+    expect(run({ aliases: [] })).toThrow(/at least one alias/);
+    expect(run({ aliases: 'x' as never })).toThrow(/must be an array/);
+    expect(run({ aliases: [DEV_ALIAS, DEV_ALIAS] })).toThrow(/listed twice/);
+    expect(run({ aliases: [{ alias: '', on: './a.ts', off: './b.ts' }] })).toThrow(/import specifier/);
+    expect(run({ aliases: [{ alias: '@/x', on: 'lib/on.ts', off: './off.ts' }] })).toThrow(/`on` as a path relative/);
+    expect(run({ aliases: [{ alias: '@/x', on: './on.ts', off: '/abs/off.ts' }] })).toThrow(/`off` as a path relative/);
+    expect(run({ aliases: [{ alias: '@/x', on: './same.ts', off: './same.ts' }] })).toThrow(/same module/);
   });
 
   it('agrees with the policy on the route', () => {

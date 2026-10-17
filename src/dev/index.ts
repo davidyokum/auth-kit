@@ -99,8 +99,18 @@ export {
   type ProductionBuildFindingKind,
 } from './build-check.js';
 export { checkDevRouteAbsent, type DevRouteCheckOptions, type DevRouteCheckResult, type DevRouteProbe } from './http-check.js';
-export { withDevKit, isDevServerPhase, PHASE_DEVELOPMENT_SERVER, type DevKitConfigOptions, type DevKitNextConfig, type DevKitNextConfigResult } from './next-config.js';
-export { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, DEV_SIGNIN_MARKER_HEADER } from './marker.js';
+export {
+  withDevKit,
+  isDevServerPhase,
+  PHASE_DEVELOPMENT_SERVER,
+  DEV_ALIAS,
+  DEV_MATRIX_ALIAS,
+  type DevKitAlias,
+  type DevKitConfigOptions,
+  type DevKitNextConfig,
+  type DevKitNextConfigResult,
+} from './next-config.js';
+export { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, DEV_SIGNIN_MARKER_HEADER, MATRIX_SERVER_MARKER } from './marker.js';
 export {
   environmentRibbonModel,
   resolveEnvironment,

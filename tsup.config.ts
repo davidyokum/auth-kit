@@ -26,6 +26,7 @@ export default defineConfig({
     'server/index': 'src/server/index.ts',
     'proxy/index': 'src/proxy/index.ts',
     'testing/index': 'src/testing/index.ts',
+    'testing/matrix-server': 'src/testing/matrix-server.ts',
     'client/index': 'src/client/index.ts',
     'admin/index': 'src/admin/index.ts',
     'admin/ui': 'src/admin/ui/index.tsx',

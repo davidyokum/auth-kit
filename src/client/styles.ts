@@ -5,6 +5,8 @@
  */
 export const authKitStyles = `
 :where([data-auth-kit]) { display: grid; gap: 1rem; max-width: 30rem; }
+:where([data-auth-kit="totp-gate"]) { display: block; max-width: none; }
+:where([data-auth-kit="totp-gate"] > [data-auth-kit-slot="content"][hidden]) { display: none !important; }
 :where([data-auth-kit] [data-auth-kit-slot="form"], [data-auth-kit] [data-auth-kit-slot="section"]) { display: grid; gap: 1rem; }
 :where([data-auth-kit] [data-auth-kit-slot="heading"]) { margin: 0; }
 :where([data-auth-kit] [data-auth-kit-slot="heading"]:focus) { outline: none; }

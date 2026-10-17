@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.1-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.2-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -11,8 +11,9 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/amplify` | A Gen 2 auth preset: one pool per app, invite-only, passkey first, password + authenticator second, emailed code as the backstop, standard token lifetimes, deletion protection, SES from a verified domain, standard groups, a WAF rate rule, sandbox detection | **Implemented** |
 | `auth-kit/amplify/pre-sign-up` | The one sanctioned exception to invite-only: a preSignUp Lambda that allows self-registration from listed email domains | **Implemented** |
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, record checks (404), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
-| `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh | **Implemented** |
-| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
+| `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
+| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
+| `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
@@ -26,10 +27,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.1-alpha/auth-kit-0.1.1-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.2-alpha/auth-kit-0.1.2-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.1-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.2-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -114,7 +115,23 @@ const user = await pages.requireCan('people.manage', { live: true }); // re-read
 
 `getUser()` is for optional display (a header that says who's signed in). It applies the same authenticator rule as `requireUser()`, so a password user without TOTP comes back as `null` unless you pass `allowMfaEnrollment: true`. Gate with `requireUser` / `requireCan`, which also say *why* someone is refused.
 
-Route handlers that change data call `assertSameOrigin(request, { expectedOrigin: process.env.APP_ORIGIN })`. Set `expectedOrigin` to the site's public origin in production: the origin rebuilt from `request.url` may not match the browser's scheme behind a CDN.
+Route handlers that change data call `assertSameOrigin(request, { expectedOrigin })`, with `expectedOrigin` set from configuration **in every environment**:
+
+```ts
+// lib/origin.ts: never from request headers
+export const expectedOrigin =
+  process.env.NODE_ENV === 'development'
+    ? (process.env.APP_DEV_ORIGIN ?? 'http://reports.localhost:3000') // localDevServer(...).url; the matrix's server sets its own (step 5)
+    : process.env.APP_ORIGIN;
+
+// app/api/reports/route.ts
+export const POST = withAuthErrors(async (request: Request) => {
+  assertSameOrigin(request, { expectedOrigin });
+  // ...
+});
+```
+
+Without it, `Origin` is compared with the origin rebuilt from `request.url`, which can have the wrong scheme behind a CDN, and whose host `next dev` rewrites to `localhost` whatever the browser asked for (Next 16). So under `next dev`, and only when `request.url` and the `Host` header are both loopback, the check also accepts the origin the browser used (`http://<Host>`); a deployed build never takes that path.
 
 ```ts
 // A risky action (grant a role, export data): require a sign-in in the last 5 minutes
@@ -163,23 +180,115 @@ The proxy refreshes only an Amplify cookie session whose access token is genuine
 
 The browser writes its own token cookies (sign-in, client-side refreshes) through Amplify's `CookieStorage`, which defaults to a 365-day lifetime; `configureAuthClient` (step 6) gives them the refresh token's lifetime too.
 
-### 5. Auth-matrix tests
+#### A strict Content-Security-Policy with a nonce
+
+The standard asks for a strict CSP because Amplify's token cookies are readable by page scripts. With the App Router that means a fresh nonce per request, set in the proxy: Next reads it from the **request's** `Content-Security-Policy` header and stamps its own scripts with it, and the browser enforces the policy from the response. `nonceCspHeaders` does both through the proxy's `headers` hook:
 
 ```ts
-import { assertAuthMatrix, bearerPersona, routesFromNextBuild } from 'auth-kit/testing';
+// proxy.ts
+import { nonceCspHeaders, withAuthProxy } from 'auth-kit/proxy';
 
-await assertAuthMatrix({
-  request: (req) => fetch(req, { redirect: 'manual' }),
-  baseUrl: 'http://app.localhost:3000', // a dev server started with AUTH_KIT_MATRIX=1
-  appRoutes: routesFromNextBuild('.next'), // after `next build`
-  personas: { anonymous: {}, member: bearerPersona(m), otherMember: bearerPersona(m2), admin: bearerPersona(a) },
-  params: { id: memberOwnReportId },
-  routes: [
-    { path: '/api/reports/:id', expect: { anonymous: 401, member: 200, otherMember: 404, admin: 200 } },
-    { method: 'POST', path: '/api/admin/invite', expect: { anonymous: 401, member: 403, admin: 200 } },
-  ],
+const dev = process.env.NODE_ENV === 'development';
+
+export const proxy = withAuthProxy({
+  auth,
+  publicRoutes: ['/', '/about', '/legal/*'],
+  headers: nonceCspHeaders((nonce) =>
+    [
+      "default-src 'self'",
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`, // React's dev tooling needs eval
+      `style-src 'self' ${dev ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
+      "img-src 'self' data: blob:",
+      // The browser calls Cognito directly; the breached-password check calls Have I Been Pwned.
+      "connect-src 'self' https://cognito-idp.us-east-1.amazonaws.com https://api.pwnedpasswords.com",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; '),
+  ),
 });
 ```
+
+- **Render per request.** A nonce can't be baked into a static page: call `await connection()` (from `next/server`) in the root layout. Pages get the nonce in `x-nonce` for their own `<Script nonce>`.
+- **Every response.** The hook runs once per request, before the auth decision. Its `request` headers reach pages and routes on every pass-through (public or protected); its `response` headers go on every response, sign-in redirects and refusals included. The proxy drops any CSP request header a client sends, so the nonce Next uses only ever comes from the app.
+- **Your own headers.** Pass any function: `headers: (request) => ({ request: { … }, response: { … } })`, sync or async. It can't set what auth depends on: the request's `cookie`, `authorization`, `host`, client-address and `x-forwarded-*` headers, auth-kit's `x-auth-kit-*`, or Next's internals; nor the response headers the proxy owns (`set-cookie`, `location`, `cache-control`, and the refusal's body headers). Those throw, and the request fails closed (`RESERVED_REQUEST_HEADERS`, `RESERVED_RESPONSE_HEADERS`).
+- **Paths the matcher skips** (`/_next/static/*`) get no proxy headers. Send the nonce-free directives (`object-src`, `base-uri`, `form-action`, `frame-ancestors`), HSTS, and `X-Content-Type-Options` from `next.config.ts` `headers()` as a baseline; the proxy's full policy replaces it on the responses it handles. The [template](https://github.com/davidyokum/site-auth-kit-template) has the full set (`lib/security-headers.ts`).
+
+### 5. Auth-matrix tests
+
+The matrix runs every route as every persona against the real app under `next dev`, in CI, with no AWS at all. `startMatrixServer` mints each persona a session with a local test issuer, starts `next dev` on 127.0.0.1 with `AUTH_KIT_MATRIX=1` and a fixture describing each persona, and hands back their cookies:
+
+```ts
+// test/matrix/auth-matrix.test.ts: run after `next build` (the matrix reads its route manifest)
+import { assertAuthMatrix, routesFromNextBuild, startMatrixServer } from 'auth-kit/testing';
+
+const server = await startMatrixServer({
+  personas: {
+    member: {},
+    otherMember: {},
+    admin: { groups: ['admin'] },
+    noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } }, // a password user without TOTP
+    demotedAdmin: { groups: ['admin'], liveGroups: [] }, // the token says admin, Cognito no longer does
+    disabledAdmin: { groups: ['admin'], enabled: false },
+    revokedSession: { groups: ['editor'], sessionRevoked: true }, // signed out everywhere
+  },
+  env: { APP_DEV_ORIGIN: 'http://127.0.0.1:3210' }, // whatever your expectedOrigin reads in development
+  port: 3210,
+});
+try {
+  await assertAuthMatrix({
+    request: (req) => fetch(req, { redirect: 'manual' }),
+    baseUrl: server.baseUrl,
+    appRoutes: routesFromNextBuild('.next'),
+    personas: server.cookiePersonas, // anonymous plus each persona's Amplify cookies
+    params: { id: memberOwnReportId },
+    routes: [
+      { path: '/api/reports/:id', expect: { anonymous: 401, member: 200, otherMember: 404, admin: 200, noAuthenticator: 403 /* … */ } },
+      { method: 'POST', path: '/api/admin/invite', headers: { origin: server.baseUrl }, expect: { anonymous: 401, member: 403, admin: 200 /* … */ } },
+    ],
+  });
+} finally {
+  await server.stop();
+}
+```
+
+The app swaps in the **matrix server mode** while it runs, through a dev-only alias like `@/dev` ([ADR 0016](docs/decisions/0016-matrix-server-mode.md)):
+
+```ts
+// lib/dev/matrix.on.ts: what @/dev-matrix means under next dev
+export { matrixServerOverrides as matrixOverrides } from 'auth-kit/testing/matrix-server';
+
+// lib/dev/matrix.off.ts: what it means in every build (tsconfig paths point here too)
+import type { MatrixServerOverrides } from 'auth-kit/testing/matrix-server';
+export function matrixOverrides(): MatrixServerOverrides | null {
+  return null;
+}
+
+// next.config.ts
+import { DEV_ALIAS, DEV_MATRIX_ALIAS, withDevKit } from 'auth-kit/dev';
+export default (phase: string) => withDevKit(phase, config, { aliases: [DEV_ALIAS, DEV_MATRIX_ALIAS] });
+
+// lib/auth.ts
+import { matrixOverrides } from '@/dev-matrix';
+export const auth = createServerAuth({ ...poolConfigFromAmplifyOutputs(outputs), capabilities, ...matrixOverrides()?.serverAuth });
+
+// lib/admin.ts
+const matrix = matrixOverrides();
+export const people = createPeopleActions({
+  auth,
+  auditLog: matrix?.auditLog ?? createDynamoAuditLog({ tableName }),
+  mailer: matrix?.mailer ?? createSesInviteMailer({ from }),
+  ...(matrix && { cognito: matrix.peopleCognito }),
+  // ...
+});
+// and your own stores: matrix?.shared('tickets', createMemoryTicketStore) ?? dynamoTickets
+```
+
+- **What changes while the matrix runs, and nothing else.** Tokens verify against the test issuer's public keys (every claim still checked; a token signed by any other key is a 401, and nothing is fetched from the pool's key endpoint); a scripted Cognito answers the authenticator check and `{ live: true }` re-reads per persona, refusing a disabled account and a revoked session exactly as Cognito does; the People list reads the fixture and every change is refused; no email is sent; the audit log is in memory. The proxy, guards, capability map, pages, and route handlers are the production code.
+- **Never in a build.** `matrixServerOverrides()` returns `null` unless `NODE_ENV` is `development` and `AUTH_KIT_MATRIX=1` (and throws, rather than falling back to AWS, if the flag has no fixture). The alias keeps the module out of builds, and `npx auth-kit check-prod-build` fails a build that contains its marker.
+- **Per bundle.** Next bundles the proxy, each page, and each route separately, each with its own copy of auth-kit, and auth-kit recognizes its errors with `instanceof`. The overrides are built per bundle; only plain data (the audit log's rows, `shared(...)` stores) is shared across bundles, so a record the API creates shows on a page.
+- **No AWS.** The dev server gets `AWS_BLOCKED_ENV` (no credentials can resolve; also exported for your test runner's own `env`), `ALLOW_DEV_SIGNIN=0`, and no `NODE_ENV`; your `env` can't override those or the flag. `startMatrixServer` reads the pool and app client from `amplify_outputs.json` (a placeholder works in CI) or `pool`.
 
 What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
 
@@ -187,7 +296,7 @@ What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
 - **Coverage.** Every route in `appRoutes` needs a row, and every row must match an app route, so a mistyped path fails instead of passing on a 404.
 - **The standard's rules.** Every route needs anonymous, member, and admin; record routes need the second member, who gets 404; at least one persona must succeed on each row (`exists: false` marks a row asserting a path is gone).
 
-What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it.
+What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it. To run your own server instead, `matrixFixture({ issuer, personas })` returns the tokens and the fixture and `matrixServerEnv()` the environment.
 
 ### 6. Sign-in screens and My account: `auth-kit/client`
 
@@ -215,14 +324,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
 ```
 
 ```tsx
-// app/(app)/layout.tsx: the server enforces; the gate keeps the screens in step
+// app/(app)/layout.tsx: the server enforces the authenticator rule for every page below
 await pages.requireUser(); // a password user without an authenticator goes to /account/authenticator
-return <TOTPEnrollmentGate issuer="Example Reports">{children}</TOTPEnrollmentGate>;
+return children; // no TOTPEnrollmentGate here: the guard above already covers every page
 
-// app/account/page.tsx
+// app/account/page.tsx: the gate inside the page, after its own guard, around client UI
 await pages.requireUser();
-return <MyAccount issuer="Example Reports" passkeysEnabled={false} />;
+return (
+  <TOTPEnrollmentGate issuer="Example Reports" serverChecked>
+    <MyAccount issuer="Example Reports" passkeysEnabled={false} />
+  </TOTPEnrollmentGate>
+);
 ```
+
+`TOTPEnrollmentGate` is the screens' mirror of the server's rule, never the enforcement: React sends a client component's children to the browser whatever it renders, so only the server guard protects content. It always renders its children, on the server too, inside a wrapper that's `hidden` until the browser check passes (from the first paint with `serverChecked`), so it can't mask a nested page's `notFound()` or `redirect()`. Wrapping a layout's `children` adds nothing but a hidden page until a browser round trip to Cognito.
 
 The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true })` and renders `<AuthenticatorSetup issuer="…" onDone={…} />` from a small client component (function props such as `onDone`, `navigate`, `loadFactors`, and `renderQrCode` can't cross from a server component).
 
@@ -231,7 +346,7 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 | `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: first-factor choice, emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
 | `ChooseFirstCredential` | After an invite's emailed code: "Save a passkey", or "Set a password" (15+ characters) followed by the authenticator, which isn't optional. |
 | `AuthenticatorSetup` | Setup link, setup key, an optional QR code (`renderQrCode`, so the package stays dependency-free), then one code. |
-| `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. If the check can't run, the app stays hidden and the reason is shown with a retry. |
+| `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. Its children are always server-rendered (hidden until the check passes), so it never changes the page's status. Use it inside a page, after the page's guard, with `serverChecked`. Without `serverChecked`, if the check can't run, the app stays hidden and the reason is shown with a retry. |
 | `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. |
 | Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
 
@@ -305,21 +420,26 @@ export async function invite(previous: ActionResult | null, data: FormData) {
 ```tsx
 // app/admin/people/page.tsx (server component; admin pages are never cached)
 import { InviteForm, PeopleTable } from 'auth-kit/admin/ui';
+import { signInUrl } from 'auth-kit/server';
 import { changeRole, deleteUser, disable, enable, invite, resend, signOutEverywhere } from './actions';
 
 export const dynamic = 'force-dynamic';
+
+// "Sign in again to confirm": /sign-in?next=%2Fadmin%2Fpeople&reauth=1, which the sign-in page
+// (step 6) reads as a step-up and returns from to this page.
+const stepUpHref = signInUrl('/admin/people', { reauth: true });
 
 export default async function PeoplePage() {
   const user = await pages.requireCan('people.manage', { live: true });
   const viewer = { sub: user.sub, groups: [...user.groups], capabilities: [...user.capabilities] };
   return (
     <>
-      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref="/sign-in?step-up=1" />
+      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref={stepUpHref} />
       <PeopleTable
         people={await people.listPeople()}
         viewer={viewer}
         actions={{ resend, changeRole, disable, enable, signOutEverywhere, deleteUser }}
-        stepUpHref="/sign-in?step-up=1"
+        stepUpHref={stepUpHref}
       />
     </>
   );
@@ -339,9 +459,37 @@ The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResour
 | 403 | Signed in, and not allowed | `ForbiddenError` |
 | 403 | A password user without an authenticator code: send them to setup | `MfaEnrollmentRequiredError` |
 | 404 | The record isn't theirs (or doesn't exist; the route doesn't say which) | `NotFoundError` |
-| 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed | `AuthUnavailableError` |
+| 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed; on pages, the error boundary says so (`isAuthUnavailableError`) | `AuthUnavailableError` |
 
-Pages turn 401 into a sign-in redirect with a safe `next` path, missing TOTP into the setup page, and 403/404 into Next's not-found page.
+Pages turn 401 into a sign-in redirect with a safe `next` path (`&reauth=1` for step-up), missing TOTP into the setup page, and 403/404 into Next's not-found page.
+
+### "Couldn't check" on pages
+
+A 503 is never a sign-in redirect or a not-found page: page guards rethrow `AuthUnavailableError` to the nearest error boundary. In a production build Next replaces server errors with a generic one before the boundary sees it (no name, no message, only `digest`), so `AuthUnavailableError` carries a digest of its own, `AUTH_KIT_AUTH_UNAVAILABLE;<reference>`, which Next keeps. `isAuthUnavailableError(error)` from `auth-kit/client` reads it, in development and production alike:
+
+```tsx
+// app/error.tsx (and app/global-error.tsx, which catches errors thrown by the root layout)
+'use client';
+import { isAuthUnavailableError } from 'auth-kit/client';
+
+export default function ErrorPage({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  const unavailable = isAuthUnavailableError(error);
+  return (
+    <main>
+      <h1>{unavailable ? 'Can’t check your sign-in right now' : 'This page couldn’t load'}</h1>
+      <p>
+        {unavailable
+          ? 'The sign-in service didn’t answer, so this page stayed closed. Nothing was shown or changed.'
+          : 'Something failed on the server. Try again, and if it keeps happening, quote the reference below.'}
+      </p>
+      {error.digest && <p>Reference: {error.digest}</p>}
+      <button type="button" onClick={reset}>Try again</button>
+    </main>
+  );
+}
+```
+
+The reference matches the server's log line for that error. The page's own HTTP status is 500 (Next serves error boundaries as 500); the proxy answers 503 itself when it can't check, and route handlers wrapped in `withAuthErrors` answer 503 JSON.
 
 ## How the standard maps to the code
 
@@ -358,7 +506,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Machine identities (IAM role, client credentials) | Server refuses machine tokens as people; scope checks not built | P2 |
 | **Sign-in** | | |
 | Passkey, password + TOTP, emailed code; `ALLOW_USER_AUTH` | Sign-in policy `WEB_AUTHN`/`PASSWORD`/`EMAIL_OTP`; client flows exactly `ALLOW_USER_AUTH` + refresh | Pkg (UI: `SignIn`) |
-| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors`; `TOTPEnrollmentGate`, `AuthenticatorSetup` | Pkg |
+| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors`, page guards redirect to setup; `TOTPEnrollmentGate` (screens only), `AuthenticatorSetup` | Pkg |
 | Passwords ≥ 15, no composition rules | Preset password policy | Pkg |
 | Breached-password check | Plus threat protection on Tier 3; a Have I Been Pwned range check before every new password the client saves | Pkg |
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
@@ -375,7 +523,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
 | Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and record memberships); live checks refuse disabled users at once | Pkg |
-| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; CSP in the template | Pkg / App |
+| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; a per-request nonce CSP through the proxy (`nonceCspHeaders`), with the policy in the site ([template](https://github.com/davidyokum/site-auth-kit-template)) | Pkg / App |
 | Amplify `ssr: true` client | Server reads its cookies and verifies them itself; the adapter refreshes in the proxy | Pkg ([ADR 0007](docs/decisions/0007-verify-tokens-in-auth-kit.md)) |
 | **Enforcement** | | |
 | Default-deny proxy that validates tokens | `withAuthProxy` | Pkg |
@@ -410,7 +558,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Ribbon naming environment, pool, persona; `[DEV]` title and favicon | `EnvironmentRibbon`, `environmentMetadata` | Pkg |
 | One `*.localhost` name per app | `localDevServer` | Pkg + App |
 | **Assurance** | | |
-| Auth-matrix tests in CI | `assertAuthMatrix` with `appRoutes: routesFromNextBuild()`, against a dev server with `AUTH_KIT_MATRIX=1` | Pkg (CI wiring in the template) |
+| Auth-matrix tests in CI | `startMatrixServer` (`next dev` with the matrix server mode, no AWS) and `assertAuthMatrix` with `appRoutes: routesFromNextBuild()` | Pkg (CI wiring in the [template](https://github.com/davidyokum/site-auth-kit-template)) |
 
 ## WAF: one web ACL for all your sites
 
@@ -444,7 +592,7 @@ These were checked against the installed packages and AWS documentation, but not
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
 - **The WAF sign-in rule's header match.** Cognito forwards `x-amzn-cognito-operation-name` to WAF, but AWS doesn't document its value format. The rule matches case-insensitively on the operation name (and on `x-amz-target`). Run it in `count` mode first; the overall per-IP rule needs no header match.
 - **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. After a sandbox session refreshes, read both rules' samples (read-only) and tune the limits with refreshes in mind: `aws wafv2 get-sampled-requests --profile <profile> --scope REGIONAL --web-acl-arn <arn> --rule-metric-name <project>-sign-in-attempts-per-ip --time-window StartTime=<iso>,EndTime=<iso> --max-items 100` (and `<project>-requests-per-ip`).
-- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
+- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Choice-based sign-in without a managed-login domain.** AWS's overview says passwordless and passkey sign-in need one; other AWS pages say SDK apps don't. The preset doesn't create a domain.
 
 ## What the pool can't enforce

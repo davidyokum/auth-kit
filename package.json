@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.1-alpha",
+  "version": "0.1.2-alpha",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -52,6 +52,10 @@
       "types": "./dist/testing/index.d.ts",
       "import": "./dist/testing/index.js"
     },
+    "./testing/matrix-server": {
+      "types": "./dist/testing/matrix-server.d.ts",
+      "import": "./dist/testing/matrix-server.js"
+    },
     "./client": {
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"
@@ -92,7 +96,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "test:e2e": "AUTH_KIT_E2E=1 vitest run test/e2e"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1152.0",

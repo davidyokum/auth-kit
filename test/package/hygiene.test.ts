@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import tsupConfig from '../../tsup.config.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
-const SKIP = new Set(['node_modules', 'dist', '.git', 'coverage', 'cdk.out']);
+const SKIP = new Set(['node_modules', 'dist', '.git', 'coverage', 'cdk.out', '.next']);
 const TEXT = /\.(ts|tsx|js|json|md|yml|yaml|snap|txt)$/;
 
 function files(dir: string): string[] {
@@ -73,6 +73,7 @@ describe('module boundaries', () => {
       for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(allowed);
     }
     expect(importsOf('src/server/redirect.ts')).toEqual([]);
+    expect(importsOf('src/shared/unavailable.ts')).toEqual([]);
     for (const spec of importsOf('src/shared/not-implemented.ts')) expect(spec).toBe('never');
   });
 

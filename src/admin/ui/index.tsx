@@ -136,7 +136,11 @@ export interface PeopleTableProps {
   people: PeopleList;
   viewer: Viewer;
   actions: PeopleTableActions;
-  /** Where "Sign in again to confirm" goes when an action needs a recent sign-in. */
+  /**
+   * Where "Sign in again to confirm" goes when an action needs a recent sign-in. Build it with
+   * `signInUrl('/admin/people', { reauth: true })` (auth-kit/server), so the sign-in screen says it's
+   * a step-up and comes back here: `/sign-in?next=%2Fadmin%2Fpeople&reauth=1`.
+   */
   stepUpHref?: string;
   /** The app's own roles (its capability map's groups beyond the standard four). */
   appRoles?: readonly string[];
@@ -337,6 +341,7 @@ export interface RoleChangeDialogProps {
   person: PersonRow;
   viewer: Viewer;
   action: FormAction;
+  /** Where "Sign in again to confirm" goes: `signInUrl('/admin/people', { reauth: true })`. */
   stepUpHref?: string;
   /** Enabled owners, for the "keep an owner" hint. The server re-counts live. */
   ownerCount?: number;
@@ -415,6 +420,7 @@ export interface InviteFormProps {
   /** Usual invite domains; others get a warning and a confirmation box. */
   inviteDomains?: readonly string[];
   inviteMode?: InviteMode;
+  /** Where "Sign in again to confirm" goes: `signInUrl('/admin/people', { reauth: true })`. */
   stepUpHref?: string;
 }
 
