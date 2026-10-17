@@ -17,3 +17,9 @@ export const MATRIX_ENV_FLAG = 'AUTH_KIT_MATRIX';
 export const PROXY_RESPONSE_HEADER = 'x-auth-kit-proxy';
 export const PROXY_DENIED = 'denied';
 export const PROXY_HANDLER_PASS = 'handler-pass';
+
+/**
+ * The matrix server mode (`auth-kit/testing/matrix-server`, ADR 0016): the fixture `startMatrixServer`
+ * passes to the dev server, as JSON. Read only under `next dev` with `AUTH_KIT_MATRIX=1`.
+ */
+export const MATRIX_FIXTURE_ENV = 'AUTH_KIT_MATRIX_FIXTURE';

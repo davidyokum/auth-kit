@@ -1,5 +1,6 @@
 /**
  * `auth-kit/testing`: helpers for apps' own tests. Node only; never import it from app code.
+ * (The matrix's server mode, which the app's dev-only code imports, is `auth-kit/testing/matrix-server`.)
  */
 import { amplifyCookieNames } from '../server/tokens.js';
 import type { CognitoGateway, LiveUserState, UserAuthFactors } from '../server/cognito.js';
@@ -32,6 +33,7 @@ export {
 } from './routes.js';
 export {
   MATRIX_ENV_FLAG,
+  MATRIX_FIXTURE_ENV,
   MATRIX_HANDLER_PASS_VALUE,
   MATRIX_REQUEST_HEADER,
   PROXY_RESPONSE_HEADER,
@@ -47,6 +49,22 @@ export {
   type MintOptions,
 } from './issuer.js';
 export { AWS_BLOCKED_ENV } from './aws-env.js';
+export {
+  startMatrixServer,
+  matrixFixture,
+  matrixServerEnv,
+  type StartMatrixServerOptions,
+  type MatrixServer,
+  type MatrixPersona,
+  type MatrixPersonaSpec,
+} from './matrix-run.js';
+export {
+  parseMatrixFixture,
+  MATRIX_FIXTURE_VERSION,
+  DEFAULT_MATRIX_FACTORS,
+  type MatrixFixture,
+  type MatrixFixtureUser,
+} from './fixture.js';
 
 /**
  * A persona that sends Amplify's `ssr: true` cookies, the way a signed-in browser does.
