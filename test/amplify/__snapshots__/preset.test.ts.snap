@@ -1,0 +1,460 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
+{
+  "AuthKitWebAcl": {
+    "Properties": {
+      "DefaultAction": {
+        "Allow": {},
+      },
+      "Description": "auth-kit rate limits for the example-reports user pool",
+      "Rules": [
+        {
+          "Action": {
+            "Block": {},
+          },
+          "Name": "auth-kit-sign-in-attempts-per-ip",
+          "Priority": 0,
+          "Statement": {
+            "RateBasedStatement": {
+              "AggregateKeyType": "IP",
+              "EvaluationWindowSec": 300,
+              "Limit": 100,
+              "ScopeDownStatement": {
+                "OrStatement": {
+                  "Statements": [
+                    {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "SingleHeader": {
+                            "Name": "x-amzn-cognito-operation-name",
+                          },
+                        },
+                        "PositionalConstraint": "CONTAINS",
+                        "SearchString": "initiateauth",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                    {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "SingleHeader": {
+                            "Name": "x-amzn-cognito-operation-name",
+                          },
+                        },
+                        "PositionalConstraint": "CONTAINS",
+                        "SearchString": "respondtoauthchallenge",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                    {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "SingleHeader": {
+                            "Name": "x-amz-target",
+                          },
+                        },
+                        "PositionalConstraint": "CONTAINS",
+                        "SearchString": "initiateauth",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                    {
+                      "ByteMatchStatement": {
+                        "FieldToMatch": {
+                          "SingleHeader": {
+                            "Name": "x-amz-target",
+                          },
+                        },
+                        "PositionalConstraint": "CONTAINS",
+                        "SearchString": "respondtoauthchallenge",
+                        "TextTransformations": [
+                          {
+                            "Priority": 0,
+                            "Type": "LOWERCASE",
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          "VisibilityConfig": {
+            "CloudWatchMetricsEnabled": true,
+            "MetricName": "example-reports-sign-in-attempts-per-ip",
+            "SampledRequestsEnabled": true,
+          },
+        },
+        {
+          "Action": {
+            "Block": {},
+          },
+          "Name": "auth-kit-requests-per-ip",
+          "Priority": 1,
+          "Statement": {
+            "RateBasedStatement": {
+              "AggregateKeyType": "IP",
+              "EvaluationWindowSec": 300,
+              "Limit": 1000,
+            },
+          },
+          "VisibilityConfig": {
+            "CloudWatchMetricsEnabled": true,
+            "MetricName": "example-reports-requests-per-ip",
+            "SampledRequestsEnabled": true,
+          },
+        },
+      ],
+      "Scope": "REGIONAL",
+      "Tags": [
+        {
+          "Key": "Environment",
+          "Value": "main",
+        },
+        {
+          "Key": "ManagedBy",
+          "Value": "auth-kit",
+        },
+        {
+          "Key": "Owner",
+          "Value": "reports-team",
+        },
+        {
+          "Key": "PoolRole",
+          "Value": "user",
+        },
+        {
+          "Key": "Project",
+          "Value": "example-reports",
+        },
+        {
+          "Key": "Tier",
+          "Value": "2",
+        },
+      ],
+      "VisibilityConfig": {
+        "CloudWatchMetricsEnabled": true,
+        "MetricName": "example-reports-auth-web-acl",
+        "SampledRequestsEnabled": true,
+      },
+    },
+    "Type": "AWS::WAFv2::WebACL",
+  },
+  "AuthKitWebAclAssociation": {
+    "Properties": {
+      "ResourceArn": {
+        "Fn::GetAtt": [
+          "authUserPoolA78B038B",
+          "Arn",
+        ],
+      },
+      "WebACLArn": {
+        "Fn::GetAtt": [
+          "AuthKitWebAcl",
+          "Arn",
+        ],
+      },
+    },
+    "Type": "AWS::WAFv2::WebACLAssociation",
+  },
+  "authIdentityPool80CA5E06": {
+    "Properties": {
+      "AllowUnauthenticatedIdentities": false,
+      "CognitoIdentityProviders": [
+        {
+          "ClientId": {
+            "Ref": "authUserPoolAppClient77860A56",
+          },
+          "ProviderName": {
+            "Fn::Join": [
+              "",
+              [
+                "cognito-idp.",
+                {
+                  "Ref": "AWS::Region",
+                },
+                ".amazonaws.com/",
+                {
+                  "Ref": "authUserPoolA78B038B",
+                },
+              ],
+            ],
+          },
+        },
+      ],
+      "IdentityPoolTags": [
+        {
+          "Key": "Environment",
+          "Value": "main",
+        },
+        {
+          "Key": "ManagedBy",
+          "Value": "auth-kit",
+        },
+        {
+          "Key": "Owner",
+          "Value": "reports-team",
+        },
+        {
+          "Key": "PoolRole",
+          "Value": "user",
+        },
+        {
+          "Key": "Project",
+          "Value": "example-reports",
+        },
+        {
+          "Key": "Tier",
+          "Value": "2",
+        },
+      ],
+      "SupportedLoginProviders": {},
+    },
+    "Type": "AWS::Cognito::IdentityPool",
+  },
+  "authUserPoolA78B038B": {
+    "DeletionPolicy": "Delete",
+    "Properties": {
+      "AccountRecoverySetting": {
+        "RecoveryMechanisms": [
+          {
+            "Name": "verified_email",
+            "Priority": 1,
+          },
+        ],
+      },
+      "AdminCreateUserConfig": {
+        "AllowAdminCreateUserOnly": true,
+      },
+      "AutoVerifiedAttributes": [
+        "email",
+      ],
+      "DeletionProtection": "ACTIVE",
+      "EmailConfiguration": {
+        "EmailSendingAccount": "DEVELOPER",
+        "From": "Example Reports <noreply@example.org>",
+        "ReplyToEmailAddress": "help@example.org",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition",
+              },
+              ":ses:",
+              {
+                "Ref": "AWS::Region",
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId",
+              },
+              ":identity/example.org",
+            ],
+          ],
+        },
+      },
+      "EmailVerificationMessage": "The verification code to your new account is {####}",
+      "EmailVerificationSubject": "Verify your new account",
+      "EnabledMfas": [
+        "SOFTWARE_TOKEN_MFA",
+      ],
+      "MfaConfiguration": "OPTIONAL",
+      "Policies": {
+        "PasswordPolicy": {
+          "MinimumLength": 15,
+          "RequireLowercase": false,
+          "RequireNumbers": false,
+          "RequireSymbols": false,
+          "RequireUppercase": false,
+          "TemporaryPasswordValidityDays": 7,
+        },
+        "SignInPolicy": {
+          "AllowedFirstAuthFactors": [
+            "WEB_AUTHN",
+            "PASSWORD",
+            "EMAIL_OTP",
+          ],
+        },
+      },
+      "Schema": [
+        {
+          "Mutable": true,
+          "Name": "email",
+          "Required": true,
+        },
+      ],
+      "SmsVerificationMessage": "The verification code to your new account is {####}",
+      "UserAttributeUpdateSettings": {
+        "AttributesRequireVerificationBeforeUpdate": [
+          "email",
+        ],
+      },
+      "UserPoolTags": {
+        "Environment": "main",
+        "ManagedBy": "auth-kit",
+        "Owner": "reports-team",
+        "PoolRole": "user",
+        "Project": "example-reports",
+        "Tier": "2",
+      },
+      "UserPoolTier": "ESSENTIALS",
+      "UsernameAttributes": [
+        "email",
+      ],
+      "UsernameConfiguration": {
+        "CaseSensitive": false,
+      },
+      "VerificationMessageTemplate": {
+        "DefaultEmailOption": "CONFIRM_WITH_CODE",
+        "EmailMessage": "The verification code to your new account is {####}",
+        "EmailSubject": "Verify your new account",
+        "SmsMessage": "The verification code to your new account is {####}",
+      },
+      "WebAuthnFactorConfiguration": "MULTI_FACTOR_WITH_USER_VERIFICATION",
+      "WebAuthnRelyingPartyID": "reports.example.org",
+      "WebAuthnUserVerification": "required",
+    },
+    "Type": "AWS::Cognito::UserPool",
+    "UpdateReplacePolicy": "Delete",
+  },
+  "authUserPoolAppClient77860A56": {
+    "Properties": {
+      "AccessTokenValidity": 60,
+      "AllowedOAuthFlows": [
+        "code",
+      ],
+      "AllowedOAuthFlowsUserPoolClient": true,
+      "AllowedOAuthScopes": [
+        "profile",
+        "phone",
+        "email",
+        "openid",
+        "aws.cognito.signin.user.admin",
+      ],
+      "AuthSessionValidity": 3,
+      "CallbackURLs": [
+        "https://example.com",
+      ],
+      "EnableTokenRevocation": true,
+      "ExplicitAuthFlows": [
+        "ALLOW_USER_AUTH",
+        "ALLOW_REFRESH_TOKEN_AUTH",
+      ],
+      "IdTokenValidity": 60,
+      "PreventUserExistenceErrors": "ENABLED",
+      "RefreshTokenValidity": 43200,
+      "SupportedIdentityProviders": [
+        "COGNITO",
+      ],
+      "TokenValidityUnits": {
+        "AccessToken": "minutes",
+        "IdToken": "minutes",
+        "RefreshToken": "minutes",
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolClient",
+  },
+  "authadminGroupB06C2B06": {
+    "Properties": {
+      "GroupName": "admin",
+      "Precedence": 1,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authadminGroupRole3D6C56FA",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "autheditorGroupEA1BDB9A": {
+    "Properties": {
+      "GroupName": "editor",
+      "Precedence": 2,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "autheditorGroupRoleFE95BACC",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "authreviewerGroupFA7E5676": {
+    "Properties": {
+      "GroupName": "reviewer",
+      "Precedence": 4,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authreviewerGroupRole8D48604D",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "authsuperadminGroup37E714B4": {
+    "Properties": {
+      "GroupName": "superadmin",
+      "Precedence": 0,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authsuperadminGroupRole6A03E294",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "authviewerGroup718C1E53": {
+    "Properties": {
+      "GroupName": "viewer",
+      "Precedence": 3,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authviewerGroupRoleA78ECDF9",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+}
+`;
