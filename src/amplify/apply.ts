@@ -39,7 +39,12 @@ export interface AppliedAuthStandard {
   userPoolTier: 'ESSENTIALS' | 'PLUS';
   tags: Record<string, string>;
   webAcl: AuthWebAcl | null;
+  /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
+  hostedUiOAuth: boolean;
 }
+
+/** The callback URL CDK fills in when a client has OAuth on and no callback of its own. */
+const CDK_PLACEHOLDER_CALLBACK = 'https://example.com';
 
 const applied = new WeakSet<CfnUserPool>();
 
@@ -185,6 +190,27 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPoolClient.tokenValidityUnits = { accessToken: 'minutes', idToken: 'minutes', refreshToken: 'minutes' };
   cfnUserPoolClient.authSessionValidity = SESSION_POLICY.authSessionMinutes;
 
+  // Sign-in happens in the app (USER_AUTH), not through the hosted UI's OAuth redirect. Amplify still
+  // turns the authorization-code flow on, and CDK fills in its placeholder callback
+  // (`https://example.com`), which would become a live redirect target the moment the pool gets a
+  // managed-login domain. So OAuth is switched off unless the site configured real callback URLs
+  // (`loginWith.externalProviders` in its own defineAuth call); the placeholder is never kept.
+  const configuredCallbacks = stack.resolve(cfnUserPoolClient.callbackUrLs) as unknown;
+  const realCallbacks = Array.isArray(configuredCallbacks)
+    ? configuredCallbacks.filter((url): url is string => typeof url === 'string' && url !== CDK_PLACEHOLDER_CALLBACK)
+    : [];
+  const hostedUiOAuth = realCallbacks.length > 0;
+  if (hostedUiOAuth) {
+    cfnUserPoolClient.callbackUrLs = realCallbacks;
+  } else {
+    cfnUserPoolClient.allowedOAuthFlowsUserPoolClient = false;
+    cfnUserPoolClient.allowedOAuthFlows = undefined;
+    cfnUserPoolClient.allowedOAuthScopes = undefined;
+    cfnUserPoolClient.callbackUrLs = undefined;
+    cfnUserPoolClient.logoutUrLs = undefined;
+    cfnUserPoolClient.defaultRedirectUri = undefined;
+  }
+
   // No guest AWS credentials unless the app asks for them.
   cfnIdentityPool.allowUnauthenticatedIdentities = o.guestAccess;
 
@@ -223,5 +249,6 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     userPoolTier,
     tags,
     webAcl,
+    hostedUiOAuth,
   };
 }

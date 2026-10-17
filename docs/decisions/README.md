@@ -11,3 +11,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0005](0005-sandbox-only-admin-password-flow.md) | `ADMIN_USER_PASSWORD_AUTH` on sandbox clients only |
 | [0006](0006-preset-props-plus-l1-overrides.md) | The preset returns `defineAuth` props, then applies L1 overrides |
 | [0007](0007-verify-tokens-in-auth-kit.md) | auth-kit verifies tokens itself; the Amplify adapter only refreshes |
+| [0008](0008-client-in-the-browser.md) | The client runs in the browser and fills Amplify v6's gaps with two direct Cognito calls |

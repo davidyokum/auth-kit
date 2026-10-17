@@ -126,6 +126,16 @@ describe('Tier 2 pool on a branch', () => {
     });
   });
 
+  it('turns the hosted-UI OAuth flow off and ships no placeholder callback URL', () => {
+    const client = Object.values(t.findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
+    expect(client.Properties.AllowedOAuthFlowsUserPoolClient).toBe(false);
+    for (const key of ['AllowedOAuthFlows', 'AllowedOAuthScopes', 'CallbackURLs', 'LogoutURLs', 'DefaultRedirectURI']) {
+      expect(client.Properties, key).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(t.toJSON())).not.toContain('https://example.com');
+    expect(applied.hostedUiOAuth).toBe(false);
+  });
+
   it('has no admin password flow outside a sandbox', () => {
     const client = Object.values(t.findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: { ExplicitAuthFlows: string[] } };
     expect(client.Properties.ExplicitAuthFlows).not.toContain('ALLOW_ADMIN_USER_PASSWORD_AUTH');
@@ -221,6 +231,21 @@ describe('Tier 2 pool on a branch', () => {
       Object.entries(t.toJSON().Resources as Record<string, { Type: string }>).filter(([, r]) => keep.has(r.Type)),
     );
     expect(resources).toMatchSnapshot();
+  });
+});
+
+describe('hosted-UI OAuth opt-in', () => {
+  it('keeps OAuth only when the site configured real callback URLs, and drops the placeholder', () => {
+    const { template, applied } = synth(BASE, {
+      beforeApply: (auth) => {
+        auth.resources.cfnResources.cfnUserPoolClient.callbackUrLs = ['https://example.com', 'https://reports.example.org/auth/callback'];
+      },
+    });
+    expect(applied.hostedUiOAuth).toBe(true);
+    template().hasResourceProperties('AWS::Cognito::UserPoolClient', {
+      AllowedOAuthFlowsUserPoolClient: true,
+      CallbackURLs: ['https://reports.example.org/auth/callback'],
+    });
   });
 });
 

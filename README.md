@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. The sign-in screens, the admin People page, and the localhost kit are typed stubs that throw `NotImplementedError` until phase 2. The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`). The admin People page and the localhost kit are typed stubs that throw `NotImplementedError` until their phase-2 work lands. The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
 
 ## What it does
 
@@ -13,7 +13,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, record checks (404), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh | **Implemented** |
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
-| `auth-kit/client` | Sign-in screens (passkey autofill, password + TOTP, emailed code), the authenticator gate, My account | Interfaces, autocomplete tokens, and the after-sign-in decision; UI stubbed |
+| `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | Guardrails implemented; actions and audit log stubbed |
 | `auth-kit/dev` | The localhost kit: personas, triple-gated "Sign in as…", environment ribbon, production-build check | Gates, sandbox guard, persona validation, ribbon model implemented; seeding, sign-in exchange, component, build check stubbed |
 
@@ -27,7 +27,7 @@ npm i github:davidyokum/auth-kit#v0.1.0-alpha
 
 npm builds the package on install (its `prepare` script installs the build tools and runs the build), which adds about a minute compared with a registry package.
 
-Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react`.
+Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
 ## Quick start
 
@@ -146,6 +146,69 @@ await assertAuthMatrix({
 
 It refuses an incomplete matrix: every route needs anonymous, member, and admin; every route that takes a record ID needs the second member, and expects 404 from them.
 
+### 6. Sign-in screens and My account: `auth-kit/client`
+
+Client components on Amplify JS v6. Amplify's auth calls go from the browser to Cognito and passkeys need the browser's prompt, so these run in the browser; `auth-kit/server` keeps enforcing the same rules on every request.
+
+```tsx
+// app/amplify-client.tsx: render <AmplifyClient /> once in the root layout
+'use client';
+import outputs from '@/amplify_outputs.json';
+import { configureAuthClient } from 'auth-kit/client';
+
+// ssr: true, SameSite=Lax, and cookies that expire with the app client's refresh token
+configureAuthClient(outputs, { refreshTokenMinutes: 30 * 24 * 60 });
+export function AmplifyClient() { return null; }
+```
+
+```tsx
+// app/sign-in/page.tsx (a public route)
+import { SignIn } from 'auth-kit/client';
+
+export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; reauth?: string }> }) {
+  const { next, reauth } = await searchParams;
+  return <SignIn siteName="Example Reports" passkeysEnabled={false} next={next} reauth={reauth === '1'} />;
+}
+```
+
+```tsx
+// app/(app)/layout.tsx: the server enforces; the gate keeps the screens in step
+await pages.requireUser(); // a password user without an authenticator goes to /account/authenticator
+return <TOTPEnrollmentGate issuer="Example Reports">{children}</TOTPEnrollmentGate>;
+
+// app/account/page.tsx
+await pages.requireUser();
+return <MyAccount issuer="Example Reports" passkeysEnabled={false} />;
+```
+
+The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true })` and renders `<AuthenticatorSetup issuer="…" onDone={…} />` from a small client component (function props such as `onDone`, `navigate`, `loadFactors`, and `renderQrCode` can't cross from a server component).
+
+| Export | What it does |
+|---|---|
+| `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: first-factor choice, emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
+| `ChooseFirstCredential` | After an invite's emailed code: "Save a passkey", or "Set a password" (15+ characters) followed by the authenticator, which isn't optional. |
+| `AuthenticatorSetup` | Setup link, setup key, an optional QR code (`renderQrCode`, so the package stays dependency-free), then one code. |
+| `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. If the check can't run, the app stays hidden and the reason is shown with a retry. |
+| `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. |
+| Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
+
+- **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, and a disabled account read the same; a reset request looks the same either way). Rate limits, including WAF's, say to wait.
+- **Accessibility:** every field has a label; errors are announced (`role="alert"`) and linked to the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading.
+- **Styling:** unstyled markup. Each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `error`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS to copy into a stylesheet.
+- **CSP:** `connect-src` needs `https://cognito-idp.<region>.amazonaws.com` (Amplify needs it too) and `https://api.pwnedpasswords.com` for the breached-password check (`checkBreachedPassword={false}` turns it off on Plus-plan pools).
+
+#### Where Amplify v6 differs from the standard
+
+Checked against `@aws-amplify/auth` 6.21 (via `aws-amplify` 6.22) and AWS's documentation; details in [ADR 0008](docs/decisions/0008-client-in-the-browser.md).
+
+- **No passkey autofill.** Cognito issues a passkey challenge only for a named user ("SDK-based applications must prompt for a username"), and Amplify calls `navigator.credentials.get()` without conditional mediation. So `autocomplete="username webauthn"` lets a password manager fill the email, but saved passkeys can't appear in the autofill list. The passkey is instead the one-click primary button once the email is filled.
+- **No first password after an invite through Amplify.** Cognito's `ChangePassword` takes no previous password for a passwordless account, but Amplify's `updatePassword` refuses an empty one. `setFirstPassword` makes that one call directly, authorized by the access token.
+- **No `GetUserAuthFactors` in Amplify.** `fetchAuthFactors` calls it the same way; the after-sign-in steps, the gate, and the last-way-in guard need it.
+- **Browser-written cookies last 365 days** with Amplify's `ssr: true`; `configureAuthClient` makes them expire with the refresh token.
+- **Smaller ones:** Amplify's default sign-in flow (SRP) isn't allowed by the standard's app client, so every call passes `USER_AUTH`; `signIn` refuses while a session exists, so step-up ends the local session first; `getSetupUri` doesn't encode its inputs and labels the account with Cognito's username (a UUID), so auth-kit builds the `otpauth://` link; `associateWebAuthnCredential` takes no passkey name (Cognito names it); once someone has an authenticator, Cognito stops offering them emailed codes, and a request for one comes back as a choice of other methods.
+
+To check on the first sandbox deploy: passkey sign-in and registration on the relying-party domain, the emailed-code and TOTP paths end to end, that `GetUserAuthFactors` from the browser passes the site's CSP, and step-up with a passkey in Safari (ending the local session adds a round trip before the passkey prompt, which may outlast the click's user activation).
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -173,11 +236,11 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Tagged Project / Owner / Environment / Tier | `applyAuthStandard` | Pkg |
 | Machine identities (IAM role, client credentials) | Server refuses machine tokens as people; scope checks not built | P2 |
 | **Sign-in** | | |
-| Passkey, password + TOTP, emailed code; `ALLOW_USER_AUTH` | Sign-in policy `WEB_AUTHN`/`PASSWORD`/`EMAIL_OTP`; client flows exactly `ALLOW_USER_AUTH` + refresh | Pkg (UI P2) |
-| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors` | Pkg (setup screen P2) |
+| Passkey, password + TOTP, emailed code; `ALLOW_USER_AUTH` | Sign-in policy `WEB_AUTHN`/`PASSWORD`/`EMAIL_OTP`; client flows exactly `ALLOW_USER_AUTH` + refresh | Pkg (UI: `SignIn`) |
+| MFA optional, TOTP only; app requires TOTP of password users | Preset; `requireUser` refuses (403 `mfa_enrollment_required`) via `GetUserAuthFactors`; `TOTPEnrollmentGate`, `AuthenticatorSetup` | Pkg |
 | Passwords ≥ 15, no composition rules | Preset password policy | Pkg |
-| Breached-password check | Plus threat protection on Tier 3; Have I Been Pwned check for Tier 2 not built | Partial (P2) |
-| `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` | Pkg (UI P2) |
+| Breached-password check | Plus threat protection on Tier 3; a Have I Been Pwned range check before every new password the client saves | Pkg |
+| `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
 | Essentials plan + SES | `UserPoolTier`, `EmailConfiguration` with the domain identity | Pkg |
 | WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule) | Pkg ([caveat](#verify-on-the-first-sandbox-deploy)) |
 | `AuthSessionValidity` 3 minutes | Preset | Pkg |
@@ -187,7 +250,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | **Sessions** | | |
 | Access/ID 60 min; refresh 30 days (Tier 2) or ≤ 1 day (Tier 3) | Preset (ceilings enforced; admin pools ≤ 1 day) | Pkg |
 | Token revocation on | Preset | Pkg |
-| Global sign-out; people manage their own passkeys | `signOutEverywhere`, `MyAccount` | P2 |
+| Global sign-out; people manage their own passkeys | `signOutEverywhere`, `MyAccount` (with a last-way-in guard) | Pkg |
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
 | Removal is `AdminDisableUser` | Live checks refuse disabled users at once; the action itself is P2 | Partial |

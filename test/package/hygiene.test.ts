@@ -5,7 +5,7 @@ import tsupConfig from '../../tsup.config.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const SKIP = new Set(['node_modules', 'dist', '.git', 'coverage', 'cdk.out']);
-const TEXT = /\.(ts|js|json|md|yml|yaml|snap|txt)$/;
+const TEXT = /\.(ts|tsx|js|json|md|yml|yaml|snap|txt)$/;
 
 function files(dir: string): string[] {
   const out: string[] = [];
@@ -63,8 +63,21 @@ function importsOf(file: string): string[] {
 
 describe('module boundaries', () => {
   it('auth-kit/client imports nothing server-side (safe in client components)', () => {
-    for (const spec of importsOf('src/client/index.ts')) expect(spec).toMatch(/^\.\.\/shared\//);
+    const files = readdirSync(join(ROOT, 'src/client'))
+      .filter((name) => /\.tsx?$/.test(name))
+      .map((name) => `src/client/${name}`);
+    expect(files.length).toBeGreaterThan(5);
+    // Its own files, shared policy, React, Amplify, and safeRedirect (pure; shared with the server).
+    const allowed = /^(\.\/|\.\.\/shared\/|\.\.\/server\/redirect\.js$|react$|aws-amplify(\/|$))/;
+    for (const file of files) {
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(allowed);
+    }
+    expect(importsOf('src/server/redirect.ts')).toEqual([]);
     for (const spec of importsOf('src/shared/not-implemented.ts')) expect(spec).toBe('never');
+  });
+
+  it("auth-kit/client is a React client module ('use client')", () => {
+    expect(readFileSync(join(ROOT, 'src/client/index.ts'), 'utf8').startsWith("'use client';")).toBe(true);
   });
 
   it('auth-kit/amplify/pre-sign-up has no imports (small Lambda bundle)', () => {
