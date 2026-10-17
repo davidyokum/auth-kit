@@ -2,10 +2,24 @@
  * Auth-matrix tests (03 §2, Assurance): anonymous, member, and admin against every route, including
  * data routes, plus a second member against every route that takes a record ID.
  *
+ * Each case runs twice:
+ * - **with proxy**: the request goes through the whole app, as a browser's would;
+ * - **without proxy**: the request reaches the route handler with `withAuthProxy` stepped aside, so a
+ *   route that relies on the proxy for its 401 (no `requireUser()` of its own) fails. Against a
+ *   running server, the proxy steps aside only for requests marked by the matrix, and only outside
+ *   production builds, with `AUTH_KIT_MATRIX=1`, on a localhost URL (`src/shared/matrix-protocol.ts`).
+ *   In-process tests can pass `handlerRequest` instead.
+ *
+ * It also checks coverage: `appRoutes` lists every route the app serves (`routesFromNextBuild()` after
+ * `next build`), and the matrix fails on an app route with no row and on a row that matches no app
+ * route (a mistyped path). And every row must expect at least one persona to succeed, so a path that
+ * 404s for everyone can't pass by accident.
+ *
  * ```ts
  * await assertAuthMatrix({
- *   request: (req) => fetch(req, { redirect: 'manual' }),   // or dispatch to route handlers in-process
- *   baseUrl: 'http://app.localhost:3000',
+ *   request: (req) => fetch(req, { redirect: 'manual' }),
+ *   baseUrl: 'http://app.localhost:3000',          // the dev server, started with AUTH_KIT_MATRIX=1
+ *   appRoutes: routesFromNextBuild('.next'),
  *   personas: {
  *     anonymous: {},
  *     member: bearerPersona(memberToken),
@@ -20,16 +34,33 @@
  *   ],
  * });
  * ```
+ *
+ * What it can't see: server actions (POSTs to a page with a `Next-Action` header) aren't routes in
+ * the build manifest, so they need rows of their own; and it checks responses, so a route that
+ * answers correctly for these personas but leaks to some other one is beyond it.
  */
+import {
+  MATRIX_HANDLER_PASS_VALUE,
+  MATRIX_REQUEST_HEADER,
+  PROXY_DENIED,
+  PROXY_HANDLER_PASS,
+  PROXY_RESPONSE_HEADER,
+} from '../shared/matrix-protocol.js';
+import { type AppRouteInput, type CompiledRoute, compileAppRoute, resolveAppRoute } from './routes.js';
 
 export const REQUIRED_PERSONAS = ['anonymous', 'member', 'admin'] as const;
 /** The persona used for the second-member check on record routes. */
 export const SECOND_MEMBER = 'otherMember';
 
+export type MatrixPass = 'with-proxy' | 'without-proxy';
+export const MATRIX_PASSES: readonly MatrixPass[] = ['with-proxy', 'without-proxy'];
+
 export interface PersonaDefinition {
   /** Headers that carry this persona's session (Authorization or Cookie). Omit for anonymous. */
   headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 }
+
+type Expectations = Partial<Record<string, number | readonly number[]>>;
 
 export interface MatrixRoute {
   /** Label in failure messages. Default `METHOD path`. */
@@ -47,19 +78,41 @@ export interface MatrixRoute {
   /** Treat as a record route even without placeholders (e.g. `?id=` routes), or opt out. */
   recordRoute?: boolean;
   /** Expected status per persona; an array allows any of several (e.g. `[302, 307]`). */
-  expect: Partial<Record<string, number | readonly number[]>>;
+  expect: Expectations;
+  /**
+   * Expected statuses when the route answers on its own, with the proxy stepped aside. Defaults to
+   * `expect`, persona by persona. Set it only where the route's own answer legitimately differs from
+   * the proxy's (say why in a comment): it's the one place a route can be declared proxy-only.
+   */
+  expectWithoutProxy?: Expectations;
   /**
    * The standard answers 404, not 403, to someone who can't see a record. Set this only for a route
    * that deliberately confirms the record exists.
    */
   allowForbiddenForSecondMember?: boolean;
+  /** `false` for a row asserting that a path does NOT exist: every persona must expect 404. */
+  exists?: boolean;
 }
 
 export interface AuthMatrixOptions {
   personas: Record<string, PersonaDefinition>;
   routes: readonly MatrixRoute[];
-  /** Sends one request and returns the response. Use `redirect: 'manual'` with fetch. */
+  /**
+   * Every route the app serves: `routesFromNextBuild('.next')` after `next build`, or a list kept by
+   * hand (`'/api/reports/[id]'`, `'POST /api/admin/invite'`). Required: an app route with no row, or
+   * a row with no app route, fails the matrix.
+   */
+  appRoutes: readonly AppRouteInput[];
+  /** Sends one request through the whole app and returns the response. Use `redirect: 'manual'` with fetch. */
   request: (request: Request) => Promise<Response>;
+  /**
+   * Sends one request straight to the route handlers, skipping the proxy (in-process tests). Default:
+   * `request`, with the matrix's handler-pass header, which `withAuthProxy` honors only outside
+   * production, with `AUTH_KIT_MATRIX=1`, on a localhost URL; every response must then carry
+   * `x-auth-kit-proxy: handler-pass` to prove the proxy stepped aside. With no proxy at all, pass
+   * `handlerRequest: request`.
+   */
+  handlerRequest?: (request: Request) => Promise<Response>;
   /** Default `http://localhost`. */
   baseUrl?: string;
   /** Placeholder values shared by all routes (the member's own record IDs). */
@@ -71,6 +124,7 @@ export interface MatrixCase {
   routeIndex: number;
   route: string;
   persona: string;
+  pass: MatrixPass;
   method: string;
   path: string;
   url: string;
@@ -97,18 +151,34 @@ function fill(path: string, params: Record<string, string>, label: string): stri
   });
 }
 
+const asList = (value: number | readonly number[] | undefined): readonly number[] =>
+  value === undefined ? [] : typeof value === 'number' ? [value] : value;
+
 /**
- * Validates the matrix against the standard and expands it into one case per route and persona.
- * Throws if a route skips a required persona, a record route skips the second member, or a record
- * route expects 403 where the standard says 404.
+ * Validates the matrix against the standard and expands it into one case per route, persona, and
+ * pass. Throws, listing every problem, if a route skips a required persona, a record route skips the
+ * second member or expects 403 where the standard says 404, a row expects nobody to succeed, a row
+ * matches none of `appRoutes`, or an app route has no row.
  */
-export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request'>): MatrixCase[] {
+export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'handlerRequest'>): MatrixCase[] {
   const problems: string[] = [];
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
   for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : [])]) {
     if (!options.personas[p]) problems.push(`persona "${p}" is required but not defined.`);
   }
+
+  let appRoutes: CompiledRoute[] = [];
+  if (!Array.isArray(options.appRoutes) || options.appRoutes.length === 0) {
+    problems.push('appRoutes is empty: pass routesFromNextBuild(".next") (or the app\'s route list) so uncovered routes fail.');
+  } else {
+    try {
+      appRoutes = options.appRoutes.map(compileAppRoute);
+    } catch (error) {
+      problems.push((error as Error).message);
+    }
+  }
+  const covered = new Set<CompiledRoute>();
 
   const cases: MatrixCase[] = [];
   for (const [routeIndex, route] of options.routes.entries()) {
@@ -119,12 +189,32 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request'>): Ma
       if (route.expect[p] === undefined) problems.push(`${label}: no expectation for "${p}".`);
     }
     if (isRecordRoute(route) && !route.allowForbiddenForSecondMember) {
-      const second = route.expect[SECOND_MEMBER];
-      const list = typeof second === 'number' ? [second] : (second ?? []);
-      if (list.includes(403)) {
-        problems.push(`${label}: a second member should get 404, not 403, so the route doesn't confirm the record exists.`);
+      for (const [field, expectations] of [
+        ['expect', route.expect],
+        ['expectWithoutProxy', route.expectWithoutProxy],
+      ] as const) {
+        if (asList(expectations?.[SECOND_MEMBER]).includes(403)) {
+          problems.push(
+            `${label}: ${field} gives a second member 403; the standard says 404, so the route doesn't confirm the record exists.`,
+          );
+        }
       }
     }
+    for (const persona of Object.keys(route.expectWithoutProxy ?? {})) {
+      if (route.expect[persona] === undefined) {
+        problems.push(`${label}: expectWithoutProxy names "${persona}", which has no expectation in expect.`);
+      }
+    }
+    const statuses = Object.values(route.expect).flatMap((v) => [...asList(v)]);
+    if (route.exists === false) {
+      if (statuses.some((s) => s !== 404)) problems.push(`${label}: exists: false rows must expect 404 for every persona.`);
+    } else if (!statuses.some((s) => s < 400)) {
+      problems.push(
+        `${label}: no persona is expected to succeed (every expectation is 4xx/5xx), so a mistyped or missing route would pass. ` +
+          'Fix the path, or set exists: false for a row asserting the path does not exist.',
+      );
+    }
+
     let path: string;
     try {
       path = fill(route.path, { ...options.params, ...route.params }, label);
@@ -132,22 +222,43 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request'>): Ma
       problems.push((error as Error).message);
       continue;
     }
+    if (appRoutes.length > 0) {
+      const target = resolveAppRoute(appRoutes, path);
+      if (route.exists === false) {
+        if (target) problems.push(`${label}: exists: false, but the app serves ${target.label}.`);
+      } else if (!target) {
+        problems.push(`${label}: ${path} is not one of the app's routes (appRoutes). Is the path mistyped, or was the route removed?`);
+      } else {
+        // A method-specific app route is covered only by a row with that method.
+        for (const candidate of appRoutes) {
+          if (candidate.key === target.key && (candidate.method === undefined || candidate.method === method)) covered.add(candidate);
+        }
+      }
+    }
+
     for (const [persona, expected] of Object.entries(route.expect)) {
       if (expected === undefined) continue;
       if (!options.personas[persona]) {
         problems.push(`${label}: expectation for unknown persona "${persona}".`);
         continue;
       }
-      cases.push({
-        routeIndex,
-        route: label,
-        persona,
-        method,
-        path,
-        url: new URL(path, baseUrl).toString(),
-        expected: typeof expected === 'number' ? [expected] : [...expected],
-      });
+      for (const pass of MATRIX_PASSES) {
+        const value = pass === 'without-proxy' ? (route.expectWithoutProxy?.[persona] ?? expected) : expected;
+        cases.push({
+          routeIndex,
+          route: label,
+          persona,
+          pass,
+          method,
+          path,
+          url: new URL(path, baseUrl).toString(),
+          expected: [...asList(value)],
+        });
+      }
     }
+  }
+  for (const r of appRoutes) {
+    if (!covered.has(r)) problems.push(`${r.label}: the app serves this route but the matrix has no row for it.`);
   }
   if (problems.length > 0) throw new Error(`auth-matrix is incomplete:\n- ${problems.join('\n- ')}`);
   return cases;
@@ -158,6 +269,13 @@ async function headersFor(persona: PersonaDefinition | undefined): Promise<Heade
   return new Headers(raw ?? {});
 }
 
+const PROXY_ANSWERED =
+  'the proxy answered (x-auth-kit-proxy: denied), so the route\'s own check never ran. Start the server with ' +
+  'AUTH_KIT_MATRIX=1 in development and use a localhost baseUrl, or pass handlerRequest.';
+const PROXY_NOT_CONFIRMED =
+  "the proxy didn't confirm it stepped aside (no x-auth-kit-proxy: handler-pass). Start the server with AUTH_KIT_MATRIX=1 " +
+  'in development and use a localhost baseUrl; with no auth-kit proxy at all, pass handlerRequest: request.';
+
 /** Runs every case and reports each result. Doesn't throw on mismatches (see `assertAuthMatrix`). */
 export async function runAuthMatrix(options: AuthMatrixOptions): Promise<MatrixResult[]> {
   const cases = authMatrixCases(options);
@@ -166,16 +284,30 @@ export async function runAuthMatrix(options: AuthMatrixOptions): Promise<MatrixR
     const route = options.routes[c.routeIndex];
     const headers = await headersFor(options.personas[c.persona]);
     for (const [k, v] of Object.entries(route?.headers ?? {})) if (!headers.has(k)) headers.set(k, v);
+    const withoutProxy = c.pass === 'without-proxy';
+    if (withoutProxy) headers.set(MATRIX_REQUEST_HEADER, MATRIX_HANDLER_PASS_VALUE);
     let body: string | undefined;
     if (route?.body !== undefined && c.method !== 'GET' && c.method !== 'HEAD') {
       body = JSON.stringify(route.body);
       if (!headers.has('content-type')) headers.set('content-type', 'application/json');
     }
+    const send = withoutProxy ? (options.handlerRequest ?? options.request) : options.request;
     try {
-      const response = await options.request(
+      const response = await send(
         new Request(c.url, { method: c.method, headers, ...(body !== undefined && { body }), redirect: 'manual' }),
       );
-      results.push({ ...c, actual: response.status, ok: c.expected.includes(response.status) });
+      let error: string | undefined;
+      if (withoutProxy) {
+        const marker = response.headers.get(PROXY_RESPONSE_HEADER);
+        if (marker === PROXY_DENIED) error = PROXY_ANSWERED;
+        else if (!options.handlerRequest && marker !== PROXY_HANDLER_PASS) error = PROXY_NOT_CONFIRMED;
+      }
+      results.push({
+        ...c,
+        actual: response.status,
+        ok: error === undefined && c.expected.includes(response.status),
+        ...(error !== undefined && { error }),
+      });
     } catch (error) {
       results.push({ ...c, actual: null, ok: false, error: error instanceof Error ? error.message : String(error) });
     }
@@ -187,10 +319,11 @@ export async function runAuthMatrix(options: AuthMatrixOptions): Promise<MatrixR
 export function formatMatrixFailures(results: readonly MatrixResult[]): string {
   return results
     .filter((r) => !r.ok)
-    .map(
-      (r) =>
-        `x ${r.route} as ${r.persona}: expected ${r.expected.join(' or ')}, got ${r.actual ?? `an error (${r.error ?? 'unknown'})`}`,
-    )
+    .map((r) => {
+      const where = `x ${r.route} as ${r.persona} (${r.pass})`;
+      if (r.actual === null) return `${where}: expected ${r.expected.join(' or ')}, got an error (${r.error ?? 'unknown'})`;
+      return `${where}: expected ${r.expected.join(' or ')}, got ${r.actual}${r.error ? `; ${r.error}` : ''}`;
+    })
     .join('\n');
 }
 
