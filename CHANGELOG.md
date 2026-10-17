@@ -21,6 +21,10 @@ Fixes for what the first live deploy (a demo site made from [site-auth-kit-templ
 - **Breaking:** `waf.action` is retired (it set both rules); it's refused with a message naming `signInRule` and `overallRule`. The preset's own web ACL now counts sign-in attempts by default instead of blocking them; set `signInRule: 'block'` after a week of counts.
 - The sweep and `describeAwsError` moved to their own modules; `auth-kit/admin` exports them as before.
 
+### Fixed
+
+- The preset quotes the pool's sender name when it holds RFC 5322 specials (`formatSender`): unquoted, `Example Site (NC OSBM)` reads as the name "Example Site" plus a comment, which mail clients may drop. A backslash in `email.fromName` is refused.
+
 ### Documentation
 
 - The WAF sign-in rule's header match was verified live: Cognito forwards the bare operation name (`x-amzn-cognito-operation-name: InitiateAuth`). README "Count first, then block the sign-in rule"; ADR 0004 and 0013 amended.

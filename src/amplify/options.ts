@@ -328,7 +328,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   const fromAddress = (email.fromAddress ?? '').trim();
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
   const fromName = (email.fromName ?? '').trim();
-  if (!fromName || /[<>"\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " or line breaks.');
+  if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
   if (email.replyTo !== undefined && !EMAIL_RE.test(email.replyTo.trim())) {
     fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
   }

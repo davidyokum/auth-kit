@@ -22,7 +22,7 @@
  * ```
  */
 export { standardAuthProps, type DefineAuthProps, type StandardAuthExtras } from './props.js';
-export { applyAuthStandard, type AppliedAuthStandard, type AppliedWaf, type AuthResourceLike } from './apply.js';
+export { applyAuthStandard, formatSender, type AppliedAuthStandard, type AppliedWaf, type AuthResourceLike } from './apply.js';
 export {
   normalizeOptions,
   AuthStandardConfigError,
