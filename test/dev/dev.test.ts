@@ -109,7 +109,7 @@ describe('personas', () => {
 
   it('rejects real-looking addresses, duplicates, missing roles, and admin roles hidden in appRoles', () => {
     const base = defaultPersonas();
-    expect(() => parsePersonas(base.map((p, i) => (i === 0 ? { ...p, email: 'owner@gmail.com' } : p)))).toThrow(/\.test/);
+    expect(() => parsePersonas(base.map((p, i) => (i === 0 ? { ...p, email: 'owner@example.com' } : p)))).toThrow(/\.test/);
     expect(() => parsePersonas([...base, { role: 'admin', email: 'admin2@personas.test' }])).toThrow(/second "admin"/);
     expect(() => parsePersonas(base.slice(1))).toThrow(/no "superadmin" persona/);
     expect(() => parsePersonas(base.map((p, i) => (i === 4 ? { ...p, appRoles: ['admin'] } : p)))).toThrow(/can't include admin roles/);
