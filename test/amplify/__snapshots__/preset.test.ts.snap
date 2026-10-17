@@ -339,21 +339,8 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
   "authUserPoolAppClient77860A56": {
     "Properties": {
       "AccessTokenValidity": 60,
-      "AllowedOAuthFlows": [
-        "code",
-      ],
-      "AllowedOAuthFlowsUserPoolClient": true,
-      "AllowedOAuthScopes": [
-        "profile",
-        "phone",
-        "email",
-        "openid",
-        "aws.cognito.signin.user.admin",
-      ],
+      "AllowedOAuthFlowsUserPoolClient": false,
       "AuthSessionValidity": 3,
-      "CallbackURLs": [
-        "https://example.com",
-      ],
       "EnableTokenRevocation": true,
       "ExplicitAuthFlows": [
         "ALLOW_USER_AUTH",
