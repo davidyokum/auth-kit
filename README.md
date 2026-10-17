@@ -25,7 +25,7 @@ From a GitHub tag (the package isn't on npm):
 npm i github:davidyokum/auth-kit#v0.1.0-alpha
 ```
 
-npm builds the package on install (its `prepare` script), so the first install takes a minute or two longer than a registry package.
+npm builds the package on install (its `prepare` script installs the build tools and runs the build), which adds about a minute compared with a registry package.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react`.
 
