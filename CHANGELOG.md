@@ -11,11 +11,16 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 - `auth-kit/dev/menu`: `PersonaMenu`, the dev-only "Sign in as…" menu.
 - `auth-kit/ribbon`: `EnvironmentRibbon`, `ViewAsBanner`, `environmentMetadata`, `viewAsMetadata`, `resolveEnvironment` (safe in production builds).
 - The `auth-kit` command (`bin`).
+- `auth-kit/admin`: `createPeopleActions` (list, invite, resend, change role, disable, re-enable, sign out everywhere, delete, invite expiry, Activity, FormData adapters), each checked live and guarded, with step-up for grants and deletes; `createDynamoAuditLog` and `createMemoryAuditLog` (append-only: conditional `PutItem` and `Query` only); `runAudited` and `recordChange` (intent → calls → result); `createInviteExpirySweep`; `createSesInviteMailer`; a Cognito quota limiter with backoff; IAM policy builders.
+- `auth-kit/admin`: owners may make owners, but each owner grant needs a recent sign-in and alerts every owner (`ownerAlerts`, default the SES mailer's `ownerGranted`); with no notifier it's refused, and if the alert fails the grant is undone.
+- `auth-kit/admin/ui`: `PeopleTable`, `InviteForm`, `RoleChangeDialog`, `ActivityLog`, `LostPasskeyGuide`.
+- `auth-kit/admin/cdk`: `AuditLogTable` (deletion protection, point-in-time recovery, stream, a resource policy denying item edits, optional tamper alerts).
 
 ### Changed
 
 - `auth-kit/client`: the phase-1 stubs are replaced. `SignInScreen` is now `SignIn`, `AuthenticatorEnrollmentGate` is `TOTPEnrollmentGate`, sign-in functions return a `SignInStep`, and `NotImplementedError` is no longer exported from this subpath.
 - `DEV_POLICY.route` is `/api/dev/sign-in`. `personas.json` entries use `key`/`email`/`groups` instead of `role`/`appRoles`. `checkProductionBuild` returns a result instead of rejecting. `auth-kit/dev` gains a `default` export condition so `next.config.ts` can load it.
+- `auth-kit/admin`: `checkPeopleAction` matches role names exactly against the known set, treats any owner count that isn't a whole number ≥ 0 as a refusal, and checks the target's state; `inviteStatus` understands the admin pool's temporary-password invites and treats an unreadable creation date as expired.
 
 ### Fixed
 

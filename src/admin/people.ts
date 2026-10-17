@@ -1,0 +1,1286 @@
+import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
+import type { AuthUser, ServerAuth } from '../server/auth.js';
+import { nextHeadersContext } from '../server/context.js';
+import {
+  AuthUnavailableError,
+  ForbiddenError,
+  MfaEnrollmentRequiredError,
+  NotFoundError,
+  StepUpRequiredError,
+  UnauthenticatedError,
+} from '../server/errors.js';
+import { ADMIN_ROLE_RANK, INVITE_EXPIRY_DAYS, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
+import { type AuditLogStore, type AuditedRun, runAudited } from './audit.js';
+import { CognitoAdmin, type CognitoPerson } from './cognito-admin.js';
+import { peopleActionDetails, roleLabel } from './copy.js';
+import {
+  type GuardrailResult,
+  type InviteMode,
+  type InviteStatus,
+  type PeopleAction,
+  PEOPLE_ACTION_CAPABILITY,
+  checkPeopleAction,
+  highestAdminRole,
+  inviteExpiresAt,
+  inviteStatus,
+  isKnownRole,
+  roleRank,
+} from './guardrails.js';
+import type { InviteMailer, OwnerAlertNotifier } from './mailer.js';
+import { ADMIN_POLICY } from './policy.js';
+import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
+import {
+  type ActionResult,
+  type ActivityPage,
+  type AuditActor,
+  type AuditEvent,
+  type AuditLogQuery,
+  type AuditRequestContext,
+  type ChangeRoleInput,
+  type DeleteUserInput,
+  type FormAction,
+  type InviteInput,
+  MEMBER_ROLE,
+  PEOPLE_FORM_FIELDS,
+  type PeopleList,
+  type PersonRow,
+  type TargetInput,
+} from './types.js';
+
+/** The audit `action` each People action writes. */
+export const PEOPLE_AUDIT_ACTIONS = {
+  invite: 'people.invite',
+  resend: 'people.resend',
+  changeRole: 'people.changeRole',
+  disable: 'people.disable',
+  enable: 'people.enable',
+  signOutEverywhere: 'people.signOutEverywhere',
+  delete: 'people.delete',
+  expireInvite: 'people.expireInvite',
+} as const;
+
+export interface PeopleAdminConfig<G extends string = string, C extends string = string> {
+  /** The app's server auth. Every action re-reads the acting person's status and groups live. */
+  auth: ServerAuth<G, C>;
+  auditLog: AuditLogStore;
+  siteName: string;
+  /** Absolute sign-in URL used in invite emails. */
+  signInUrl: string;
+  /** Default `emailed-code` (everyday pools). The Tier 3 admin pool uses `temporary-password`. */
+  inviteMode?: InviteMode;
+  /**
+   * Sends the branded invite. Required in `emailed-code` mode. `createSesInviteMailer` also sends the
+   * owner-grant alert, so it serves as `ownerAlerts` too.
+   */
+  mailer?: InviteMailer & Partial<OwnerAlertNotifier>;
+  /**
+   * Alerts every owner when someone is made an owner. Granting the owner role requires it: with no
+   * notifier the grant is refused, and if the alert fails the grant is undone. Default: the mailer's
+   * `ownerGranted` (SES, from the site's sender) when it has one.
+   */
+  ownerAlerts?: OwnerAlertNotifier;
+  /**
+   * Email domains invites normally go to. An invite outside them needs `confirmOutsideDomain`,
+   * because an invite to a mistyped address is a live account for whoever owns that inbox.
+   */
+  inviteDomains?: readonly string[];
+  /** Days a disabled account waits before an owner can delete it. Default 90; 0 turns the wait off. */
+  deleteRetentionDays?: number;
+  /**
+   * Removes the person's per-record memberships in the app's own database when they're disabled
+   * (reviewers of a report, members of a team). Its return value is logged as part of `after`.
+   */
+  removeRecordMemberships?: (person: { sub: string; username: string; email: string }) => Promise<unknown>;
+  /**
+   * Called after each completed change's result row is written: grants and removals should alert a
+   * named person (03 §2). Failures are reported to `onError`, never to the admin.
+   */
+  onChange?: (event: AuditEvent) => void | Promise<void>;
+  /** Errors the actions handle without failing (a refused row or an alert that couldn't be written). */
+  onError?: (error: unknown, context: string) => void;
+  /** Inject a Cognito client (tests). Default: one for the pool's region, with retries left to auth-kit. */
+  cognito?: CognitoIdentityProviderClient;
+  quota?: QuotaLimiterOptions;
+  /** Where the audit log's request context comes from. Default: Next's `headers()`. */
+  requestContext?: () => Promise<AuditRequestContext>;
+  /** The People list stops here (and says so). Default 5000. */
+  maxPeople?: number;
+  now?: () => number;
+  sleep?: Sleep;
+}
+
+export interface SweepResult {
+  /** Subs of invites disabled by this run. */
+  disabled: string[];
+  /** Invites that were due but couldn't be disabled (and why). */
+  failed: { sub: string; error: string }[];
+  /** How many accounts were checked. */
+  checked: number;
+  truncated: boolean;
+}
+
+export interface PeopleActions {
+  /** Everyone, with live status and groups: a ListUsers snapshot joined with ListUsersInGroup. */
+  listPeople(): Promise<PeopleList>;
+  /** AdminCreateUser with no password and no `email_verified`; AdminAddUserToGroup; the invite email. */
+  invite(input: InviteInput): Promise<ActionResult>;
+  /** Sends the invite again. Never resets an account; only for an invite nobody has used. */
+  resend(input: TargetInput): Promise<ActionResult>;
+  /** AdminRemoveUserFromGroup / AdminAddUserToGroup, with a reason; promotions need a recent sign-in. */
+  changeRole(input: ChangeRoleInput): Promise<ActionResult>;
+  /** AdminDisableUser, then removes admin roles and record memberships. */
+  disable(input: TargetInput): Promise<ActionResult>;
+  /** AdminEnableUser. Old sessions stay ended; access is member-only until a role is granted again. */
+  enable(input: TargetInput): Promise<ActionResult>;
+  /** AdminUserGlobalSignOut. Not removal. */
+  signOutEverywhere(input: TargetInput): Promise<ActionResult>;
+  /** AdminDeleteUser: owners only, after disabling and the retention period, with the address typed out. */
+  deleteUser(input: DeleteUserInput): Promise<ActionResult>;
+  /** Disables unaccepted invites older than 7 days, as the acting admin. */
+  expireStaleInvites(): Promise<SweepResult | { error: ActionResult }>;
+  /** The Activity page: merged audit entries, newest first. Needs `audit.read`. */
+  listActivity(query?: AuditLogQuery): Promise<ActivityPage>;
+  /** The same actions taking FormData, for `useActionState` and `auth-kit/admin/ui`. */
+  readonly forms: PeopleFormActions;
+}
+
+export interface PeopleFormActions {
+  invite: FormAction;
+  resend: FormAction;
+  changeRole: FormAction;
+  disable: FormAction;
+  enable: FormAction;
+  signOutEverywhere: FormAction;
+  deleteUser: FormAction;
+}
+
+// ---- Input checks (server actions receive untrusted input) -----------------------------------
+
+const SUB_RE = /^[A-Za-z0-9-]{1,128}$/;
+const EMAIL_RE = /^[^\s@"\\<>(),;:[\]]+@[^\s@"\\<>(),;:[\]]+\.[^\s@"\\<>(),;:[\]]+$/;
+
+class InputError extends Error {}
+
+function record(input: unknown): Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new InputError('Expected an object.');
+  return input as Record<string, unknown>;
+}
+
+/** Trims and drops control characters. */
+function text(value: unknown, field: string, max: number): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value !== 'string') throw new InputError(`${field} must be text.`);
+  const clean = [...value]
+    .filter((ch) => {
+      const c = ch.charCodeAt(0);
+      return c >= 32 && c !== 127;
+    })
+    .join('')
+    .trim();
+  if (clean.length > max) throw new InputError(`${field} is too long (at most ${max} characters).`);
+  return clean === '' ? undefined : clean;
+}
+
+function subOf(value: unknown): string {
+  if (typeof value !== 'string' || !SUB_RE.test(value)) throw new InputError('That person ID is invalid.');
+  return value;
+}
+
+function emailOf(value: unknown): string {
+  const email = text(value, 'Email', 254)?.toLowerCase();
+  if (!email || !EMAIL_RE.test(email)) throw new InputError('Enter a full email address.');
+  return email;
+}
+
+const isStandardGroup = (role: string): role is StandardGroup => (STANDARD_GROUPS as readonly string[]).includes(role);
+
+// ---- Results ------------------------------------------------------------------------------------
+
+type Fail = Extract<ActionResult, { ok: false }>;
+
+function fail(code: Fail['code'], error: string, extra: Partial<Omit<Fail, 'ok' | 'code' | 'error'>> = {}): Fail {
+  return { ok: false, code, error, changed: 'nothing', ...extra };
+}
+
+function authFailure(error: unknown): Fail | null {
+  if (error instanceof StepUpRequiredError) {
+    return fail('step_up_required', 'Please sign in again to confirm this action.', { maxAgeSeconds: error.maxAgeSeconds });
+  }
+  if (error instanceof MfaEnrollmentRequiredError) return fail('forbidden', error.message);
+  if (error instanceof UnauthenticatedError) return fail('unauthenticated', error.message);
+  if (error instanceof ForbiddenError) return fail('forbidden', error.message);
+  if (error instanceof NotFoundError) return fail('not_found', error.message);
+  if (error instanceof AuthUnavailableError) return fail('unavailable', error.message);
+  return null;
+}
+
+function errorName(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'name' in error ? String((error).name) : 'Error';
+}
+
+/** Says why AWS refused, in words an admin can act on. Never a stack trace. */
+export function describeAwsError(error: unknown): string {
+  const name = errorName(error);
+  switch (name) {
+    case 'TooManyRequestsException':
+    case 'ThrottlingException':
+      return 'Cognito is busy: its request quota is shared by every app in this AWS account. Try again in a few seconds.';
+    case 'UserNotFoundException':
+      return 'That person no longer exists in Cognito.';
+    case 'UsernameExistsException':
+      return 'That address already has an account.';
+    case 'AccessDeniedException':
+    case 'AccessDenied':
+      return "The server's AWS role isn't allowed to make this call (check its IAM policy).";
+    case 'NotAuthorizedException':
+      return "Cognito refused the call: the server's role isn't allowed, or the account's state doesn't allow it.";
+    case 'UnsupportedUserStateException':
+      return "Cognito says this account's state doesn't allow that.";
+    case 'LimitExceededException':
+      return 'Cognito refused the call: a limit was reached (a person can be in at most 100 groups).';
+    case 'ResourceNotFoundException':
+      return 'Cognito couldn’t find the user pool or group (check the pool ID and that the group exists).';
+    case 'MessageRejected':
+    case 'MailFromDomainNotVerifiedException':
+    case 'AccountSuspendedException':
+    case 'SendingPausedException':
+      return `SES refused the email (${name}).`;
+    default:
+      return `AWS couldn't complete the call (${name}).`;
+  }
+}
+
+class OwnerAlertFailedError extends Error {
+  constructor(cause: unknown, undone: boolean) {
+    super(
+      undone
+        ? `Couldn't alert the owners (${describeAwsError(cause)}), so the owner grant was undone. Nothing changed; try again.`
+        : `Couldn't alert the owners (${describeAwsError(cause)}), and undoing the owner grant failed too: check this person's role now. The audit log shows each call.`,
+      { cause },
+    );
+    this.name = 'OwnerAlertFailedError';
+  }
+}
+
+class InviteMisconfiguredError extends Error {
+  constructor() {
+    super(
+      'This pool gave the new account a password, so it doesn’t offer emailed codes: a no-password invite can’t work here. Use inviteMode "temporary-password" (the admin pool) or turn on emailed codes.',
+    );
+    this.name = 'InviteMisconfiguredError';
+  }
+}
+
+// ---- The actions --------------------------------------------------------------------------------
+
+interface Target {
+  person: CognitoPerson;
+  groups: string[];
+  invite: InviteStatus;
+}
+
+interface Acting<C extends string> {
+  user: AuthUser<C>;
+  actor: AuditActor;
+  request: AuditRequestContext;
+}
+
+async function defaultRequestContext(): Promise<AuditRequestContext> {
+  try {
+    const { headers } = await nextHeadersContext();
+    const ip = headers.get('x-forwarded-for') ?? headers.get('x-real-ip') ?? undefined;
+    const userAgent = headers.get('user-agent') ?? undefined;
+    const requestId = headers.get('x-amzn-trace-id') ?? headers.get('x-request-id') ?? undefined;
+    return { ...(ip && { ip }), ...(userAgent && { userAgent }), ...(requestId && { requestId }) };
+  } catch {
+    return {};
+  }
+}
+
+function adminGroupsOf(groups: readonly string[]): StandardGroup[] {
+  return groups.filter(isStandardGroup).sort((a, b) => ADMIN_ROLE_RANK[b] - ADMIN_ROLE_RANK[a]);
+}
+
+function sweepFor(deps: {
+  cognito: CognitoAdmin;
+  auditLog: AuditLogStore;
+  mode: InviteMode;
+  now: () => number;
+  maxPeople: number;
+  sleep?: Sleep;
+}) {
+  return async (actor: AuditActor, request: AuditRequestContext): Promise<SweepResult> => {
+    const { users, truncated } = await deps.cognito.listUsers(deps.maxPeople);
+    const today = new Date(deps.now());
+    const due = users.filter((u) => inviteStatus(u, today, { mode: deps.mode }) === 'expired');
+    const result: SweepResult = { disabled: [], failed: [], checked: users.length, truncated };
+    for (const person of due) {
+      const groups = adminGroupsOf(await deps.cognito.groupsOf(person.username).catch(() => [] as string[]));
+      const run = await runAudited(
+        deps.auditLog,
+        {
+          intent: {
+            actor,
+            action: PEOPLE_AUDIT_ACTIONS.expireInvite,
+            target: { sub: person.sub, email: person.email },
+            before: { enabled: true, invite: 'expired', createdAt: person.createdAt.toISOString(), groups },
+            after: { enabled: false, groups: [] },
+            reason: `Invite unused for ${INVITE_EXPIRY_DAYS} days`,
+            calls: ['AdminDisableUser', ...groups.map((g) => `AdminRemoveUserFromGroup ${g}`)],
+            ...(request.requestId !== undefined && { requestId: request.requestId }),
+            context: { ...(request.ip && { ip: request.ip }), ...(request.userAgent && { userAgent: request.userAgent }) },
+          },
+          run: async (steps) => {
+            await steps.call('AdminDisableUser', () => deps.cognito.disable(person.username));
+            for (const g of groups) await steps.call(`AdminRemoveUserFromGroup ${g}`, () => deps.cognito.removeFromGroup(person.username, g));
+            return { value: undefined };
+          },
+        },
+        deps.sleep ? { sleep: deps.sleep } : {},
+      );
+      if (run.kind === 'done') result.disabled.push(person.sub);
+      else if (run.kind === 'failed' && run.changed) result.disabled.push(person.sub);
+      if (run.kind === 'not-started') result.failed.push({ sub: person.sub, error: "Couldn't write the audit log; not disabled." });
+      else if (run.kind === 'failed') result.failed.push({ sub: person.sub, error: describeAwsError(run.error) });
+    }
+    return result;
+  };
+}
+
+/**
+ * The People page's server actions. Create once (in a server-only module) and call from your own
+ * `'use server'` file:
+ *
+ * ```ts
+ * // lib/admin.ts
+ * export const people = createPeopleActions({ auth, auditLog, mailer, siteName: 'Example Reports', signInUrl: 'https://reports.example.org/sign-in' });
+ *
+ * // app/admin/people/actions.ts
+ * 'use server';
+ * import { people } from '@/lib/admin';
+ * export async function invite(previous: ActionResult | null, data: FormData) { return people.forms.invite(previous, data); }
+ * ```
+ *
+ * Every action, in order: `requireCan(<capability>, { live: true })` (status and groups re-read from
+ * Cognito); input checks; the target re-read from Cognito; `checkPeopleAction` with the live owner
+ * count; a recent sign-in for promotions and deletions; then the audit intent row, the Cognito calls,
+ * and the result row (`runAudited`). A refusal is logged too.
+ */
+export function createPeopleActions<G extends string, C extends string>(config: PeopleAdminConfig<G, C>): PeopleActions {
+  const { auth, auditLog } = config;
+  const mode: InviteMode = config.inviteMode ?? 'emailed-code';
+  if (mode === 'emailed-code' && !config.mailer) {
+    throw new Error('auth-kit: emailed-code invites need a mailer (Cognito’s own invite is suppressed). See createSesInviteMailer.');
+  }
+  if (!config.siteName) throw new Error('auth-kit: createPeopleActions needs a siteName.');
+  let signInUrl: URL;
+  try {
+    signInUrl = new URL(config.signInUrl);
+  } catch {
+    throw new Error('auth-kit: signInUrl must be an absolute URL.');
+  }
+  const localHost = signInUrl.hostname === 'localhost' || signInUrl.hostname.endsWith('.localhost') || signInUrl.hostname === '127.0.0.1';
+  if (signInUrl.protocol !== 'https:' && !(signInUrl.protocol === 'http:' && localHost)) {
+    throw new Error('auth-kit: signInUrl must use https (http only for localhost).');
+  }
+  const now = config.now ?? Date.now;
+  const retentionDays = config.deleteRetentionDays ?? ADMIN_POLICY.deleteRetentionDays;
+  const maxPeople = config.maxPeople ?? ADMIN_POLICY.maxPeople;
+  const inviteDomains = (config.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
+  const details = peopleActionDetails(mode);
+  const ownerNotifier: OwnerAlertNotifier | undefined =
+    config.ownerAlerts ?? (typeof config.mailer?.ownerGranted === 'function' ? (config.mailer as OwnerAlertNotifier) : undefined);
+  const report = (error: unknown, context: string) => {
+    try {
+      config.onError?.(error, context);
+    } catch {
+      // A broken error hook must not break an action.
+    }
+  };
+
+  let client = config.cognito;
+  let admin: CognitoAdmin | undefined;
+  const limiter = createQuotaLimiter({ ...(config.sleep !== undefined && { sleep: config.sleep }), ...config.quota });
+  const cognito = (): CognitoAdmin =>
+    (admin ??= new CognitoAdmin(
+      (client ??= new CognitoIdentityProviderClient({ region: auth.pool.region, maxAttempts: 1 })),
+      auth.pool.userPoolId,
+      limiter,
+    ));
+  const sweep = () =>
+    sweepFor({ cognito: cognito(), auditLog, mode, now, maxPeople, ...(config.sleep !== undefined && { sleep: config.sleep }) });
+
+  const groupsKnown = (): string[] => [...new Set<string>([...STANDARD_GROUPS, ...auth.capabilities.groups])];
+  const statusOf = (p: CognitoPerson): InviteStatus =>
+    inviteStatus(p, new Date(now()), { mode, warnDays: ADMIN_POLICY.inviteWarnDays });
+
+  async function acting(capability: string): Promise<Acting<C>> {
+    const user = await auth.requireCan(capability as C, { live: true });
+    const request: AuditRequestContext = await (config.requestContext ?? defaultRequestContext)().catch((): AuditRequestContext => ({}));
+    return {
+      user,
+      actor: { sub: user.sub, ...(user.profile?.email !== undefined && { email: user.profile.email }) },
+      request: { ...request, requestId: request.requestId ?? globalThis.crypto.randomUUID() },
+    };
+  }
+
+  const contextOf = (request: AuditRequestContext) => ({
+    ...(request.requestId !== undefined && { requestId: request.requestId }),
+    ...((request.ip ?? request.userAgent) !== undefined && {
+      context: { ...(request.ip !== undefined && { ip: request.ip }), ...(request.userAgent !== undefined && { userAgent: request.userAgent }) },
+    }),
+  });
+
+  /** A refusal by an authorized person: logged (best effort), never a change. */
+  async function refuse(
+    who: Acting<C>,
+    action: string,
+    target: Target | { email: string } | null,
+    guardrail: string,
+    message: string,
+    extra: { after?: unknown; reason?: string } = {},
+  ): Promise<Fail> {
+    try {
+      await auditLog.append({
+        phase: 'refused',
+        actor: who.actor,
+        action,
+        ...(target && {
+          target: 'person' in target ? { sub: target.person.sub, email: target.person.email } : { email: target.email },
+        }),
+        ...(target && 'person' in target && { before: { adminRole: highestAdminRole(target.groups), enabled: target.person.enabled } }),
+        ...(extra.after !== undefined && { after: extra.after }),
+        ...(extra.reason !== undefined && { reason: extra.reason }),
+        error: `${guardrail}: ${message}`,
+        ...contextOf(who.request),
+      });
+    } catch (error) {
+      report(error, `audit: couldn't log a refused ${action}`);
+    }
+    return fail('refused', message, { guardrail });
+  }
+
+  /** Logs a forbidden attempt when the person is at least signed in (best effort). */
+  async function logForbidden(action: string, error: unknown): Promise<void> {
+    if (!(error instanceof ForbiddenError)) return;
+    try {
+      const user = await auth.getUser();
+      if (!user) return;
+      await auditLog.append({
+        phase: 'refused',
+        actor: { sub: user.sub, ...(user.profile?.email !== undefined && { email: user.profile.email }) },
+        action,
+        error: `capability: ${error.message}`,
+      });
+    } catch (logError) {
+      report(logError, `audit: couldn't log a forbidden ${action}`);
+    }
+  }
+
+  async function loadTarget(sub: string): Promise<Target | null> {
+    const person = await cognito().findBySub(sub);
+    if (!person) return null;
+    const groups = await cognito().groupsOf(person.username);
+    return { person, groups, invite: statusOf(person) };
+  }
+
+  /** Enabled owners right now, or undefined when Cognito can't say (the guardrail treats that as "no"). */
+  async function ownerCount(): Promise<number | undefined> {
+    try {
+      return (await cognito().listGroupMembers('superadmin')).filter((p) => p.enabled).length;
+    } catch (error) {
+      report(error, 'cognito: owner count');
+      return undefined;
+    }
+  }
+
+  function guard(who: Acting<C>, action: PeopleAction, target: Target | undefined, extra: { toRole?: string; ownerCount?: number; reason?: string }): GuardrailResult {
+    return checkPeopleAction({
+      action,
+      knownRoles: groupsKnown(),
+      actor: { sub: who.user.sub, groups: who.user.groups, capabilities: who.user.capabilities },
+      ...(target && { target: { sub: target.person.sub, groups: target.groups, enabled: target.person.enabled, invite: target.invite } }),
+      ...extra,
+    });
+  }
+
+  async function notify(run: AuditedRun<unknown>): Promise<void> {
+    if (run.kind === 'not-started' || !run.result || !config.onChange) return;
+    if (run.kind === 'failed' && !run.changed) return;
+    try {
+      await config.onChange(run.result);
+    } catch (error) {
+      report(error, 'onChange');
+    }
+  }
+
+  /** Turns a run into what the screen says. */
+  async function finish<T>(
+    run: AuditedRun<T>,
+    words: { ok: (value: T) => string; partial?: (error: unknown) => string },
+    subject?: (value: T) => { sub: string; email?: string },
+  ): Promise<ActionResult> {
+    await notify(run);
+    switch (run.kind) {
+      case 'not-started':
+        report(run.error, 'audit: intent write failed');
+        return fail('audit_unavailable', "Couldn't write the audit log, so nothing was changed. Try again in a moment.");
+      case 'failed': {
+        const missing = run.result === undefined;
+        if (missing) report(run.resultError, 'audit: result write failed');
+        const why =
+          run.error instanceof InviteMisconfiguredError || run.error instanceof OwnerAlertFailedError
+            ? run.error.message
+            : run.changed && words.partial
+              ? words.partial(run.error)
+              : `${describeAwsError(run.error)} ${run.changed ? 'Part of the change was made; the audit log shows which calls succeeded.' : 'Nothing was changed.'}`;
+        return fail('failed', missing ? `${why} The audit log shows the attempt, but not its result.` : why, {
+          changed: run.changed ? 'partly' : 'nothing',
+          auditId: run.intent.id,
+        });
+      }
+      case 'done':
+        if (run.result === undefined) {
+          report(run.resultError, 'audit: result write failed');
+          return fail(
+            'audit_incomplete',
+            `${words.ok(run.value)} But its result couldn't be added to the audit log: the change is logged as attempted, with its outcome not recorded.`,
+            { changed: 'yes', auditId: run.intent.id },
+          );
+        }
+        return { ok: true, message: words.ok(run.value), auditId: run.result.id, ...(subject && { subject: subject(run.value) }) };
+    }
+  }
+
+  /** Authorize, parse, and load the target; any failure becomes an ActionResult. */
+  async function begin<P extends { sub: string }>(
+    action: PeopleAction,
+    input: unknown,
+    parse: (raw: Record<string, unknown>) => P,
+  ): Promise<{ who: Acting<C>; input: P; target: Target } | Fail> {
+    const auditAction = PEOPLE_AUDIT_ACTIONS[action];
+    let who: Acting<C>;
+    try {
+      who = await acting(PEOPLE_ACTION_CAPABILITY[action]);
+    } catch (error) {
+      await logForbidden(auditAction, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let parsed: P;
+    try {
+      parsed = parse(record(input));
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    let target: Target | null;
+    try {
+      target = await loadTarget(parsed.sub);
+    } catch (error) {
+      return fail('unavailable', `Couldn't read this person from Cognito: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    if (!target) return fail('not_found', 'That person no longer exists.');
+    return { who, input: parsed, target };
+  }
+
+  function stepUp(who: Acting<C>, needed: boolean): Fail | null {
+    if (!needed) return null;
+    try {
+      auth.requireRecentSignIn(who.user);
+      return null;
+    } catch (error) {
+      return authFailure(error) ?? fail('step_up_required', 'Please sign in again to confirm this action.');
+    }
+  }
+
+  const base = (who: Acting<C>, action: string, target: Target) => ({
+    actor: who.actor,
+    action,
+    target: { sub: target.person.sub, email: target.person.email },
+    ...contextOf(who.request),
+  });
+
+  const parseTarget = (raw: Record<string, unknown>): TargetInput => {
+    const reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+    return { sub: subOf(raw.sub), ...(reason !== undefined && { reason }) };
+  };
+
+  const who = (t: Target) => t.person.name ?? t.person.email;
+
+  // ---- owner grants ---------------------------------------------------------------------------
+  // Owners may make owners, but each grant needs a fresh sign-in and an alert to every owner.
+
+  const OWNER_ALERT_MISSING =
+    'Making someone an owner alerts every owner, and no owner alert is configured (ownerAlerts, or a mailer that sends them). Nothing changed.';
+
+  /** Reads every enabled owner (after the grant) and alerts them all; returns who was told. */
+  async function alertOwners(
+    steps: Parameters<Parameters<typeof runAudited>[1]['run']>[0],
+    who: Acting<C>,
+    grantedTo: { sub: string; email: string; name?: string },
+    via: 'changeRole' | 'invite',
+    reason: string | undefined,
+  ): Promise<string[]> {
+    const owners = (await cognito().listGroupMembers('superadmin'))
+      .filter((p) => p.enabled)
+      .map((p) => ({ sub: p.sub, email: p.email, ...(p.name !== undefined && { name: p.name }) }));
+    await steps.call(`Owner alert (${owners.length} owners)`, () =>
+      ownerNotifier!.ownerGranted({
+        siteName: config.siteName,
+        owners,
+        grantedTo,
+        grantedBy: who.actor,
+        via,
+        ...(reason !== undefined && { reason }),
+        at: new Date(now()),
+        context: who.request,
+      }),
+    );
+    return owners.map((o) => o.email);
+  }
+
+  // ---- invite ---------------------------------------------------------------------------------
+
+  async function invite(input: InviteInput): Promise<ActionResult> {
+    const auditAction = PEOPLE_AUDIT_ACTIONS.invite;
+    let acting_: Acting<C>;
+    try {
+      acting_ = await acting(PEOPLE_ACTION_CAPABILITY.invite);
+    } catch (error) {
+      await logForbidden(auditAction, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let email: string, role: string, name: string | undefined, reason: string | undefined, confirmOutside: boolean;
+    try {
+      const raw = record(input);
+      email = emailOf(raw.email);
+      // Role names are taken verbatim: no trimming or case folding (a near-miss is refused, not guessed).
+      role = typeof raw.role === 'string' ? raw.role : '';
+      if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
+      name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
+      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      confirmOutside = raw.confirmOutsideDomain === true || raw.confirmOutsideDomain === 'on' || raw.confirmOutsideDomain === 'true';
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+
+    const domain = email.slice(email.lastIndexOf('@') + 1);
+    if (inviteDomains.length > 0 && !inviteDomains.includes(domain) && !confirmOutside) {
+      return fail(
+        'refused',
+        `${email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
+        { guardrail: 'domain' },
+      );
+    }
+
+    const g = guard(acting_, 'invite', undefined, { toRole: role, ...(reason !== undefined && { reason }) });
+    if (!g.ok) return refuse(acting_, auditAction, { email }, g.code, g.reason, { after: { role }, ...(reason !== undefined && { reason }) });
+    if (roleRank(role) >= ADMIN_ROLE_RANK.admin && (reason ?? '').length < ADMIN_POLICY.reasonMinLength) {
+      return refuse(acting_, auditAction, { email }, 'reason_required', 'Inviting an admin or owner records a reason.', { after: { role } });
+    }
+
+    try {
+      if (await cognito().findByEmail(email)) {
+        return fail('refused', 'That address already has an account. Resend never resets an existing account.', { guardrail: 'exists' });
+      }
+    } catch (error) {
+      return fail('unavailable', `Couldn't check for an existing account: ${describeAwsError(error)} Nothing was changed.`);
+    }
+
+    const ownerGrant = role === 'superadmin';
+    if (ownerGrant && !ownerNotifier) return refuse(acting_, auditAction, { email }, 'owner_alert_unavailable', OWNER_ALERT_MISSING, { after: { role } });
+    const blocked = stepUp(acting_, g.requiresRecentSignIn || ownerGrant);
+    if (blocked) return blocked;
+
+    const plannedExpiry = inviteExpiresAt(new Date(now()));
+    const run = await runAudited(
+      auditLog,
+      {
+        intent: {
+          actor: acting_.actor,
+          action: auditAction,
+          target: { email },
+          before: null,
+          after: { email, ...(name !== undefined && { name }), role, status: 'invited', expiresAt: plannedExpiry.toISOString() },
+          ...(reason !== undefined && { reason }),
+          calls: [...details.invite.calls, ...(ownerGrant ? ['Owner alert (every owner)'] : [])],
+          ...contextOf(acting_.request),
+        },
+        run: async (steps) => {
+          const created = await steps.call('AdminCreateUser', () =>
+            cognito().createInvitedUser({ email, ...(name !== undefined && { name }), mode }),
+          );
+          if (mode === 'emailed-code' && created.status === 'FORCE_CHANGE_PASSWORD') {
+            await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+            throw new InviteMisconfiguredError();
+          }
+          if (role !== MEMBER_ROLE) {
+            try {
+              await steps.call(`AdminAddUserToGroup ${role}`, () => cognito().addToGroup(created.username, role));
+            } catch (error) {
+              // A half-made invite is worse than none: it was created seconds ago and never used.
+              await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+              throw error;
+            }
+          }
+          let ownerAlert: string[] | undefined;
+          if (ownerGrant) {
+            try {
+              ownerAlert = await alertOwners(steps, acting_, { sub: created.sub, email, ...(name !== undefined && { name }) }, 'invite', reason);
+            } catch (error) {
+              const undone = await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+              throw new OwnerAlertFailedError(error, undone);
+            }
+          }
+          const expiresAt = inviteExpiresAt(created.createdAt);
+          if (mode === 'emailed-code') {
+            await steps.call('SES SendEmail', () =>
+              config.mailer!.sendInvite({
+                email,
+                ...(name !== undefined && { name }),
+                siteName: config.siteName,
+                signInUrl: signInUrl.toString(),
+                expiresAt,
+              }),
+            );
+          }
+          return {
+            value: { created, expiresAt },
+            target: { sub: created.sub, email },
+            after: {
+              email,
+              ...(name !== undefined && { name }),
+              role,
+              status: 'invited',
+              invitedAt: created.createdAt.toISOString(),
+              expiresAt: expiresAt.toISOString(),
+              ...(ownerAlert !== undefined && { ownerAlert: { sentTo: ownerAlert } }),
+            },
+          };
+        },
+      },
+      config.sleep ? { sleep: config.sleep } : {},
+    );
+    return finish(
+      run,
+      {
+        ok: ({ expiresAt }) =>
+          mode === 'emailed-code'
+            ? `Invite sent to ${email}. They can sign in now with a code sent to that address, then save a passkey. The invite expires on ${expiresAt.toISOString().slice(0, 10)} if it isn't used.`
+            : `Invite sent to ${email}. Cognito emailed them a one-time password. The invite expires on ${expiresAt.toISOString().slice(0, 10)} if it isn't used.`,
+        partial: (error) =>
+          `${email}'s account was created as ${roleLabel(role)}, but the invite email didn't send (${describeAwsError(error)}). Use Resend.`,
+      },
+      ({ created }) => ({ sub: created.sub, email }),
+    );
+  }
+
+  // ---- resend ---------------------------------------------------------------------------------
+
+  async function resend(input: TargetInput): Promise<ActionResult> {
+    const start = await begin('resend', input, parseTarget);
+    if ('ok' in start) return start;
+    const { who: w, target } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.resend;
+    const g = guard(w, 'resend', target, {});
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason);
+    const expiresAt = inviteExpiresAt(target.person.createdAt);
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        after: { expiresAt: expiresAt.toISOString() },
+        calls: [...details.resend.calls],
+        ...(start.input.reason !== undefined && { reason: start.input.reason }),
+      },
+      run: async (steps) => {
+        if (mode === 'emailed-code') {
+          await steps.call('SES SendEmail', () =>
+            config.mailer!.sendInvite({
+              email: target.person.email,
+              ...(target.person.name !== undefined && { name: target.person.name }),
+              siteName: config.siteName,
+              signInUrl: signInUrl.toString(),
+              expiresAt,
+            }),
+          );
+        } else {
+          await steps.call('AdminCreateUser RESEND', () => cognito().resendTemporaryPassword(target.person.username));
+        }
+        return { value: undefined };
+      },
+    });
+    return finish(run, {
+      ok: () =>
+        mode === 'emailed-code'
+          ? `Invite resent to ${target.person.email}. Nothing about their account changed.`
+          : `A new one-time password went to ${target.person.email}; the old one no longer works.`,
+    });
+  }
+
+  // ---- change role ----------------------------------------------------------------------------
+
+  async function changeRole(input: ChangeRoleInput): Promise<ActionResult> {
+    const start = await begin('changeRole', input, (raw) => {
+      // Verbatim, like invite: "Owner", " admin", and "superAdmin" are refused.
+      const toRole = typeof raw.toRole === 'string' ? raw.toRole : '';
+      if (toRole !== MEMBER_ROLE && !isStandardGroup(toRole)) throw new InputError('Choose an admin role, or Member for none.');
+      const fromRole = typeof raw.fromRole === 'string' && raw.fromRole !== '' ? raw.fromRole : undefined;
+      if (fromRole !== undefined && fromRole !== MEMBER_ROLE && !isStandardGroup(fromRole)) throw new InputError('That current role is invalid.');
+      const reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength) ?? '';
+      return {
+        sub: subOf(raw.sub),
+        toRole: toRole,
+        ...(fromRole !== undefined && { fromRole: fromRole }),
+        reason,
+      };
+    });
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.changeRole;
+    const current = adminGroupsOf(target.groups);
+    const currentRole = current[0] ?? MEMBER_ROLE;
+    if (inp.fromRole !== undefined && inp.fromRole !== currentRole) {
+      return fail('stale', `Their role changed to ${roleLabel(currentRole)} since this page loaded. Reload and try again.`);
+    }
+    const wanted: StandardGroup[] = isStandardGroup(inp.toRole) ? [inp.toRole] : [];
+    if (current.length === wanted.length && current.every((g, i) => g === wanted[i])) {
+      return fail('refused', `That's already their role (${roleLabel(currentRole)}).`, { guardrail: 'state' });
+    }
+    const removesOwner = target.groups.includes('superadmin') && target.person.enabled && inp.toRole !== 'superadmin';
+    const owners = removesOwner ? await ownerCount() : undefined;
+    const g = guard(w, 'changeRole', target, { toRole: inp.toRole, reason: inp.reason, ...(owners !== undefined && { ownerCount: owners }) });
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, { after: { adminRole: inp.toRole === MEMBER_ROLE ? null : inp.toRole }, reason: inp.reason });
+    const ownerGrant = inp.toRole === 'superadmin';
+    if (ownerGrant && !ownerNotifier) return refuse(w, auditAction, target, 'owner_alert_unavailable', OWNER_ALERT_MISSING, { reason: inp.reason });
+    const blocked = stepUp(w, g.requiresRecentSignIn || ownerGrant);
+    if (blocked) return blocked;
+
+    const remove = current.filter((g2) => !wanted.includes(g2));
+    const add = wanted.filter((g2) => !target.groups.includes(g2));
+    const appRoles = target.groups.filter((g2) => !isStandardGroup(g2));
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        before: { adminRole: current[0] ?? null, groups: target.groups },
+        after: { adminRole: wanted[0] ?? null, groups: [...wanted, ...appRoles] },
+        reason: inp.reason,
+        calls: [
+          ...remove.map((r) => `AdminRemoveUserFromGroup ${r}`),
+          ...add.map((a) => `AdminAddUserToGroup ${a}`),
+          ...(ownerGrant ? ['Owner alert (every owner)'] : []),
+        ],
+      },
+      // Removing first: if a call fails halfway, they hold less access than before, never more.
+      run: async (steps) => {
+        for (const r of remove) await steps.call(`AdminRemoveUserFromGroup ${r}`, () => cognito().removeFromGroup(target.person.username, r));
+        for (const a of add) await steps.call(`AdminAddUserToGroup ${a}`, () => cognito().addToGroup(target.person.username, a));
+        if (!ownerGrant) return { value: undefined };
+        try {
+          const sentTo = await alertOwners(
+            steps,
+            w,
+            { sub: target.person.sub, email: target.person.email, ...(target.person.name !== undefined && { name: target.person.name }) },
+            'changeRole',
+            inp.reason,
+          );
+          return { value: undefined, after: { adminRole: 'superadmin', groups: [...wanted, ...appRoles], ownerAlert: { sentTo } } };
+        } catch (error) {
+          // An owner grant nobody was told about doesn't stand: put their old roles back.
+          let undone = true;
+          for (const a of add) {
+            if (!(await steps.rollback(`AdminRemoveUserFromGroup ${a}`, () => cognito().removeFromGroup(target.person.username, a)))) undone = false;
+          }
+          for (const r of remove) {
+            if (!(await steps.rollback(`AdminAddUserToGroup ${r}`, () => cognito().addToGroup(target.person.username, r)))) undone = false;
+          }
+          throw new OwnerAlertFailedError(error, undone);
+        }
+      },
+    });
+    // This server's admin pages see the change at once; other instances within their ~60 s live cache.
+    auth.invalidate({ username: target.person.username, tokenId: '' });
+    return finish(run, {
+      ok: () =>
+        `${who(target)} is now ${roleLabel(inp.toRole)}. ${details.changeRole.says}${ownerGrant ? ' Every owner was alerted.' : ''}`,
+      partial: (error) =>
+        `${describeAwsError(error)} Part of the change was made: ${who(target)} may now hold fewer roles than before (removals go first, so never more). Check their role and try again.`,
+    });
+  }
+
+  // ---- disable / enable / sign out ------------------------------------------------------------
+
+  async function disable(input: TargetInput): Promise<ActionResult> {
+    const start = await begin('disable', input, parseTarget);
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.disable;
+    const isOwner = target.groups.includes('superadmin') && target.person.enabled;
+    const owners = isOwner ? await ownerCount() : undefined;
+    const g = guard(w, 'disable', target, owners !== undefined ? { ownerCount: owners } : {});
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, inp.reason !== undefined ? { reason: inp.reason } : {});
+
+    const remove = adminGroupsOf(target.groups);
+    const appRoles = target.groups.filter((g2) => !isStandardGroup(g2));
+    const revokingInvite = target.invite === 'pending' || target.invite === 'expiring-soon' || target.invite === 'expired';
+    const hook = config.removeRecordMemberships;
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        before: { enabled: true, adminRole: remove[0] ?? null, groups: target.groups, ...(revokingInvite && { invite: target.invite }) },
+        after: { enabled: false, adminRole: null, groups: appRoles },
+        ...(inp.reason !== undefined && { reason: inp.reason }),
+        calls: ['AdminDisableUser', ...remove.map((r) => `AdminRemoveUserFromGroup ${r}`), ...(hook ? ['App: remove record memberships'] : [])],
+      },
+      // Disable first: it's the removal step, and it stops sign-in and refresh at once.
+      run: async (steps) => {
+        await steps.call('AdminDisableUser', () => cognito().disable(target.person.username));
+        auth.invalidate({ username: target.person.username, tokenId: '' });
+        for (const r of remove) await steps.call(`AdminRemoveUserFromGroup ${r}`, () => cognito().removeFromGroup(target.person.username, r));
+        const memberships = hook
+          ? await steps.call('App: remove record memberships', () =>
+              hook({ sub: target.person.sub, username: target.person.username, email: target.person.email }),
+            )
+          : undefined;
+        return {
+          value: undefined,
+          after: { enabled: false, adminRole: null, groups: appRoles, ...(memberships !== undefined && { recordMemberships: memberships }) },
+        };
+      },
+    });
+    return finish(run, {
+      ok: () =>
+        revokingInvite
+          ? `The invite for ${target.person.email} is revoked. Nobody ever signed in with it.`
+          : `${who(target)} is disabled. ${details.disable.says}`,
+      partial: (error) =>
+        `${who(target)} is disabled (sign-in and refresh stop now), but cleaning up didn't finish: ${describeAwsError(error)} The audit log shows which steps succeeded.`,
+    });
+  }
+
+  async function enable(input: TargetInput): Promise<ActionResult> {
+    const start = await begin('enable', input, parseTarget);
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.enable;
+    const g = guard(w, 'enable', target, {});
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason);
+    if (inviteStatus({ ...target.person, enabled: true }, new Date(now()), { mode }) === 'expired') {
+      return refuse(
+        w,
+        auditAction,
+        target,
+        'state',
+        'This invite expired unused. Re-enabling it would be undone by the next expiry sweep: an owner deletes the old account, then invite them again.',
+      );
+    }
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        before: { enabled: false },
+        after: { enabled: true, adminRole: highestAdminRole(target.groups) },
+        ...(inp.reason !== undefined && { reason: inp.reason }),
+        calls: ['AdminEnableUser'],
+      },
+      run: async (steps) => {
+        await steps.call('AdminEnableUser', () => cognito().enable(target.person.username));
+        auth.invalidate({ username: target.person.username, tokenId: '' });
+        return { value: undefined };
+      },
+    });
+    return finish(run, { ok: () => `${who(target)} is re-enabled. ${details.enable.says} ${details.enable.now}` });
+  }
+
+  async function signOutEverywhere(input: TargetInput): Promise<ActionResult> {
+    const start = await begin('signOutEverywhere', input, parseTarget);
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.signOutEverywhere;
+    const g = guard(w, 'signOutEverywhere', target, {});
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason);
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        after: { refreshTokensRevoked: true },
+        ...(inp.reason !== undefined && { reason: inp.reason }),
+        calls: ['AdminUserGlobalSignOut'],
+      },
+      run: async (steps) => {
+        await steps.call('AdminUserGlobalSignOut', () => cognito().globalSignOut(target.person.username));
+        return { value: undefined };
+      },
+    });
+    return finish(run, { ok: () => `${who(target)} is signed out everywhere. ${details.signOutEverywhere.says}` });
+  }
+
+  // ---- delete ---------------------------------------------------------------------------------
+
+  /** When this account was last disabled, from the audit log (newest first). */
+  async function disabledAt(sub: string): Promise<Date | null> {
+    let cursor: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const out = await auditLog.list({ targetSub: sub, action: 'people.', limit: 100, ...(cursor !== undefined && { cursor }) });
+      for (const e of out.events) {
+        if (e.phase !== 'result' || e.outcome === 'failed') continue;
+        if (e.action === PEOPLE_AUDIT_ACTIONS.enable) return null;
+        if (e.action === PEOPLE_AUDIT_ACTIONS.disable || e.action === PEOPLE_AUDIT_ACTIONS.expireInvite) return new Date(e.at);
+      }
+      if (!out.nextCursor) return null;
+      cursor = out.nextCursor;
+    }
+    return null;
+  }
+
+  async function deleteUser(input: DeleteUserInput): Promise<ActionResult> {
+    const start = await begin('delete', input, (raw) => ({
+      sub: subOf(raw.sub),
+      reason: text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength) ?? '',
+      confirmEmail: text(raw.confirmEmail, 'Confirmation', 254) ?? '',
+    }));
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.delete;
+    if (inp.confirmEmail.toLowerCase() !== target.person.email.toLowerCase()) {
+      return fail('refused', 'Type their email address exactly to confirm.', { guardrail: 'confirm' });
+    }
+    if (inp.reason.length < ADMIN_POLICY.reasonMinLength) {
+      return fail('refused', 'Deleting an account records a reason.', { guardrail: 'reason_required' });
+    }
+    const g = guard(w, 'delete', target, { reason: inp.reason });
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, { reason: inp.reason });
+
+    // Never-used invites have nothing to retain. Anyone else waits out the retention period.
+    const neverUsed = inviteStatus({ ...target.person, enabled: true }, new Date(now()), { mode }) !== 'accepted';
+    if (retentionDays > 0 && !neverUsed) {
+      let since: Date | null;
+      try {
+        since = await disabledAt(target.person.sub);
+      } catch (error) {
+        return fail('unavailable', `Couldn't read the audit log to check the retention period: ${describeAwsError(error)} Nothing was deleted.`);
+      }
+      if (!since) {
+        return refuse(
+          w,
+          auditAction,
+          target,
+          'retention_unknown',
+          "Couldn't find when this account was disabled in the audit log (it may have been disabled outside the admin area), so the retention period can't be confirmed. Nothing was deleted.",
+          { reason: inp.reason },
+        );
+      }
+      const allowedFrom = new Date(since.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+      if (now() < allowedFrom.getTime()) {
+        return refuse(
+          w,
+          auditAction,
+          target,
+          'retention',
+          `Deleting comes after the ${retentionDays}-day retention period: this account was disabled on ${since.toISOString().slice(0, 10)}, so it can be deleted from ${allowedFrom.toISOString().slice(0, 10)}.`,
+          { reason: inp.reason },
+        );
+      }
+    }
+    const blocked = stepUp(w, true);
+    if (blocked) return blocked;
+
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        before: {
+          email: target.person.email,
+          username: target.person.username,
+          createdAt: target.person.createdAt.toISOString(),
+          enabled: false,
+          groups: target.groups,
+        },
+        after: { deleted: true },
+        reason: inp.reason,
+        calls: ['AdminDeleteUser'],
+      },
+      run: async (steps) => {
+        await steps.call('AdminDeleteUser', () => cognito().deleteUser(target.person.username));
+        auth.invalidate({ username: target.person.username, tokenId: '' });
+        return { value: undefined };
+      },
+    });
+    return finish(run, { ok: () => `${target.person.email} is deleted. ${details.delete.says} Their audit history stays.` });
+  }
+
+  // ---- lists ----------------------------------------------------------------------------------
+
+  async function listPeople(): Promise<PeopleList> {
+    try {
+      await acting(PEOPLE_ACTION_CAPABILITY.invite);
+    } catch (error) {
+      const f = authFailure(error);
+      return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
+    }
+    try {
+      const fetchedAt = new Date(now()).toISOString();
+      const { users, truncated } = await cognito().listUsers(maxPeople);
+      const memberships = new Map<string, string[]>();
+      for (const group of groupsKnown()) {
+        for (const member of await cognito().listGroupMembers(group)) {
+          const list = memberships.get(member.username) ?? [];
+          list.push(group);
+          memberships.set(member.username, list);
+        }
+      }
+      const people: PersonRow[] = users.map((u) => {
+        const groups = memberships.get(u.username) ?? [];
+        return {
+          sub: u.sub,
+          username: u.username,
+          email: u.email,
+          ...(u.name !== undefined && { name: u.name }),
+          enabled: u.enabled,
+          emailVerified: u.emailVerified,
+          status: u.status,
+          groups,
+          adminRole: highestAdminRole(groups),
+          createdAt: u.createdAt.toISOString(),
+          invite: { status: statusOf(u), expiresAt: inviteExpiresAt(u.createdAt).toISOString() },
+        };
+      });
+      people.sort((a, b) => roleRank(b.adminRole) - roleRank(a.adminRole) || a.email.localeCompare(b.email));
+      return { state: 'ok', people, fetchedAt, truncated, inviteMode: mode };
+    } catch (error) {
+      report(error, 'cognito: listPeople');
+      return {
+        state: 'unavailable',
+        reason: `Couldn't load people: ${describeAwsError(error)} This isn't a count of zero.`,
+      };
+    }
+  }
+
+  async function listActivity(query: AuditLogQuery = {}): Promise<ActivityPage> {
+    try {
+      await acting('audit.read');
+    } catch (error) {
+      const f = authFailure(error);
+      return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
+    }
+    try {
+      const q = record(query);
+      const pick = (name: keyof AuditLogQuery) => (typeof q[name] === 'string' && q[name] !== '' ? { [name]: q[name] } : {});
+      const limit = typeof q.limit === 'number' ? { limit: q.limit } : {};
+      const page = await auditLog.listActivity({
+        ...pick('actorSub'),
+        ...pick('targetSub'),
+        ...pick('targetEmail'),
+        ...pick('targetRecordId'),
+        ...pick('action'),
+        ...pick('since'),
+        ...pick('until'),
+        ...pick('cursor'),
+        ...limit,
+      });
+      return { state: 'ok', ...page };
+    } catch (error) {
+      report(error, 'audit: listActivity');
+      const invalid = error instanceof Error && error.name === 'AuditEventInvalidError';
+      return {
+        state: 'unavailable',
+        reason: invalid ? error.message.replace(/^auth-kit: /, '') : `Couldn't load the activity log: ${describeAwsError(error)}`,
+      };
+    }
+  }
+
+  async function expireStaleInvites(): Promise<SweepResult | { error: ActionResult }> {
+    let w: Acting<C>;
+    try {
+      w = await acting(PEOPLE_ACTION_CAPABILITY.disable);
+    } catch (error) {
+      return { error: authFailure(error) ?? fail('unavailable', describeAwsError(error)) };
+    }
+    try {
+      return await sweep()(w.actor, w.request);
+    } catch (error) {
+      return { error: fail('unavailable', `Couldn't list invites: ${describeAwsError(error)}`) };
+    }
+  }
+
+  // ---- FormData adapters ----------------------------------------------------------------------
+
+  const F = PEOPLE_FORM_FIELDS;
+  const field = (data: FormData, name: string): string | undefined => {
+    const v = data.get(name);
+    return typeof v === 'string' ? v : undefined;
+  };
+  const formOf = (data: unknown): FormData | null => (data instanceof FormData ? data : null);
+  const badForm = () => Promise.resolve(fail('invalid', 'Expected form data.'));
+  const targetFrom = (data: FormData) => ({ sub: field(data, F.sub), reason: field(data, F.reason) });
+
+  const forms: PeopleFormActions = {
+    invite: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return invite({
+        email: field(d, F.email) ?? '',
+        role: field(d, F.role) ?? '',
+        name: field(d, F.name),
+        reason: field(d, F.reason),
+        confirmOutsideDomain: field(d, F.confirmOutsideDomain) !== undefined,
+      });
+    },
+    resend: (_prev, data) => (formOf(data) ? resend(targetFrom(data) as TargetInput) : badForm()),
+    changeRole: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return changeRole({ sub: field(d, F.sub), toRole: field(d, F.toRole), fromRole: field(d, F.fromRole), reason: field(d, F.reason) } as ChangeRoleInput);
+    },
+    disable: (_prev, data) => (formOf(data) ? disable(targetFrom(data) as TargetInput) : badForm()),
+    enable: (_prev, data) => (formOf(data) ? enable(targetFrom(data) as TargetInput) : badForm()),
+    signOutEverywhere: (_prev, data) => (formOf(data) ? signOutEverywhere(targetFrom(data) as TargetInput) : badForm()),
+    deleteUser: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return deleteUser({ sub: field(d, F.sub), reason: field(d, F.reason), confirmEmail: field(d, F.confirmEmail) } as DeleteUserInput);
+    },
+  };
+
+  return Object.freeze({
+    listPeople,
+    invite,
+    resend,
+    changeRole,
+    disable,
+    enable,
+    signOutEverywhere,
+    deleteUser,
+    expireStaleInvites,
+    listActivity,
+    forms: Object.freeze(forms),
+  });
+}
+
+export interface InviteExpirySweepOptions {
+  userPoolId: string;
+  region?: string;
+  auditLog: AuditLogStore;
+  inviteMode?: InviteMode;
+  cognito?: CognitoIdentityProviderClient;
+  quota?: QuotaLimiterOptions;
+  maxPeople?: number;
+  now?: () => number;
+  sleep?: Sleep;
+}
+
+/**
+ * The scheduled invite-expiry sweep, for a job with no signed-in person (EventBridge Scheduler → an
+ * IAM-invoked Lambda, daily). Disables every unaccepted invite older than 7 days and removes its
+ * admin roles, logging each as `people.expireInvite` by the `system:invite-expiry` actor.
+ */
+export function createInviteExpirySweep(options: InviteExpirySweepOptions): () => Promise<SweepResult> {
+  const region = options.region ?? /^([a-z]{2}(?:-[a-z]+)+-\d+)_/.exec(options.userPoolId)?.[1];
+  if (!region) throw new Error(`auth-kit: userPoolId "${options.userPoolId}" isn't a Cognito user pool ID.`);
+  const client = options.cognito ?? new CognitoIdentityProviderClient({ region, maxAttempts: 1 });
+  const limiter = createQuotaLimiter({ ...(options.sleep !== undefined && { sleep: options.sleep }), ...options.quota });
+  const run = sweepFor({
+    cognito: new CognitoAdmin(client, options.userPoolId, limiter),
+    auditLog: options.auditLog,
+    mode: options.inviteMode ?? 'emailed-code',
+    now: options.now ?? Date.now,
+    maxPeople: options.maxPeople ?? ADMIN_POLICY.maxPeople,
+    ...(options.sleep !== undefined && { sleep: options.sleep }),
+  });
+  return () => run({ sub: 'system:invite-expiry', kind: 'system' }, { requestId: globalThis.crypto.randomUUID() });
+}

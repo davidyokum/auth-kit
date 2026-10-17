@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   checkPeopleAction,
-  createDynamoAuditLog,
-  createPeopleActions,
   grantableRoles,
   grantCeiling,
   highestAdminRole,
+  inviteExpiresAt,
   inviteStatus,
-  NotImplementedError,
+  isKnownRole,
   PEOPLE_ACTION_COPY,
   PEOPLE_ACTIONS,
+  peopleActionDetails,
+  roleRank,
   type GuardrailInput,
 } from '../../src/admin/index.js';
 
@@ -90,7 +91,10 @@ describe('grant and act only below your own level', () => {
   it('admins can manage editors, viewers, and plain members, and grant app roles', () => {
     expect(check({ action: 'disable', actor: admin, target: editor })).toMatchObject({ ok: true });
     expect(check({ action: 'changeRole', actor: admin, target: person('m', 'reviewer'), toRole: 'viewer', reason: 'joined' })).toMatchObject({ ok: true });
-    expect(check({ action: 'invite', actor: admin, toRole: 'reviewer' })).toMatchObject({ ok: true, requiresRecentSignIn: false });
+    expect(check({ action: 'invite', actor: admin, toRole: 'reviewer', knownRoles: ['reviewer'] })).toMatchObject({
+      ok: true,
+      requiresRecentSignIn: false,
+    });
   });
 
   it('owners may make owners', () => {
@@ -173,10 +177,121 @@ describe('invite status', () => {
   });
 });
 
-describe('phase-2 stubs', () => {
-  it('throw NotImplementedError and every action has on-screen copy', () => {
-    expect(() => createDynamoAuditLog({ tableName: 't' })).toThrow(NotImplementedError);
-    expect(() => createPeopleActions({} as never)).toThrow(NotImplementedError);
-    for (const action of PEOPLE_ACTIONS) expect(PEOPLE_ACTION_COPY[action]).toBeTruthy();
+describe('every action has on-screen copy and named Cognito calls', () => {
+  it.each(['emailed-code', 'temporary-password'] as const)('%s mode', (mode) => {
+    const details = peopleActionDetails(mode);
+    for (const action of PEOPLE_ACTIONS) {
+      expect(PEOPLE_ACTION_COPY[action]).toBeTruthy();
+      expect(details[action].says).toBeTruthy();
+      expect(details[action].calls.length).toBeGreaterThan(0);
+      expect(details[action].now).toBeTruthy();
+    }
+    expect(details.changeRole.later).toMatch(/60 minutes/);
+  });
+});
+
+describe('role names are matched exactly (security review)', () => {
+  it.each(['Admin', ' admin', 'admin ', 'ADMIN', 'superAdmin', 'owner', 'Owner', 'root', '', 'editor\n'])('refuses %j as a role', (role) => {
+    expect(check({ action: 'invite', actor: owner, toRole: role })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(
+      check({ action: 'changeRole', actor: owner, target: person('t', 'viewer'), toRole: role, reason: 'because' }),
+    ).toMatchObject({ ok: false, code: 'invalid' });
+  });
+
+  it('refuses unknown fromRole spellings too', () => {
+    expect(check({ action: 'changeRole', actor: owner, target: editor, toRole: 'viewer', fromRole: 'Editor', reason: 'x y z' })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+  });
+
+  it('accepts app roles only when the app names them', () => {
+    expect(check({ action: 'invite', actor: admin, toRole: 'reviewer' })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(check({ action: 'invite', actor: admin, toRole: 'Reviewer', knownRoles: ['reviewer'] })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(check({ action: 'invite', actor: admin, toRole: 'member' })).toMatchObject({ ok: true, requiresRecentSignIn: false });
+  });
+
+  it('refuses non-string roles and malformed people', () => {
+    expect(check({ action: 'invite', actor: owner, toRole: 4 as never })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(check({ action: 'invite', actor: owner, toRole: ['admin'] as never })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(check({ action: 'disable', actor: { sub: 'o', groups: 'superadmin' as never }, target: editor })).toMatchObject({
+      ok: false,
+      code: 'invalid',
+    });
+    expect(check({ action: 'disable', actor: owner, target: { sub: '', groups: [] } })).toMatchObject({ ok: false, code: 'invalid' });
+  });
+
+  it('gives near-miss group names no rank and no power', () => {
+    expect(isKnownRole('superadmin')).toBe(true);
+    expect(isKnownRole('Superadmin')).toBe(false);
+    expect(roleRank('Admin')).toBe(0);
+    expect(highestAdminRole(['Admin', 'SUPERADMIN', ' superadmin'])).toBeNull();
+    expect(grantableRoles(['Superadmin'])).toEqual([]);
+    expect(check({ action: 'disable', actor: person('x', 'Admin'), target: editor })).toMatchObject({ ok: false, code: 'capability' });
+  });
+});
+
+describe('owner counts fail closed (security review)', () => {
+  const otherOwner = person('owner-2', 'superadmin');
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5, '3' as never, null as never])(
+    'treats %j as unknown',
+    (ownerCount) => {
+      for (const extra of [{ action: 'disable' }, { action: 'delete' }, { action: 'changeRole', toRole: 'admin', reason: 'stepping back' }] as const) {
+        expect(check({ actor: owner, target: otherOwner, ownerCount, ...extra })).toMatchObject({ ok: false, code: 'owner_count_unknown' });
+      }
+    },
+  );
+
+  it('zero is a number, and still the last owner', () => {
+    expect(check({ action: 'disable', actor: owner, target: otherOwner, ownerCount: 0 })).toMatchObject({ ok: false, code: 'last_owner' });
+  });
+
+  it('a disabled owner is no longer counted as one', () => {
+    expect(check({ action: 'delete', actor: owner, target: { ...otherOwner, enabled: false } })).toMatchObject({ ok: true });
+  });
+});
+
+describe('target state', () => {
+  const t = (extra: object) => ({ ...person('t', 'viewer'), ...extra });
+  it('resend only for an unused invite', () => {
+    expect(check({ action: 'resend', actor: admin, target: t({ invite: 'pending' }) })).toMatchObject({ ok: true });
+    expect(check({ action: 'resend', actor: admin, target: t({ invite: 'expiring-soon' }) })).toMatchObject({ ok: true });
+    for (const invite of ['accepted', 'expired', 'disabled']) {
+      expect(check({ action: 'resend', actor: admin, target: t({ invite }) })).toMatchObject({ ok: false, code: 'state' });
+    }
+    expect(check({ action: 'resend', actor: admin, target: t({ invite: 'accepted' }) })).toMatchObject({
+      reason: 'Resend is only for invites nobody has used. It never changes an active account.',
+    });
+  });
+
+  it('enable only a disabled account; disable only an enabled one; delete only after disabling', () => {
+    expect(check({ action: 'enable', actor: admin, target: t({ enabled: true }) })).toMatchObject({ ok: false, code: 'state' });
+    expect(check({ action: 'enable', actor: admin, target: t({ enabled: false }) })).toMatchObject({ ok: true });
+    expect(check({ action: 'disable', actor: admin, target: t({ enabled: false }) })).toMatchObject({ ok: false, code: 'state' });
+    expect(check({ action: 'delete', actor: owner, target: t({ enabled: true }) })).toMatchObject({ ok: false, code: 'state' });
+    expect(check({ action: 'delete', actor: owner, target: t({ enabled: false }) })).toMatchObject({ ok: true });
+  });
+});
+
+describe('invite status by mode', () => {
+  const now = new Date('2026-10-17T12:00:00Z');
+  const created = new Date('2026-10-15T12:00:00Z');
+  it('temporary-password: accepted once the one-time password is used, whatever email_verified says', () => {
+    const mode = 'temporary-password' as const;
+    expect(inviteStatus({ createdAt: created, emailVerified: false, enabled: true, status: 'FORCE_CHANGE_PASSWORD' }, now, { mode })).toBe('pending');
+    expect(inviteStatus({ createdAt: created, emailVerified: false, enabled: true, status: 'CONFIRMED' }, now, { mode })).toBe('accepted');
+  });
+
+  it('emailed-code: an unused password means not accepted, even with a verified email', () => {
+    expect(inviteStatus({ createdAt: created, emailVerified: true, enabled: true, status: 'FORCE_CHANGE_PASSWORD' }, now)).toBe('pending');
+    expect(inviteStatus({ createdAt: created, emailVerified: true, enabled: true, status: 'CONFIRMED' }, now)).toBe('accepted');
+  });
+
+  it('an unreadable creation date never keeps an unused invite alive', () => {
+    expect(inviteStatus({ createdAt: new Date(Number.NaN), emailVerified: false, enabled: true }, now)).toBe('expired');
+  });
+
+  it('expires 7 days after creation', () => {
+    expect(inviteExpiresAt(created).toISOString()).toBe('2026-10-22T12:00:00.000Z');
   });
 });
