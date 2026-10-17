@@ -12,12 +12,17 @@ You'll get an acknowledgment within a few days. Fixes ship as a new version tag,
 
 Only the latest `0.x` pre-release gets fixes. auth-kit is pre-release and not yet used in production.
 
+## Verifying a release
+
+Each release tarball is built by this repository's CI from the tagged commit and carries a GitHub build-provenance attestation: `gh attestation verify auth-kit-<version>.tgz --repo davidyokum/auth-kit`. Sites pin the tarball's `sha512` in their lockfile.
+
 ## What's in scope
 
 - Token verification, the proxy, the server guards, `safeRedirect`, cookie and origin helpers.
 - The Amplify preset's settings: anything that leaves a pool weaker than the README says.
 - The dev kit's gates: any way "Sign in as…" could run outside local development or against a non-sandbox pool.
 - The test helpers, if they could mislead a site into believing it's protected when it isn't.
+- The proxy's matrix handler pass: any way it could be honored outside a local, non-production server.
 
 ## Design notes
 

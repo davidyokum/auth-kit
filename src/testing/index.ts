@@ -13,12 +13,31 @@ export {
   bearerPersona,
   REQUIRED_PERSONAS,
   SECOND_MEMBER,
+  MATRIX_PASSES,
+  type MatrixPass,
   type AuthMatrixOptions,
   type MatrixRoute,
   type MatrixCase,
   type MatrixResult,
   type PersonaDefinition,
 } from './matrix.js';
+export {
+  routesFromNextBuild,
+  compileAppRoute,
+  resolveAppRoute,
+  type AppRoute,
+  type AppRouteInput,
+  type CompiledRoute,
+  type RoutesFromNextBuildOptions,
+} from './routes.js';
+export {
+  MATRIX_ENV_FLAG,
+  MATRIX_HANDLER_PASS_VALUE,
+  MATRIX_REQUEST_HEADER,
+  PROXY_RESPONSE_HEADER,
+  PROXY_DENIED,
+  PROXY_HANDLER_PASS,
+} from '../shared/matrix-protocol.js';
 export {
   createTestIssuer,
   tamperToken,

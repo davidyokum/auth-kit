@@ -47,6 +47,7 @@ export async function handlePageAuthError(error: unknown, options: PageGuardOpti
   switch (error.code) {
     case 'unauthenticated':
     case 'invalid_token':
+    case 'token_expired':
     case 'account_disabled':
     case 'step_up_required': {
       const returnTo = options.returnTo ?? (await currentPath());

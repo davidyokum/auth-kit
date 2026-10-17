@@ -86,6 +86,12 @@ export interface RequireUserOptions extends GuardOptions {
   allowMfaEnrollment?: boolean;
 }
 
+/**
+ * `getUser` applies the same authenticator rule as `requireUser`: a password user without TOTP comes
+ * back as `null` (not signed in for the app's purposes) unless `allowMfaEnrollment` is true.
+ */
+export type GetUserOptions = RequireUserOptions;
+
 export interface RequireRoleOptions extends RequireUserOptions {
   /**
    * Re-read the person's enabled status and groups from Cognito (cached ~60 s). Use it on admin-area
@@ -113,8 +119,13 @@ export interface ServerAuth<G extends string = string, C extends string = string
   readonly tokenSource: TokenSource;
   /** Verifies an access token: signature, expiry, issuer, audience (`client_id`), `token_use`. */
   verifyAccessToken(token: string): Promise<AccessTokenClaims>;
-  /** The signed-in person, or `null`. Throws only `AuthUnavailableError` (couldn't check). */
-  getUser(options?: GuardOptions): Promise<AuthUser<C> | null>;
+  /**
+   * The signed-in person, or `null`, for optional display (a header that says who's signed in).
+   * Throws only `AuthUnavailableError` (couldn't check). Applies the authenticator rule: a password
+   * user without TOTP is `null` unless `allowMfaEnrollment` is true. Gate routes with `requireUser`
+   * or `requireCan`, which say *why* someone is refused (401 vs 403 `mfa_enrollment_required`).
+   */
+  getUser(options?: GetUserOptions): Promise<AuthUser<C> | null>;
   /** The signed-in person, or throws 401 (and 403 for a password user without an authenticator). */
   requireUser(options?: RequireUserOptions): Promise<AuthUser<C>>;
   /** Requires membership in any of `groups`. Prefer `requireCan`; use this for coarse gates. */
@@ -132,11 +143,60 @@ export interface ServerAuth<G extends string = string, C extends string = string
    * belongs to it, or holds a capability that covers every record. Otherwise 404, never 403.
    */
   requireRecordAccess<R>(user: AuthUser<C>, record: R | null | undefined, rule: RecordAccessRule<R, C>): R;
-  /** Forgets cached factor and live results for this person (after an enrollment or role change). */
-  invalidate(user: Pick<AuthUser<C>, 'username' | 'tokenId'>): void;
+  /**
+   * Forgets cached results after an enrollment or role change: the live status-and-groups read for
+   * `username` (what the admin module knows about another person), and, given `sub` and `tokenId`
+   * too (an `AuthUser`), that token's authenticator answer.
+   */
+  invalidate(user: { username: string; sub?: string; tokenId?: string }): void;
 }
 
 const ENROLLMENT_RECHECK_MS = 30_000;
+
+const OPTION_KEYS = new Set<string>([
+  'userPoolId',
+  'clientId',
+  'capabilities',
+  'tokenSource',
+  'requireTotpForPasswordUsers',
+  'factorLookup',
+  'factorCheckTtlSeconds',
+  'liveCheckTtlSeconds',
+  'stepUpMaxAgeSeconds',
+  'cognito',
+  'jwks',
+  'jwksFetcher',
+  'verifier',
+  'now',
+  'context',
+]);
+
+/** Fails loudly at startup on a misconfiguration instead of producing odd runtime behavior. */
+function validateServerAuthOptions<G extends string, C extends string>(options: ServerAuthOptions<G, C>): void {
+  const problems: string[] = [];
+  for (const key of Object.keys(options)) {
+    if (!OPTION_KEYS.has(key)) problems.push(`unknown option "${key}"`);
+  }
+  if (typeof options.capabilities?.capabilitiesOf !== 'function') {
+    problems.push('capabilities must come from defineCapabilities()');
+  }
+  for (const key of ['factorCheckTtlSeconds', 'liveCheckTtlSeconds', 'stepUpMaxAgeSeconds'] as const) {
+    const value = options[key];
+    if (value !== undefined && !(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+      problems.push(`${key} must be a positive number of seconds`);
+    }
+  }
+  if (options.factorLookup !== undefined && options.factorLookup !== 'access-token' && options.factorLookup !== 'iam') {
+    problems.push(`factorLookup must be 'access-token' or 'iam'`);
+  }
+  if (options.requireTotpForPasswordUsers !== undefined && typeof options.requireTotpForPasswordUsers !== 'boolean') {
+    problems.push('requireTotpForPasswordUsers must be true or false');
+  }
+  for (const key of ['tokenSource', 'jwksFetcher', 'now', 'context'] as const) {
+    if (options[key] !== undefined && typeof options[key] !== 'function') problems.push(`${key} must be a function`);
+  }
+  if (problems.length > 0) throw new Error(`auth-kit: createServerAuth options are invalid:\n- ${problems.join('\n- ')}`);
+}
 
 /**
  * Binds one pool, one app client, and the app's capability map. Create it once per app:
@@ -153,6 +213,7 @@ const ENROLLMENT_RECHECK_MS = 30_000;
 export function createServerAuth<G extends string, C extends string>(
   options: ServerAuthOptions<G, C>,
 ): ServerAuth<G, C> {
+  validateServerAuthOptions(options);
   const pool = resolvePoolConfig(options);
   const now = options.now ?? Date.now;
   const verifier =
@@ -214,18 +275,22 @@ export function createServerAuth<G extends string, C extends string>(
     return user;
   }
 
-  async function getUser(opts: GuardOptions = {}): Promise<AuthUser<C> | null> {
+  /**
+   * The verified person before the authenticator rule, or the reason there isn't one (no token, or
+   * the verifier's `invalid_token` / `token_expired`), so `requireUser` can say which.
+   */
+  async function resolveUser(opts: GuardOptions): Promise<AuthUser<C> | UnauthenticatedError> {
     const found = await tokenSource(await contextFor(opts.request));
-    if (!found.accessToken) return null;
+    if (!found.accessToken) return new UnauthenticatedError();
     let claims: AccessTokenClaims;
     try {
       claims = await verifier.verifyAccessToken(found.accessToken);
     } catch (error) {
-      if (error instanceof UnauthenticatedError) return null;
+      if (error instanceof UnauthenticatedError) return error;
       throw error;
     }
     // Machine tokens (client credentials) carry no username; they aren't people.
-    if (!claims.username) return null;
+    if (!claims.username) return new UnauthenticatedError('invalid_token', 'This token does not belong to a person.');
     let profile: UserProfile | null = null;
     if (found.idToken) {
       try {
@@ -244,22 +309,41 @@ export function createServerAuth<G extends string, C extends string>(
     return buildUser(claims, found.accessToken, profile);
   }
 
-  async function assertMfaEnrolled(user: AuthUser<C>): Promise<void> {
-    let needs = factorCache.get(user.tokenId);
-    if (needs === undefined) {
-      const accessToken = rawTokens.get(user);
-      if (!accessToken) throw new UnauthenticatedError();
-      needs = needsTotpEnrollment(await cognito().getUserAuthFactors({ accessToken, username: user.username }));
-      const untilExpiry = user.expiresAt * 1000 - now();
-      factorCache.set(user.tokenId, needs, Math.min(needs ? ENROLLMENT_RECHECK_MS : factorTtlMs, untilExpiry));
+  // Keyed by person and token: claim validation guarantees both are non-empty strings, and pairing
+  // them means two people can never share an answer even if a token ID repeated.
+  const factorKey = (user: Pick<AuthUser<C>, 'sub' | 'tokenId'>) => `${user.sub}\n${user.tokenId}`;
+
+  /** True when this password user still has to set up an authenticator (cached per token). */
+  async function needsEnrollment(user: AuthUser<C>): Promise<boolean> {
+    if (!requireTotp) return false;
+    const key = factorKey(user);
+    const cached = factorCache.get(key);
+    if (cached !== undefined) return cached;
+    const accessToken = rawTokens.get(user);
+    if (!accessToken) throw new UnauthenticatedError();
+    const needs = needsTotpEnrollment(await cognito().getUserAuthFactors({ accessToken, username: user.username }));
+    const untilExpiry = user.expiresAt * 1000 - now();
+    factorCache.set(key, needs, Math.min(needs ? ENROLLMENT_RECHECK_MS : factorTtlMs, untilExpiry));
+    return needs;
+  }
+
+  async function getUser(opts: GetUserOptions = {}): Promise<AuthUser<C> | null> {
+    const user = await resolveUser(opts);
+    if (user instanceof UnauthenticatedError) return null;
+    if (opts.allowMfaEnrollment === true) return user;
+    try {
+      return (await needsEnrollment(user)) ? null : user;
+    } catch (error) {
+      // Cognito says the session was revoked or the account is gone: not signed in.
+      if (error instanceof UnauthenticatedError) return null;
+      throw error;
     }
-    if (needs) throw new MfaEnrollmentRequiredError();
   }
 
   async function requireUser(opts: RequireUserOptions = {}): Promise<AuthUser<C>> {
-    const user = await getUser(opts);
-    if (!user) throw new UnauthenticatedError();
-    if (requireTotp && opts.allowMfaEnrollment !== true) await assertMfaEnrolled(user);
+    const user = await resolveUser(opts);
+    if (user instanceof UnauthenticatedError) throw user;
+    if (opts.allowMfaEnrollment !== true && (await needsEnrollment(user))) throw new MfaEnrollmentRequiredError();
     return user;
   }
 
@@ -322,7 +406,7 @@ export function createServerAuth<G extends string, C extends string>(
       throw new NotFoundError();
     },
     invalidate(user) {
-      factorCache.delete(user.tokenId);
+      if (user.sub && user.tokenId) factorCache.delete(factorKey({ sub: user.sub, tokenId: user.tokenId }));
       liveCache.delete(user.username);
     },
   };

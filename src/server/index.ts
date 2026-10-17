@@ -12,6 +12,7 @@ export {
   type AuthUser,
   type UserProfile,
   type GuardOptions,
+  type GetUserOptions,
   type RequireUserOptions,
   type RequireRoleOptions,
   type RecordAccessRule,
@@ -27,6 +28,7 @@ export {
 } from './capabilities.js';
 export {
   createTokenVerifier,
+  TOKEN_TIME_POLICY,
   type TokenVerifier,
   type TokenVerifierOptions,
   type AccessTokenClaims,
@@ -55,7 +57,7 @@ export {
   type CookieReader,
   type HeaderReader,
 } from './tokens.js';
-export { toRequestContext, nextHeadersContext, type RequestInput } from './context.js';
+export { toRequestContext, nextHeadersContext, parseCookieHeader, type RequestInput } from './context.js';
 export { safeRedirect, isSafeRedirect, type SafeRedirectOptions } from './redirect.js';
 export {
   secureCookieOptions,
@@ -67,6 +69,7 @@ export {
   SECURE_COOKIE_DEFAULTS,
   PRIVATE_NO_STORE,
   type CookieOptions,
+  type AmplifyCookieRuntimeInput,
   type OriginCheckRequest,
   type OriginCheckOptions,
 } from './cookies.js';

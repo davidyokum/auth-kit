@@ -1,6 +1,6 @@
 # 0004. A WAF rate rule on every user pool
 
-- **Status:** Accepted, 2026-10-17
+- **Status:** Accepted, 2026-10-17; amended 2026-10-17 by [0013](0013-shared-web-acl.md) (shared web ACL, acknowledged opt-out) and for token refreshes
 - **Standard:** 03 §2 Sign-in; primer §4 "Guessing codes"
 
 ## Context
@@ -14,7 +14,7 @@ The preset attaches an AWS WAF web ACL (REGIONAL) to each non-sandbox user pool 
 1. **Sign-in attempts**, default 100 per IP: requests whose Cognito operation is `InitiateAuth` or `RespondToAuthChallenge` (code sends, password and passkey starts, every code or TOTP guess). Matched case-insensitively on `x-amzn-cognito-operation-name` (the header Cognito forwards and AWS points to for identifying operations) and on `x-amz-target`.
 2. **All inspected requests**, default 1000 per IP, with no header match, so it always applies.
 
-Limits, window, and a `count` mode are options. Sandboxes skip the web ACL by default (it's billed); `waf.enabledInSandbox` turns it on. Turning it off outside a sandbox emits a synthesis warning.
+Limits, window, and a `count` mode are options. Sandboxes skip the web ACL by default (it's billed); `waf.enabledInSandbox` turns it on. Sites can share one web ACL per account and Region (`waf: { webAclArn }`, [0013](0013-shared-web-acl.md)); turning WAF off needs `waf: false` plus `acknowledgeNoRateLimit: true` and still emits a synthesis warning.
 
 ## Consequences
 
@@ -22,4 +22,5 @@ Limits, window, and a `count` mode are options. Sandboxes skip the web ACL by de
 - AWS doesn't document the value format of `x-amzn-cognito-operation-name`. Confirm the sign-in rule matches in `count` mode on the first sandbox deploy; until then the overall rule is the guaranteed floor.
 - Per-IP limits don't stop a distributed attacker, and an office behind one NAT address shares a budget. The defaults leave room for a busy office.
 - IAM-signed Admin* calls (the dev kit's `AdminInitiateAuth`, the admin module) aren't inspected by WAF, so the rules never block them. Server-side token-authorized calls (the TOTP check's `GetUserAuthFactors`) do count, from the server's address.
+- **Token refreshes count too**, from the browser's address for client-side refreshes and from the **server's** address for the proxy's (`amplifyAdapterRefresh`). Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken`, which counts toward the overall rule only; older clients and other SDKs use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also matches (it can't see the auth flow). Every server-side refresh shares the server's egress budget, so the proxy refreshes only a genuine expired session that has a refresh-token cookie, never an anonymous or forged request, and limits refreshes per person and per instance with back-off (`refreshLimits`). Keep the `count`-mode check, and confirm from the rules' sampled requests which operations refreshes show up as before tuning limits.
 - A web ACL that uses AWS's account-takeover-prevention managed rule group can't be attached to a user pool; this one doesn't.

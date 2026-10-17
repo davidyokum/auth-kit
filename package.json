@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.0-alpha",
+  "version": "0.1.1-alpha",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -88,7 +88,6 @@
   },
   "scripts": {
     "build": "tsup",
-    "prepare": "npm run build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

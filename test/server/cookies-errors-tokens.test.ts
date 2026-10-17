@@ -22,7 +22,9 @@ import {
   signInUrl,
   toRequestContext,
   withAuthErrors,
+  parseCookieHeader,
 } from '../../src/server/index.js';
+import { RequestCookies } from 'next/dist/compiled/@edge-runtime/cookies/index.js';
 
 describe('cookie helpers', () => {
   it('defaults to httpOnly, Secure, SameSite=Lax, path /', () => {
@@ -42,8 +44,24 @@ describe('cookie helpers', () => {
     expect(() => serializeCookie('n', 'a b')).toThrow(/encoding/);
   });
 
-  it('keeps Amplify cookies SameSite=Lax and no longer-lived than the refresh token', () => {
-    expect(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 1440 })).toEqual({ cookies: { sameSite: 'lax', maxAge: 86400 } });
+  it('makes server-written Amplify cookies Secure, SameSite=Lax, and no longer-lived than the refresh token (M2)', () => {
+    expect(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 1440 })).toEqual({ cookies: { sameSite: 'lax', secure: true, maxAge: 86400 } });
+    expect(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 60, domain: 'example.org' }).cookies).toMatchObject({ secure: true, domain: 'example.org' });
+  });
+
+  it('drops Secure only for a declared http://localhost development origin', () => {
+    for (const origin of ['http://localhost:3000', 'http://app.localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000']) {
+      expect(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 60, localDevOrigin: origin }).cookies.secure).toBe(false);
+    }
+    for (const origin of ['https://localhost:3000', 'http://app.example.org', 'http://localhost.evil.example', 'http://localhost:3000/', 'localhost']) {
+      expect(() => amplifyCookieRuntimeOptions({ refreshTokenMinutes: 60, localDevOrigin: origin })).toThrow(/localDevOrigin/);
+    }
+  });
+
+  it('refuses a nonsensical refresh-token lifetime', () => {
+    for (const minutes of [0, -1, Number.NaN, Infinity]) {
+      expect(() => amplifyCookieRuntimeOptions({ refreshTokenMinutes: minutes })).toThrow(/positive refreshTokenMinutes/);
+    }
   });
 
   it('sets Cache-Control: private, no-store', () => {
@@ -68,6 +86,25 @@ describe('origin checks for state-changing route handlers', () => {
     expect(isSameOriginRequest(request)).toBe(ok);
   });
 
+  it('compares with a configured expectedOrigin instead of the rebuilt request URL (L7)', () => {
+    // Behind a CDN the app may see http:// while the browser sends Origin: https://.
+    const behindCdn = { method: 'POST', url: 'http://app.example.org/api/x', headers: new Headers({ origin: 'https://app.example.org' }) };
+    expect(isSameOriginRequest(behindCdn)).toBe(false);
+    expect(isSameOriginRequest(behindCdn, { expectedOrigin: 'https://app.example.org' })).toBe(true);
+    const http = { ...behindCdn, headers: new Headers({ origin: 'http://app.example.org' }) };
+    expect(isSameOriginRequest(http, { expectedOrigin: 'https://app.example.org' })).toBe(false);
+    const evil = { ...behindCdn, headers: new Headers({ origin: 'https://evil.example' }) };
+    expect(isSameOriginRequest(evil, { expectedOrigin: 'https://app.example.org' })).toBe(false);
+  });
+
+  it('throws on a malformed expectedOrigin or allowedOrigins entry instead of silently refusing everything', () => {
+    const request = req('POST', { origin: 'https://app.example.org' });
+    for (const bad of ['https://app.example.org/', 'app.example.org', 'https://app.example.org/path', 'https://APP.example.org']) {
+      expect(() => isSameOriginRequest(request, { expectedOrigin: bad })).toThrow(/must be an origin/);
+      expect(() => isSameOriginRequest(request, { allowedOrigins: [bad] })).toThrow(/must be an origin/);
+    }
+  });
+
   it('accepts explicitly allowed origins and throws 403 otherwise', () => {
     const request = req('POST', { origin: 'https://admin.example.org' });
     expect(isSameOriginRequest(request, { allowedOrigins: ['https://admin.example.org'] })).toBe(true);
@@ -79,6 +116,7 @@ describe('error responses (401 / 403 / 404 / 503 conventions)', () => {
   it.each([
     [new UnauthenticatedError(), 401, 'unauthenticated', 'Bearer'],
     [new UnauthenticatedError('invalid_token'), 401, 'invalid_token', 'Bearer error="invalid_token"'],
+    [new UnauthenticatedError('token_expired'), 401, 'token_expired', 'Bearer error="invalid_token", error_description="The access token expired"'],
     [new ForbiddenError(), 403, 'forbidden', null],
     [new MfaEnrollmentRequiredError(), 403, 'mfa_enrollment_required', null],
     [new NotFoundError(), 404, 'not_found', null],
@@ -143,6 +181,15 @@ describe('token sources', () => {
     expect(await amplifyCookieTokens('nobody')(ctx)).toEqual({});
   });
 
+  it('reports the refresh-token cookie so the proxy can tell whether a refresh is possible', async () => {
+    const ctx = toRequestContext(
+      new Request('https://x.example', {
+        headers: { cookie: 'CognitoIdentityServiceProvider.c.LastAuthUser=u; CognitoIdentityServiceProvider.c.u.accessToken=AT; CognitoIdentityServiceProvider.c.u.refreshToken=RT' },
+      }),
+    );
+    expect(await amplifyCookieTokens('c')(ctx)).toEqual({ accessToken: 'AT', refreshToken: 'RT', source: 'amplify-cookies' });
+  });
+
   it('reads a well-formed bearer header only', async () => {
     const read = (value: string) => bearerToken()(toRequestContext(new Request('https://x.example', { headers: { authorization: value } })));
     expect(await read('Bearer abc.def.ghi')).toEqual({ accessToken: 'abc.def.ghi', source: 'bearer' });
@@ -162,5 +209,38 @@ describe('token sources', () => {
       clientId: 'c',
     });
     expect(() => poolConfigFromAmplifyOutputs({})).toThrow(/no auth/);
+  });
+});
+
+describe("cookie parsing matches Next's RequestCookies (L2)", () => {
+  const C = String.fromCharCode;
+  it.each([
+    ['last duplicate wins', 'a=1; a=2'],
+    ['duplicates with other cookies between', 'LastAuthUser=victim; x=1; LastAuthUser=attacker'],
+    ['no space after the semicolon', 'a=1;b=2;a=3'],
+    ['several spaces', 'a=1;   b=2'],
+    ['a pair without =', 'flag; a=1'],
+    ['percent-encoded values', 'u=user%40example.org; v=%7Bx%7D'],
+    ['an undecodable value keeps the earlier one', 'a=1; a=%E0%A4%A'],
+    ['empty pairs', ';; a=1 ;'],
+    ['= inside the value', 'a=b=c'],
+    ['a tab before the name', `a=1;${C(9)}b=2`],
+  ])('%s', (_label, header) => {
+    const ours = toRequestContext(new Request('https://x.example', { headers: { cookie: header } })).cookies;
+    const next = new RequestCookies(new Headers({ cookie: header }));
+    const names = new Set([...header.split(/; */).map((p) => p.split('=')[0] ?? ''), ...next.getAll().map((c) => c.name)]);
+    for (const name of names) expect(ours.get(name)?.value, name).toBe(next.get(name)?.value);
+  });
+
+  it('so the proxy and a handler given a plain Request read the same session', async () => {
+    const cookie = 'CognitoIdentityServiceProvider.c.LastAuthUser=victim; CognitoIdentityServiceProvider.c.LastAuthUser=attacker; CognitoIdentityServiceProvider.c.victim.accessToken=V; CognitoIdentityServiceProvider.c.attacker.accessToken=A';
+    const plain = await amplifyCookieTokens('c')(toRequestContext(new Request('https://x.example', { headers: { cookie } })));
+    const viaNext = await amplifyCookieTokens('c')({ cookies: new RequestCookies(new Headers({ cookie })), headers: new Headers() });
+    expect(plain).toEqual(viaNext);
+    expect(plain.accessToken).toBe('A');
+  });
+
+  it('parseCookieHeader handles a missing header', () => {
+    expect(parseCookieHeader(null).get('a')).toBeUndefined();
   });
 });

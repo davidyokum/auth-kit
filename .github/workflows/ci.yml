@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # --ignore-scripts skips `prepare` (the build) so each step below reports on its own.
+      # --ignore-scripts: no dependency runs install scripts in CI.
       - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run lint
@@ -47,3 +47,57 @@ jobs:
         run: npx vitest run test/dev/dist.test.ts
         env:
           AUTH_KIT_DIST_TESTS: '1'
+
+  # Releases (ADR 0012): a v* tag builds the package once, here, from the tagged commit, packs it,
+  # attests its provenance, and attaches the tarball to a GitHub Release. Sites install that tarball
+  # by URL; their lockfile pins its sha512, so nobody builds auth-kit or installs its dev toolchain.
+  release:
+    name: release tarball
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # sign the provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      # No dependency cache for a release build: everything comes from the lockfile, verified.
+      - run: npm ci --ignore-scripts
+      - name: The tag matches package.json
+        run: |
+          expected="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match package.json version ($expected)." >&2
+            exit 1
+          fi
+      - run: npm run build
+      - name: Pack
+        run: |
+          npm pack --ignore-scripts
+          sha256sum auth-kit-*.tgz > SHA256SUMS
+          cat SHA256SUMS
+      - name: The tarball holds every export
+        run: node scripts/check-tarball.mjs auth-kit-*.tgz
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: auth-kit-*.tgz
+      - name: Publish the GitHub Release (never overwrites an existing one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "CHANGELOG.md has no section for $version." >&2
+            exit 1
+          fi
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" auth-kit-*.tgz SHA256SUMS \
+            --verify-tag $prerelease --title "auth-kit $GITHUB_REF_NAME" --notes-file notes.md

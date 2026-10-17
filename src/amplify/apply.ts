@@ -1,5 +1,6 @@
-import { Annotations, ArnFormat, Stack, Tags } from 'aws-cdk-lib';
+import { Annotations, ArnFormat, Stack, Tags, Token } from 'aws-cdk-lib';
 import type { CfnIdentityPool, CfnUserPool, CfnUserPoolClient, CfnUserPoolGroup, IUserPool } from 'aws-cdk-lib/aws-cognito';
+import type { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
 import {
   AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY,
   type AmplifyDeploymentType,
@@ -7,8 +8,19 @@ import {
   PASSWORD_POLICY,
   SESSION_POLICY,
 } from '../shared/policy.js';
-import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions } from './options.js';
-import { type AuthWebAcl, createAuthWebAcl } from './waf.js';
+import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions, webAclArnRegion } from './options.js';
+import { associateAuthWebAcl, createAuthWebAcl } from './waf.js';
+
+/** How the pool is rate limited. */
+export interface AppliedWaf {
+  /** `created`: a web ACL for this pool; `shared`: an existing one associated; `none`: no rate limit. */
+  mode: 'created' | 'shared' | 'none';
+  /** The ACL the preset created (`created` only). */
+  webAcl: CfnWebACL | null;
+  /** The ARN associated with the pool (a token for a created ACL). */
+  webAclArn: string | null;
+  association: CfnWebACLAssociation | null;
+}
 
 /**
  * The parts of an Amplify auth resource the preset changes. `backend.auth` from `defineBackend` fits,
@@ -38,7 +50,7 @@ export interface AppliedAuthStandard {
   deletionProtection: 'ACTIVE' | 'INACTIVE';
   userPoolTier: 'ESSENTIALS' | 'PLUS';
   tags: Record<string, string>;
-  webAcl: AuthWebAcl | null;
+  waf: AppliedWaf;
   /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
   hostedUiOAuth: boolean;
 }
@@ -226,14 +238,29 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   for (const [key, value] of Object.entries(tags)) Tags.of(stack).add(key, value);
 
   // ---- WAF --------------------------------------------------------------------------------------
-  const wafWanted = isSandbox ? o.waf.enabledInSandbox : o.waf.enabled;
-  const webAcl = wafWanted
-    ? createAuthWebAcl(stack, 'AuthKitWebAcl', { userPoolArn: userPool.userPoolArn, project: o.project, waf: o.waf })
-    : null;
-  if (!wafWanted && !isSandbox) {
+  // One web ACL per pool by default, or a shared one per account and Region (ADR 0013).
+  let waf: AppliedWaf = { mode: 'none', webAcl: null, webAclArn: null, association: null };
+  const wafWanted = o.waf.mode !== 'off' && (!isSandbox || o.waf.enabledInSandbox);
+  if (wafWanted && o.waf.mode === 'create') {
+    const created = createAuthWebAcl(stack, 'AuthKitWebAcl', { userPoolArn: userPool.userPoolArn, project: o.project, waf: o.waf });
+    waf = { mode: 'created', webAcl: created.webAcl, webAclArn: created.webAcl.attrArn, association: created.association };
+  } else if (wafWanted && o.waf.mode === 'shared') {
+    const arnRegion = webAclArnRegion(o.waf.webAclArn);
+    if (arnRegion !== undefined && !Token.isUnresolved(stack.region) && arnRegion !== stack.region) {
+      throw new AuthStandardConfigError(
+        `waf.webAclArn is in ${arnRegion} but the pool is in ${stack.region}; a web ACL protects resources in its own Region only.`,
+      );
+    }
+    const association = associateAuthWebAcl(stack, 'AuthKitWebAclAssociation', {
+      userPoolArn: userPool.userPoolArn,
+      webAclArn: o.waf.webAclArn,
+    });
+    waf = { mode: 'shared', webAcl: null, webAclArn: o.waf.webAclArn, association };
+  }
+  if (o.waf.mode === 'off' && !isSandbox) {
     Annotations.of(userPool).addWarningV2(
       'auth-kit:no-waf',
-      'The standard requires a WAF rate rule on every user pool: Cognito does not lock out wrong emailed codes.',
+      'This pool has no WAF rate rule (acknowledgeNoRateLimit): Cognito does not lock out wrong emailed codes.',
     );
   }
 
@@ -248,7 +275,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     deletionProtection,
     userPoolTier,
     tags,
-    webAcl,
+    waf,
     hostedUiOAuth,
   };
 }

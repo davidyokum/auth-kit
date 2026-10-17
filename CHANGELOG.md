@@ -2,7 +2,18 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
-## [Unreleased]
+## [0.1.1-alpha] - 2026-10-17
+
+Phase 2 of `auth-kit/client` and `auth-kit/dev`, and the fixes from the [2026-10-17 security review](docs/reviews/2026-10-17-fable-review.md). Pre-release; some APIs changed (marked **Breaking**).
+
+### Security
+
+- **Auth matrix checks each route's own guard (H1).** Every case also runs with the proxy stepped aside (honored only outside production builds, with `AUTH_KIT_MATRIX=1`, on a localhost URL), so a route relying on the proxy for its 401 fails. **Breaking:** `appRoutes` is required (`routesFromNextBuild()` reads Next's build manifests); uncovered and mistyped routes fail; each row must expect some persona to succeed. New: `expectWithoutProxy`, `exists: false`, `handlerRequest`. ADR 0014.
+- **Server-side refresh only for genuine expired sessions (M1).** The proxy refreshes only an Amplify cookie session whose access token is signed by this pool for this client and merely expired, with a refresh-token cookie; never anonymous, forged, or bearer requests. Refreshes are limited per person and per instance, back off after failures, and are shared by concurrent requests (`refreshLimits`, `onRefresh`). Tokens that merely expired are now 401 `token_expired`.
+- **Secure server-written token cookies (M2).** `amplifyCookieRuntimeOptions` sets `secure: true` explicitly (`localDevOrigin` drops it for http://localhost only). Browser-written cookies get the same lifetime from `configureAuthClient`.
+- **Default-deny can't be configured away (M3).** `publicRoutes` that match everything (`'/*'`, catch-all RegExps) or unanchored RegExps throw at startup; malformed paths and unknown options throw.
+- **Release tarballs (M4).** **Breaking:** install from the attested release tarball, not `github:`; the `prepare` script is gone. Dependabot added. ADR 0012.
+- **Low items.** Token claim shape and time policy checked, `NaN` cache lifetimes refused, authenticator cache keyed by person and token (L1); cookie parsing matches Next's (L2); public routes overwrite `x-auth-kit-path` (L5); **Breaking:** `getUser()` applies the authenticator rule (L6); `expectedOrigin` for the origin check (L7); stricter preSignUp address parsing (L8).
 
 ### Added
 
@@ -15,6 +26,8 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 - `auth-kit/admin`: owners may make owners, but each owner grant needs a recent sign-in and alerts every owner (`ownerAlerts`, default the SES mailer's `ownerGranted`); with no notifier it's refused, and if the alert fails the grant is undone.
 - `auth-kit/admin/ui`: `PeopleTable`, `InviteForm`, `RoleChangeDialog`, `ActivityLog`, `LostPasskeyGuide`.
 - `auth-kit/admin/cdk`: `AuditLogTable` (deletion protection, point-in-time recovery, stream, a resource policy denying item edits, optional tamper alerts).
+- Shared web ACL: `waf: { webAclArn }`, `createSharedAuthWebAcl`, `associateAuthWebAcl`. **Breaking:** `waf: false` requires `acknowledgeNoRateLimit: true`; `waf.enabled` is retired; `AppliedAuthStandard.webAcl` became `waf`. ADR 0013.
+- `createServerAuth` validates its options at startup; `requireUser` reports `invalid_token` / `token_expired`.
 
 ### Changed
 
@@ -42,4 +55,5 @@ First pre-release. Not yet used in production.
 - `auth-kit/client`: autocomplete tokens, `afterSignInStep`, and typed stubs for the sign-in screens and My account.
 - Decision records, CI (typecheck, lint, test, build on Node 22 and 24).
 
+[0.1.1-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.1-alpha
 [0.1.0-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.0-alpha

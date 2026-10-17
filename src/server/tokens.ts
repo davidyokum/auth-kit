@@ -25,7 +25,13 @@ export interface RequestContext {
 export interface FoundTokens {
   accessToken?: string;
   idToken?: string;
-  /** Where the tokens were found, for diagnostics. */
+  /**
+   * The refresh token from Amplify's cookies. The proxy reads it only to decide whether a server-side
+   * refresh is possible and to group concurrent refreshes of one session; auth-kit never logs it or
+   * sends it anywhere (the Amplify adapter reads its own copy of the cookie).
+   */
+  refreshToken?: string;
+  /** Where the tokens were found. Only `amplify-cookies` sessions are refreshed server-side. */
   source?: 'amplify-cookies' | 'bearer';
 }
 
@@ -69,8 +75,14 @@ export function amplifyCookieTokens(clientId: string): TokenSource {
     const names = amplifyCookieNames(clientId, username);
     const accessToken = names.accessToken ? cookieValue(cookies, names.accessToken) : undefined;
     const idToken = names.idToken ? cookieValue(cookies, names.idToken) : undefined;
+    const refreshToken = names.refreshToken ? cookieValue(cookies, names.refreshToken) : undefined;
     if (!accessToken) return {};
-    return { accessToken, ...(idToken !== undefined && { idToken }), source: 'amplify-cookies' };
+    return {
+      accessToken,
+      ...(idToken !== undefined && { idToken }),
+      ...(refreshToken !== undefined && { refreshToken }),
+      source: 'amplify-cookies',
+    };
   };
 }
 

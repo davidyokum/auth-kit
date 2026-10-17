@@ -3,7 +3,7 @@
  *
  * | Status | Meaning | Error |
  * |---|---|---|
- * | 401 | We don't know who you are (no token, a bad or expired token, a revoked session) | `UnauthenticatedError` |
+ * | 401 | We don't know who you are (no token, a bad or expired token, a revoked session) | `UnauthenticatedError` (`token_expired` when a genuine token has merely expired) |
  * | 401 | We know you, but this action needs a fresh sign-in (step-up) | `StepUpRequiredError` |
  * | 403 | We know you, and the answer is no (missing capability or group) | `ForbiddenError` |
  * | 403 | You must set up an authenticator code before going further | `MfaEnrollmentRequiredError` |
@@ -15,6 +15,7 @@
 export type AuthErrorCode =
   | 'unauthenticated'
   | 'invalid_token'
+  | 'token_expired'
   | 'account_disabled'
   | 'step_up_required'
   | 'forbidden'
@@ -37,10 +38,14 @@ export class AuthError extends Error {
   }
 }
 
-/** 401: no valid session. */
+/**
+ * 401: no valid session. `token_expired` means the token was genuine (signed by this pool, issued to
+ * this app client, an access token) but past its expiry, so a refresh may help; `invalid_token`
+ * means it was forged, foreign, malformed, or revoked.
+ */
 export class UnauthenticatedError extends AuthError {
   constructor(
-    code: Extract<AuthErrorCode, 'unauthenticated' | 'invalid_token' | 'account_disabled'> = 'unauthenticated',
+    code: Extract<AuthErrorCode, 'unauthenticated' | 'invalid_token' | 'token_expired' | 'account_disabled'> = 'unauthenticated',
     message = 'Sign in to continue.',
     options?: { cause?: unknown },
   ) {
@@ -108,8 +113,13 @@ function baseHeaders(error: AuthError): Headers {
         'WWW-Authenticate',
         `Bearer error="insufficient_user_authentication", error_description="A more recent sign-in is required", max_age=${error.maxAgeSeconds}`,
       );
+    } else if (error.code === 'unauthenticated') {
+      headers.set('WWW-Authenticate', 'Bearer');
+    } else if (error.code === 'token_expired') {
+      // RFC 6750 §3.1: an expired token is an invalid_token.
+      headers.set('WWW-Authenticate', 'Bearer error="invalid_token", error_description="The access token expired"');
     } else {
-      headers.set('WWW-Authenticate', error.code === 'unauthenticated' ? 'Bearer' : 'Bearer error="invalid_token"');
+      headers.set('WWW-Authenticate', 'Bearer error="invalid_token"');
     }
   }
   if (error.status === 503) headers.set('Retry-After', '5');

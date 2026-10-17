@@ -1,3 +1,4 @@
+import { Token } from 'aws-cdk-lib';
 import {
   type AuthTier,
   SESSION_POLICY,
@@ -54,10 +55,23 @@ export interface PasskeyOptions {
   sandboxRelyingPartyId?: string;
 }
 
+/**
+ * Rate limiting for the pool's public Cognito API (ADR 0004, ADR 0013).
+ *
+ * - Default: create a web ACL for this pool. Fine for a first site.
+ * - `{ webAclArn }`: reuse an existing REGIONAL web ACL and only associate it with this pool. The
+ *   recommended setup once there's more than one site: one shared web ACL per AWS account and Region
+ *   (`createSharedAuthWebAcl`), associated with every pool there. AWS WAF bills per web ACL and per
+ *   rule, so one shared ACL costs the same for one site or twenty.
+ */
 export interface WafOptions {
-  /** Attach the web ACL to non-sandbox pools. Default `true`. */
-  enabled?: boolean;
-  /** Attach it to sandbox pools too (each web ACL is billed). Default `false`. */
+  /**
+   * ARN of an existing REGIONAL web ACL (`arn:aws:wafv2:<region>:<account>:regional/webacl/<name>/<id>`)
+   * in the pool's Region. The preset associates it and creates nothing else, so the limit and action
+   * options below don't apply: they belong to the shared ACL.
+   */
+  webAclArn?: string;
+  /** Protect sandbox pools too (a created ACL is billed; a shared one isn't). Default `false`. */
   enabledInSandbox?: boolean;
   /** Sign-in attempts (InitiateAuth + RespondToAuthChallenge) per IP per window. Default 100. */
   signInLimit?: number;
@@ -68,6 +82,19 @@ export interface WafOptions {
   /** `count` to observe before blocking (AWS recommends it when tuning). Default `block`. */
   action?: 'block' | 'count';
 }
+
+/** The rate rules of a web ACL auth-kit creates. */
+export interface WafRuleSettings {
+  signInLimit: number;
+  overallLimit: number;
+  evaluationWindowSec: 60 | 120 | 300 | 600;
+  action: 'block' | 'count';
+}
+
+export type NormalizedWafOptions =
+  | ({ mode: 'create'; enabledInSandbox: boolean } & WafRuleSettings)
+  | { mode: 'shared'; webAclArn: string; enabledInSandbox: boolean }
+  | { mode: 'off' };
 
 export interface SelfSignUpOptions {
   /**
@@ -96,7 +123,16 @@ export interface AuthStandardOptions {
   passkeys?: PasskeyOptions | false;
   /** Groups beyond superadmin, admin, editor, and viewer, e.g. `['reviewer']`. */
   appRoles?: readonly string[];
-  waf?: WafOptions;
+  /**
+   * Rate limiting (see `WafOptions`). `false` leaves the pool with no rate limit at all and must be
+   * paired with `acknowledgeNoRateLimit: true`; prefer a shared web ACL (`{ webAclArn }`) instead.
+   */
+  waf?: WafOptions | false;
+  /**
+   * Required with `waf: false`, and refused otherwise. Cognito doesn't lock out wrong emailed codes
+   * (tested 2026-10-12), so a pool without a rate limit lets anyone keep guessing them.
+   */
+  acknowledgeNoRateLimit?: boolean;
   /** Refresh-token lifetime in minutes. Default and ceiling: 43200 (30 days) on Tier 2, 1440 (1 day) on Tier 3. */
   refreshTokenMinutes?: number;
   /**
@@ -124,7 +160,7 @@ export interface NormalizedAuthStandardOptions {
   passkeys: Required<PasskeyOptions> | null;
   groups: string[];
   appRoles: string[];
-  waf: Required<WafOptions>;
+  waf: NormalizedWafOptions;
   refreshTokenMinutes: number;
   threatProtection: 'off' | 'audit' | 'enforced';
   guestAccess: boolean;
@@ -144,6 +180,79 @@ const PUBLIC_SUFFIX_RP_IDS = new Set(['amplifyapp.com', 'cloudfront.net', 'amazo
 
 function fail(message: string): never {
   throw new AuthStandardConfigError(message);
+}
+
+const WAF_KEYS = new Set(['webAclArn', 'enabledInSandbox', 'signInLimit', 'overallLimit', 'evaluationWindowSec', 'action']);
+const RULE_KEYS = ['signInLimit', 'overallLimit', 'evaluationWindowSec', 'action'] as const;
+// A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
+const WEB_ACL_ARN_RE =
+  /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
+
+/** The Region in a literal web ACL ARN, or undefined for a CDK token (resolved at deploy). */
+export function webAclArnRegion(arn: string): string | undefined {
+  return WEB_ACL_ARN_RE.exec(arn)?.[1];
+}
+
+function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): NormalizedWafOptions {
+  if (acknowledgeNoRateLimit !== undefined && typeof acknowledgeNoRateLimit !== 'boolean') {
+    fail('acknowledgeNoRateLimit must be true or false.');
+  }
+  if (input === false) {
+    if (acknowledgeNoRateLimit !== true) {
+      fail(
+        "waf: false leaves the pool with no rate limit, and Cognito doesn't lock out wrong emailed codes. " +
+          'Reuse a shared web ACL with waf: { webAclArn } instead, or set acknowledgeNoRateLimit: true.',
+      );
+    }
+    return { mode: 'off' };
+  }
+  if (acknowledgeNoRateLimit === true) fail('acknowledgeNoRateLimit applies only with waf: false; remove it.');
+  if (input !== undefined && (typeof input !== 'object' || input === null || Array.isArray(input))) {
+    fail('waf must be an options object, or false (with acknowledgeNoRateLimit: true).');
+  }
+  const w = (input ?? {}) as WafOptions & Record<string, unknown>;
+  for (const key of Object.keys(w)) {
+    if (key === 'enabled') fail('waf.enabled is gone: use waf: false with acknowledgeNoRateLimit: true, or a shared web ACL (waf: { webAclArn }).');
+    if (!WAF_KEYS.has(key)) fail(`waf has no option "${key}".`);
+  }
+  if (w.enabledInSandbox !== undefined && typeof w.enabledInSandbox !== 'boolean') fail('waf.enabledInSandbox must be true or false.');
+  const enabledInSandbox = w.enabledInSandbox === true;
+
+  if (w.webAclArn !== undefined) {
+    const extra = RULE_KEYS.filter((k) => w[k] !== undefined);
+    if (extra.length > 0) {
+      fail(`waf.${extra.join(', waf.')} can't be combined with waf.webAclArn: a shared web ACL's rules are set where it's created.`);
+    }
+    if (typeof w.webAclArn !== 'string' || w.webAclArn.trim() === '') fail('waf.webAclArn must be a web ACL ARN.');
+    const arn = w.webAclArn.trim();
+    if (!Token.isUnresolved(arn) && webAclArnRegion(arn) === undefined) {
+      fail(
+        `waf.webAclArn "${arn}" isn't a REGIONAL web ACL ARN (arn:aws:wafv2:<region>:<account>:regional/webacl/<name>/<id>). ` +
+          'Cognito user pools can only use REGIONAL web ACLs.',
+      );
+    }
+    return { mode: 'shared', webAclArn: arn, enabledInSandbox };
+  }
+
+  const rules: WafRuleSettings = {
+    signInLimit: w.signInLimit ?? WAF_POLICY.signInLimit,
+    overallLimit: w.overallLimit ?? WAF_POLICY.overallLimit,
+    evaluationWindowSec: w.evaluationWindowSec ?? WAF_POLICY.evaluationWindowSec,
+    action: w.action ?? 'block',
+  };
+  return { mode: 'create', enabledInSandbox, ...validateWafRules(rules, 'waf') };
+}
+
+/** Checks rate-rule settings against AWS WAF's ranges. */
+export function validateWafRules(rules: WafRuleSettings, label: string): WafRuleSettings {
+  for (const [key, value] of [['signInLimit', rules.signInLimit], ['overallLimit', rules.overallLimit]] as const) {
+    if (!Number.isInteger(value) || value < 10 || value > 2_000_000_000) {
+      fail(`${label}.${key} must be a whole number from 10 to 2,000,000,000 (AWS WAF's range).`);
+    }
+  }
+  if (![60, 120, 300, 600].includes(rules.evaluationWindowSec)) fail(`${label}.evaluationWindowSec must be 60, 120, 300, or 600.`);
+  if (rules.action !== 'block' && rules.action !== 'count') fail(`${label}.action must be "block" or "count".`);
+  return rules;
 }
 
 function domainOf(address: string): string {
@@ -238,23 +347,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   }
 
   // WAF.
-  const w = o.waf ?? {};
-  const waf: Required<WafOptions> = {
-    enabled: w.enabled ?? true,
-    enabledInSandbox: w.enabledInSandbox ?? false,
-    signInLimit: w.signInLimit ?? WAF_POLICY.signInLimit,
-    overallLimit: w.overallLimit ?? WAF_POLICY.overallLimit,
-    evaluationWindowSec: w.evaluationWindowSec ?? WAF_POLICY.evaluationWindowSec,
-    action: w.action ?? 'block',
-  };
-  for (const [key, value] of [['signInLimit', waf.signInLimit], ['overallLimit', waf.overallLimit]] as const) {
-    if (!Number.isInteger(value) || value < 10 || value > 2_000_000_000) {
-      fail(`waf.${key} must be a whole number from 10 to 2,000,000,000 (AWS WAF's range).`);
-    }
-  }
-  if (![60, 120, 300, 600].includes(waf.evaluationWindowSec)) {
-    fail('waf.evaluationWindowSec must be 60, 120, 300, or 600.');
-  }
+  const waf = normalizeWaf(o.waf, o.acknowledgeNoRateLimit);
 
   const threatProtection = o.threatProtection ?? (tier === 3 ? 'audit' : 'off');
   if (tier === 3 && threatProtection === 'off') {

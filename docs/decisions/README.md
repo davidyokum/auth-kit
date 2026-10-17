@@ -15,3 +15,6 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0009](0009-localhost-kit.md) | The localhost kit: TOTP personas, a checked loopback binding, a ribbon that ships and a menu that doesn't |
 | [0010](0010-audit-log-intent-then-result.md) | The audit log is append-only, written as an intent before the change and a result after |
 | [0011](0011-people-actions.md) | People actions: live checks, exact roles, owner grants, two invite modes, and where the primer was unclear |
+| [0012](0012-release-tarballs.md) | Releases are attested tarballs built once in CI |
+| [0013](0013-shared-web-acl.md) | One shared web ACL per account and Region |
+| [0014](0014-matrix-without-proxy.md) | The auth matrix checks each route's own guard |

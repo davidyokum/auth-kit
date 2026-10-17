@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AuthUnavailableError, createTokenVerifier, UnauthenticatedError } from '../../src/server/index.js';
+import { AuthUnavailableError, createTokenVerifier, TOKEN_TIME_POLICY, UnauthenticatedError } from '../../src/server/index.js';
 import { createTestIssuer, tamperToken, unsignedToken } from '../../src/testing/index.js';
 import { CLIENT_ID, OTHER_CLIENT_ID, OTHER_POOL_ID, POOL_ID } from '../helpers.js';
 
@@ -101,6 +101,77 @@ describe('verifyAccessToken: the five checks', () => {
   it('rejects an access token presented as an ID token', async () => {
     const error = await rejection(verifier.verifyIdToken(issuer.mintAccessToken()));
     expect(error).toBeInstanceOf(UnauthenticatedError);
+  });
+});
+
+describe('expired versus invalid (M1)', () => {
+  it('reports a genuine token of this pool and client that merely expired as token_expired', async () => {
+    const error = await expect401(issuer.mintAccessToken({ expiresIn: -60 }));
+    expect(error.code).toBe('token_expired');
+  });
+
+  it("reports an expired token issued to another app client in the same pool as invalid_token", async () => {
+    const error = await expect401(issuer.mintAccessToken({ expiresIn: -60, claims: { client_id: OTHER_CLIENT_ID } }));
+    expect(error.code).toBe('invalid_token');
+  });
+
+  it('reports an expired ID token presented as an access token as invalid_token', async () => {
+    const error = await expect401(issuer.mintIdToken({ expiresIn: -60 }));
+    expect(error.code).toBe('invalid_token');
+  });
+
+  it('reports an expired forged or foreign token as invalid_token (signature is checked before expiry)', async () => {
+    const forged = tamperToken(issuer.mintAccessToken({ expiresIn: -60 }), { sub: 'someone-else' });
+    expect((await expect401(forged)).code).toBe('invalid_token');
+    const foreign = createTestIssuer({ userPoolId: OTHER_POOL_ID, clientId: CLIENT_ID }).mintAccessToken({ expiresIn: -60 });
+    expect((await expect401(foreign)).code).toBe('invalid_token');
+  });
+
+  it('keeps the raw token payload out of the error it reports', async () => {
+    const error = await expect401(issuer.mintAccessToken({ expiresIn: -60, sub: 'private-sub' }));
+    expect((error.cause as { rawJwt?: unknown }).rawJwt).toBeUndefined();
+  });
+});
+
+describe('claim shape and time policy (L1)', () => {
+  const now = Math.floor(Date.now() / 1000);
+
+  it.each([
+    ['no jti', { jti: undefined }],
+    ['no sub', { sub: undefined }],
+    ['an empty sub', { sub: '' }],
+    ['no exp (aws-jwt-verify would treat it as never expiring)', { exp: undefined }],
+    ['no iat', { iat: undefined }],
+    ['no auth_time', { auth_time: undefined }],
+    ['a NaN-like exp', { exp: 'soon' }],
+    ['a non-string username', { username: 42 }],
+    ['a non-string scope', { scope: ['a'] }],
+    ['groups that are not strings', { 'cognito:groups': [1, 2] }],
+  ])('refuses a pool-signed access token with %s', async (_label, claims) => {
+    expect((await expect401(issuer.mintAccessToken({ claims }))).code).toBe('invalid_token');
+  });
+
+  it('accepts a machine token without username (getUser refuses it separately)', async () => {
+    await expect(verifier.verifyAccessToken(issuer.mintAccessToken({ claims: { username: undefined } }))).resolves.toBeTruthy();
+  });
+
+  it(`allows iat up to ${TOKEN_TIME_POLICY.maxClockSkewSeconds} s in the future (clock drift) and no further`, async () => {
+    await expect(verifier.verifyAccessToken(issuer.mintAccessToken({ issuedAt: now + 120, authTime: now + 120 }))).resolves.toBeTruthy();
+    expect((await expect401(issuer.mintAccessToken({ issuedAt: now + 3600, authTime: now + 3600 }))).code).toBe('invalid_token');
+  });
+
+  it('refuses a lifetime Cognito never issues (over a day) or an exp before iat', async () => {
+    expect((await expect401(issuer.mintAccessToken({ expiresIn: 2 * 86400 }))).code).toBe('invalid_token');
+    expect((await expect401(issuer.mintAccessToken({ claims: { exp: now + 60, iat: now + 120, auth_time: now } }))).code).toBe('invalid_token');
+  });
+
+  it('refuses an auth_time after iat', async () => {
+    expect((await expect401(issuer.mintAccessToken({ issuedAt: now, authTime: now + 3600 }))).code).toBe('invalid_token');
+  });
+
+  it('checks ID tokens for sub, exp, and iat too', async () => {
+    const error = await rejection(verifier.verifyIdToken(issuer.mintIdToken({ claims: { sub: undefined } })));
+    expect((error as UnauthenticatedError).code).toBe('invalid_token');
   });
 });
 

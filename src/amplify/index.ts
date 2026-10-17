@@ -22,7 +22,7 @@
  * ```
  */
 export { standardAuthProps, type DefineAuthProps, type StandardAuthExtras } from './props.js';
-export { applyAuthStandard, type AppliedAuthStandard, type AuthResourceLike } from './apply.js';
+export { applyAuthStandard, type AppliedAuthStandard, type AppliedWaf, type AuthResourceLike } from './apply.js';
 export {
   normalizeOptions,
   AuthStandardConfigError,
@@ -30,15 +30,20 @@ export {
   type AuthEmailOptions,
   type PasskeyOptions,
   type WafOptions,
+  type WafRuleSettings,
+  type NormalizedWafOptions,
   type SelfSignUpOptions,
   type NormalizedAuthStandardOptions,
 } from './options.js';
 export {
   createAuthWebAcl,
+  createSharedAuthWebAcl,
+  associateAuthWebAcl,
   COGNITO_OPERATION_HEADERS,
   SIGN_IN_OPERATIONS,
   type AuthWebAcl,
   type AuthWebAclProps,
+  type SharedAuthWebAclProps,
 } from './waf.js';
 export {
   STANDARD_GROUPS,

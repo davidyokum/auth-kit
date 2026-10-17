@@ -28,13 +28,26 @@ export interface PreSignUpAllowlistOptions {
 }
 
 const DOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
+// The local part: printable ASCII except space, `@`, and the characters that can't appear unquoted.
+// Quoted local parts and anything exotic are refused; real institutional addresses don't need them.
+const LOCAL_PART_RE = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]{1,64}$/;
 
-/** True when `email` is on an allowed domain. Exported for tests and for UI hints. */
+/**
+ * True when `email` is a plain address on an allowed domain. Exported for tests and for UI hints.
+ * Exactly one `@`, no spaces or control characters, at most 254 characters, and a local part of
+ * ordinary characters (no leading, trailing, or doubled dots).
+ */
 export function isAllowedEmail(email: string, options: PreSignUpAllowlistOptions): boolean {
+  if (typeof email !== 'string') return false;
+  // Control characters anywhere (even at the ends, where trim() would hide them) mean no.
+  // eslint-disable-next-line no-control-regex -- control characters are what's being refused
+  if (/[\u0000-\u001F\u007F]/.test(email)) return false;
   const normalized = email.trim().toLowerCase();
-  const at = normalized.lastIndexOf('@');
-  if (at <= 0 || at === normalized.length - 1) return false;
-  const domain = normalized.slice(at + 1);
+  if (normalized.length === 0 || normalized.length > 254) return false;
+  const parts = normalized.split('@');
+  if (parts.length !== 2) return false;
+  const [local = '', domain = ''] = parts;
+  if (!LOCAL_PART_RE.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')) return false;
   if (!DOMAIN_RE.test(domain)) return false;
   return options.allowedEmailDomains.some((allowed) => {
     const a = allowed.trim().toLowerCase();
@@ -49,6 +62,10 @@ export function isAllowedEmail(email: string, options: PreSignUpAllowlistOptions
  *   must use an allowed domain.
  * - Admin-created users (`PreSignUp_AdminCreateUser`) always pass: invites are the normal path.
  * - Nobody is auto-confirmed or auto-verified; the emailed code proves the person owns the address.
+ *
+ * With self sign-up on, Cognito's `SignUp` answers `UsernameExistsException` for an address that
+ * already has an account (`PreventUserExistenceErrors` doesn't cover `SignUp`), so anyone can test
+ * whether an allowed-domain address is registered. The README lists this with the exception.
  */
 export function preSignUpAllowlist(options: PreSignUpAllowlistOptions) {
   if (options.allowedEmailDomains.length === 0) {
