@@ -1,6 +1,6 @@
 # 0013. One shared web ACL per account and Region
 
-- **Status:** Accepted, 2026-10-17 (amends [0004](0004-waf-rate-rule.md))
+- **Status:** Accepted, 2026-10-17 (amends [0004](0004-waf-rate-rule.md)); amended by [0017](0017-per-rule-waf-modes.md) (per-rule modes on `createSharedAuthWebAcl`)
 
 ## Context
 

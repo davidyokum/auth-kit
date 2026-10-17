@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.2-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.3-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -17,7 +17,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
-| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts) | **Implemented** (phase 2) |
+| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days | **Implemented** (phase 2) |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
@@ -27,10 +27,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.2-alpha/auth-kit-0.1.2-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.3-alpha/auth-kit-0.1.3-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.2-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.3-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -343,13 +343,14 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 
 | Export | What it does |
 |---|---|
-| `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: first-factor choice, emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
+| `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
 | `ChooseFirstCredential` | After an invite's emailed code: "Save a passkey", or "Set a password" (15+ characters) followed by the authenticator, which isn't optional. |
 | `AuthenticatorSetup` | Setup link, setup key, an optional QR code (`renderQrCode`, so the package stays dependency-free), then one code. |
 | `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. Its children are always server-rendered (hidden until the check passes), so it never changes the page's status. Use it inside a page, after the page's guard, with `serverChecked`. Without `serverChecked`, if the check can't run, the app stays hidden and the reason is shown with a retry. |
 | `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. |
 | Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
 
+- **The same screens for every address** until someone proves a factor ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)). Cognito's answer to "a passkey" or "a code" depends on the account (an unused invite has only emailed codes; an unknown address gets a random set), so the screens never show it: an account without a passkey still gets a passkey prompt that finds nothing (`decoyPasskeyPrompt`), an account without a password gets "don't match", and "Check your email" always follows a code request, naming the typed address ("If … has an account here"), with nothing sent when there's nothing to send. There's no method chooser. Cognito's responses still differ on the wire (the network panel, direct API calls); the WAF sign-in rule limits how fast anyone can ask. Sites building their own screens: `isFirstFactorUnavailable`, `decoyPasskeyPrompt`, `answerSimulatedCode`.
 - **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, and a disabled account read the same; a reset request looks the same either way). Rate limits, including WAF's, say to wait.
 - **Accessibility:** every field has a label; errors are announced (`role="alert"`) and linked to the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading.
 - **Styling:** unstyled markup. Each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `error`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS to copy into a stylesheet.
@@ -363,7 +364,7 @@ Checked against `@aws-amplify/auth` 6.21 (via `aws-amplify` 6.22) and AWS's docu
 - **No first password after an invite through Amplify.** Cognito's `ChangePassword` takes no previous password for a passwordless account, but Amplify's `updatePassword` refuses an empty one. `setFirstPassword` makes that one call directly, authorized by the access token.
 - **No `GetUserAuthFactors` in Amplify.** `fetchAuthFactors` calls it the same way; the after-sign-in steps, the gate, and the last-way-in guard need it.
 - **Browser-written cookies last 365 days** with Amplify's `ssr: true`; `configureAuthClient` makes them expire with the refresh token.
-- **Smaller ones:** Amplify's default sign-in flow (SRP) isn't allowed by the standard's app client, so every call passes `USER_AUTH`; `signIn` refuses while a session exists, so step-up ends the local session first; `getSetupUri` doesn't encode its inputs and labels the account with Cognito's username (a UUID), so auth-kit builds the `otpauth://` link; `associateWebAuthnCredential` takes no passkey name (Cognito names it); once someone has an authenticator, Cognito stops offering them emailed codes, and a request for one comes back as a choice of other methods.
+- **Smaller ones:** Amplify's default sign-in flow (SRP) isn't allowed by the standard's app client, so every call passes `USER_AUTH`; `signIn` refuses while a session exists, so step-up ends the local session first; `getSetupUri` doesn't encode its inputs and labels the account with Cognito's username (a UUID), so auth-kit builds the `otpauth://` link; `associateWebAuthnCredential` takes no passkey name (Cognito names it); once someone has an authenticator, Cognito stops offering them emailed codes (the code screen says so, to everyone, rather than showing that account's other methods).
 
 To check on the first sandbox deploy: passkey sign-in and registration on the relying-party domain, the emailed-code and TOTP paths end to end, that `GetUserAuthFactors` from the browser passes the site's CSP, and step-up with a passkey in Safari (ending the local session adds a round trip before the passkey prompt, which may outlast the click's user activation).
 
@@ -380,9 +381,16 @@ Then a dev-only route (`app/api/dev/sign-in/route.dev.ts` with `createDevKit`), 
 ### 8. The admin area: `auth-kit/admin`
 
 ```ts
-// amplify/backend.ts: the audit table
-import { AuditLogTable } from 'auth-kit/admin/cdk';
-const auditLog = new AuditLogTable(backend.createStack('audit-log'), 'AuditLog');
+// amplify/backend.ts: the audit table, and the schedule that enforces invite expiry
+import { AuditLogTable, InviteExpirySweep } from 'auth-kit/admin/cdk';
+const admin = backend.createStack('admin');
+const auditLog = new AuditLogTable(admin, 'AuditLog');
+new InviteExpirySweep(admin, 'InviteExpiry', {
+  userPool: backend.auth.resources.userPool,
+  auditLog,
+  // alarmTopic: an SNS topic that emails someone: a run failed, or the scheduler couldn't run it.
+  // inviteMode: 'temporary-password', // the Tier 3 admin pool
+});
 backend.addOutput({ custom: { auditLogTable: auditLog.tableName } });
 ```
 
@@ -448,7 +456,9 @@ export default async function PeoplePage() {
 
 Every action re-reads the acting person and the target from Cognito, runs the guardrails with a live owner count, asks for a recent sign-in before a grant or a delete (making someone an owner also emails every owner, and is undone if that email can't be sent), and writes the audit intent before any Cognito call and the result after ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md), [ADR 0011](docs/decisions/0011-people-actions.md)). Each returns `{ ok, message }` or `{ ok: false, code, error, changed }`, where `changed` says honestly whether anything happened. The Activity page is `people.listActivity({ cursor })` with `<ActivityLog>`; apps log their own content changes with `recordChange(auditLog, …)`.
 
-The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResourceArns })` (Amplify Hosting's compute role is set in the console, so this returns plain JSON; in CDK, `auditLog.grantAppendAndQuery(role)`). Schedule `createInviteExpirySweep({ userPoolId, auditLog })` daily. The Tier 3 admin pool, which has no emailed codes, uses `inviteMode: 'temporary-password'`: Cognito emails a one-time password the app never sees.
+The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResourceArns })` (Amplify Hosting's compute role is set in the console, so this returns plain JSON; in CDK, `auditLog.grantAppendAndQuery(role)`). The Tier 3 admin pool, which has no emailed codes, uses `inviteMode: 'temporary-password'`: Cognito emails a one-time password the app never sees.
+
+**Invite expiry.** An invite is a live account until it's used, so `InviteExpirySweep` disables every invite still unused after 7 days, within the hour ([ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)). EventBridge Scheduler runs a Lambda function with the package's own bundle (`createInviteExpirySweep` as the `system:invite-expiry` actor; each disable is an audit intent, the Cognito calls, then a result, shown as "Scheduled job" on the Activity page). Its role may call only `ListUsers`, `AdminListGroupsForUser`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on that pool, `PutItem` on the audit table, and write its own log; the scheduler's role may only invoke it. Options: `schedule` (a `rate` from 10 minutes to a day, or a `cron`), `inviteMode`, `alarmTopic`, `maxPeople` (a run fails, and alarms, rather than silently skip accounts past it), `logRetention`. For a role defined outside CDK, `inviteExpirySweepPolicy({ userPoolArn, auditTableArn })` is the same policy as JSON. An admin can also run the sweep from the People page (`people.expireStaleInvites()`).
 
 ## Status codes
 
@@ -511,10 +521,10 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Breached-password check | Plus threat protection on Tier 3; a Have I Been Pwned range check before every new password the client saves | Pkg |
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
 | Essentials plan + SES | `UserPoolTier`, `EmailConfiguration` with the domain identity | Pkg |
-| WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule), or one [shared ACL](#waf-one-web-acl-for-all-your-sites) per account and Region; off only with `acknowledgeNoRateLimit` | Pkg ([caveat](#verify-on-the-first-sandbox-deploy)) |
+| WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule, each with its own mode), or one [shared ACL](#waf-one-web-acl-for-all-your-sites) per account and Region; off only with `acknowledgeNoRateLimit` | Pkg ([count first](#count-first-then-block-the-sign-in-rule)) |
 | `AuthSessionValidity` 3 minutes | Preset | Pkg |
 | Passkeys: user verification, count as MFA, final-domain RP ID | `WebAuthnUserVerification`, `WebAuthnFactorConfiguration`, RP ID validation | Pkg |
-| `PreventUserExistenceErrors` | Preset | Pkg |
+| `PreventUserExistenceErrors` | Preset; the sign-in screens are the same for every address until a factor is proven ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)) | Pkg (on-the-wire caveat in the ADR) |
 | Invites with no password and no `email_verified` | `people.invite` (`MessageAction: SUPPRESS` + SES) | Pkg |
 | **Sessions** | | |
 | Access/ID 60 min; refresh 30 days (Tier 2) or ≤ 1 day (Tier 3) | Preset (ceilings enforced; admin pools ≤ 1 day) | Pkg |
@@ -538,7 +548,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
 | Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
-| Unused invites disabled after 7 days, flagged | `inviteStatus`; `createInviteExpirySweep` (schedule it daily) | Pkg |
+| Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)) | Pkg |
 | Recovery defined | Email recovery (everyday), admin-only (admin pool); admin MFA reset P2 | Partial |
 | Email changes admin-only | Can't be enforced in the pool ([why](#what-the-pool-cant-enforce)) | Gap |
 | First admin bootstrapped once at deploy | Not built | P2 |
@@ -571,7 +581,9 @@ import { createSharedAuthWebAcl } from 'auth-kit/amplify';
 
 const app = new App();
 const stack = new Stack(app, 'AuthKitSharedWaf', { env: { region: 'us-east-1' } });
-const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl'); // same rate rules, no association
+// Same rate rules, no association. The sign-in rule counts by default; after a week of counts:
+// createSharedAuthWebAcl(stack, 'SharedAuthWebAcl', { waf: { signInRule: 'block' } })
+const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl');
 new CfnOutput(stack, 'WebAclArn', { value: acl.attrArn });
 ```
 
@@ -585,15 +597,35 @@ export const authOptions = {
 
 The preset then only associates the shared ACL with the pool. Its rate rules count per IP across every pool it protects, so an office using several sites shares one budget: raise the shared ACL's limits if that bites. Turning WAF off entirely takes `waf: false` plus `acknowledgeNoRateLimit: true` (Cognito doesn't lock out wrong emailed codes) and still warns at synthesis.
 
-## Verify on the first sandbox deploy
+### Count first, then block the sign-in rule
 
-These were checked against the installed packages and AWS documentation, but not against a live pool. Deploying a sandbox needs David's approval.
+Each rule has its own mode ([ADR 0017](docs/decisions/0017-per-rule-waf-modes.md)): `waf: { signInRule, overallRule }`, each `'count'` or `'block'`, on `createSharedAuthWebAcl` and on the preset's own web ACL. The defaults are **sign-in `count`, overall `block`**, so the pool always has a per-IP limit while the sign-in rule's counts come in.
 
+The sign-in rule's header match was **verified live on 2026-10-17**: Cognito forwards the bare operation name (`x-amzn-cognito-operation-name: InitiateAuth`), and a burst of `InitiateAuth` calls put the sender over the sign-in limit and not the overall one. What's left is tuning: after about a week, read both rules' sampled requests (read-only), check who comes near the sign-in limit and whether token refreshes show up as `InitiateAuth`, then set `signInRule: 'block'` and redeploy the stack that owns the ACL:
+
+```sh
+aws wafv2 get-sampled-requests --profile <profile> --scope REGIONAL --web-acl-arn <arn> \
+  --rule-metric-name <acl-or-project>-sign-in-attempts-per-ip \
+  --time-window StartTime=<iso>,EndTime=<iso> --max-items 100   # and <acl-or-project>-requests-per-ip
+```
+
+## Verified on a live pool, and what's left
+
+The first live deploy (a demo site, 2026-10-17) checked these against a real pool:
+
+- **The preset's settings deploy as written:** MFA optional with TOTP; passkeys with user verification required and `FactorConfiguration` `MULTI_FACTOR_WITH_USER_VERIFICATION`; allowed first factors `WEB_AUTHN`, `PASSWORD`, `EMAIL_OTP`; an app client with exactly `ALLOW_USER_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` (a `USER_PASSWORD_AUTH` call is refused), `PreventUserExistenceErrors`, token revocation, and the standard lifetimes. Two traps when checking by hand ([ADR 0001](docs/decisions/0001-passkey-first.md)): the AWS CLI's `describe-user-pool` hides `FactorConfiguration` (its model predates the field; the raw response under `--debug` and the CloudFormation template have it), and the allowed first factors are on the **pool** (`Policies.SignInPolicy.AllowedFirstAuthFactors`), not the app client.
+- **Choice-based sign-in without a managed-login domain** works at the API level: the pool has no domain, and unsigned `InitiateAuth` with `USER_AUTH` returns `SELECT_CHALLENGE`, or a passkey challenge carrying the site's relying-party ID and decoy credential IDs for an unknown address.
+- **The WAF sign-in rule's header match** ([above](#count-first-then-block-the-sign-in-rule)).
+- **Redirects behind Amplify Hosting** keep the `https` scheme and a safe `next`.
+
+Still to check on a live pool (each needs a real person or a deploy approved by David):
+
+- **The passkey ceremony** on the relying-party domain, registration and sign-in, and step-up with a passkey in Safari.
+- **What Cognito reveals on the wire** for an invited address versus unknown ones ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md) lists the exact checks). The screens are the same either way.
+- **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. Read the samples after a session refreshes (the command above).
+- **`request.url`'s scheme in route handlers behind Amplify Hosting.** If handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
-- **The WAF sign-in rule's header match.** Cognito forwards `x-amzn-cognito-operation-name` to WAF, but AWS doesn't document its value format. The rule matches case-insensitively on the operation name (and on `x-amz-target`). Run it in `count` mode first; the overall per-IP rule needs no header match.
-- **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. After a sandbox session refreshes, read both rules' samples (read-only) and tune the limits with refreshes in mind: `aws wafv2 get-sampled-requests --profile <profile> --scope REGIONAL --web-acl-arn <arn> --rule-metric-name <project>-sign-in-attempts-per-ip --time-window StartTime=<iso>,EndTime=<iso> --max-items 100` (and `<project>-requests-per-ip`).
-- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
-- **Choice-based sign-in without a managed-login domain.** AWS's overview says passwordless and passkey sign-in need one; other AWS pages say SDK apps don't. The preset doesn't create a domain.
+- **The invite-expiry schedule end to end** (a real invite disabled after 7 days, its audit rows on the Activity page).
 
 ## What the pool can't enforce
 

@@ -20,3 +20,6 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0014](0014-matrix-without-proxy.md) | The auth matrix checks each route's own guard |
 | [0015](0015-gate-renders-its-children.md) | The authenticator gate always renders its children, so it can't mask the server's answer |
 | [0016](0016-matrix-server-mode.md) | The auth matrix's server mode ships in auth-kit |
+| [0017](0017-per-rule-waf-modes.md) | Each WAF rule has its own mode; the sign-in rule counts first |
+| [0018](0018-same-screens-for-every-address.md) | The sign-in screens are the same for every address until a factor is proven |
+| [0019](0019-invite-expiry-sweep.md) | Invite expiry runs hourly, from a Lambda bundled in the package |
