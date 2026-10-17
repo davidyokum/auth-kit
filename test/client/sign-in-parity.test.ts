@@ -13,7 +13,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SignIn, isFirstFactorUnavailable, type SignInStep } from '../../src/client/index.js';
+import { SignIn, describeAuthError, isFirstFactorUnavailable, type SignInStep } from '../../src/client/index.js';
 import { answerSimulatedCode } from '../../src/client/parity.js';
 import { auth, awsError, next, resetAmplifyMocks } from './amplify-mock.js';
 
@@ -189,6 +189,13 @@ describe('the same screens for every address (ADR 0018)', () => {
       expect(promptShown + (cognitoPrompted ? 1 : 0), name).toBe(1);
       cleanup();
     }
+  });
+
+  it('a wrong emailed code reads the same whichever error Cognito gives (a fake challenge may answer either)', () => {
+    const mismatch = describeAuthError(awsError('CodeMismatchException', 'Invalid code received for user'), 'code');
+    const notAuthorized = describeAuthError(awsError('NotAuthorizedException', 'Incorrect username or password.'), 'code');
+    expect(notAuthorized).toMatchObject({ kind: 'wrong-code', message: mismatch.message });
+    expect(describeAuthError(awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.'), 'code').kind).toBe('session-expired');
   });
 
   it('a simulated code expires with the 3-minute session, like a real one', async () => {
