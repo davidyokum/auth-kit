@@ -29,7 +29,8 @@ npm run check   # typecheck + lint + test + build
 - `src/proxy` `withAuthProxy`
 - `src/testing` auth matrix, test issuer, fakes
 - `src/client` sign-in screens, the authenticator gate, and My account (React client components on Amplify JS v6; ADR 0008)
-- `src/admin`, `src/dev` phase-2 stubs with implemented pure checks
+- `src/admin` phase-2 stubs with implemented pure checks
+- `src/dev` the localhost kit (`auth-kit/dev`, `auth-kit/dev/menu`, `auth-kit/ribbon`, the `auth-kit` command; see `docs/localhost.md`). Only `ribbon.tsx` and `ribbon-model.ts` may reach a production build: never import the marker or other dev modules from them
 - `src/shared/policy.ts` every concrete setting (lifetimes, limits, roles, capabilities)
 - `docs/decisions` ADRs
 

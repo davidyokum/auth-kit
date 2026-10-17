@@ -1,6 +1,6 @@
 # 0005. `ADMIN_USER_PASSWORD_AUTH` on sandbox clients only
 
-- **Status:** Accepted, 2026-10-17
+- **Status:** Accepted, 2026-10-17; amended by [0009](0009-localhost-kit.md) (loopback IPs in the host gate, a checked loopback binding, TOTP personas)
 - **Standard:** 03 §2 Local development; primer §10 (Chapter 8)
 
 ## Context
@@ -12,7 +12,7 @@ AI coding tools' built-in browsers can't reach a password manager, and seeing wh
 - The preset reads Amplify's CDK context (`amplify-backend-type`). Only a sandbox deployment gets `ALLOW_ADMIN_USER_PASSWORD_AUTH` on its app client, and only a sandbox pool is tagged `Environment=sandbox`. A branch named `sandbox` is tagged `branch-sandbox`, and the `environment` option can't be set to `sandbox`.
 - Anything that seeds accounts or signs people in calls `assertSandboxPool` and refuses a pool without that tag.
 - "Sign in as…" answers 404 unless three gates pass: `NODE_ENV === 'development'`, a `localhost` / `*.localhost` host, and `ALLOW_DEV_SIGNIN === '1'`. The dev server binds to `127.0.0.1` so a stranger on the same network can't send `Host: localhost`.
-- Phase 2 adds the exchange itself, the persona seeding script (which asserts the AWS account before writing), and the CI check that a production build doesn't contain the route.
+- Phase 2 adds the exchange itself, the persona seeding script (which asserts the AWS account before writing), and the CI check that a production build doesn't contain the route (done; see 0009 and [the localhost guide](../localhost.md)).
 
 ## Consequences
 

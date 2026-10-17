@@ -95,7 +95,8 @@ export const WAF_POLICY = {
 
 /** Local development (primer Chapter 8). */
 export const DEV_POLICY = {
-  route: '/dev/sign-in',
+  /** The "Sign in as…" route (`app/api/dev/sign-in/route.dev.ts`). */
+  route: '/api/dev/sign-in',
   /** Persona addresses end in `.test`, a reserved TLD that never delivers mail. */
   personaEmailDomain: 'personas.test',
   /** Personas: one per admin role plus a member with no group. */

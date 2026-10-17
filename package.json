@@ -62,9 +62,21 @@
     },
     "./dev": {
       "types": "./dist/dev/index.d.ts",
-      "import": "./dist/dev/index.js"
+      "import": "./dist/dev/index.js",
+      "default": "./dist/dev/index.js"
+    },
+    "./dev/menu": {
+      "types": "./dist/dev/menu.d.ts",
+      "import": "./dist/dev/menu.js"
+    },
+    "./ribbon": {
+      "types": "./dist/ribbon/index.d.ts",
+      "import": "./dist/ribbon/index.js"
     },
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "auth-kit": "./dist/bin/auth-kit.js"
   },
   "scripts": {
     "build": "tsup",
@@ -118,8 +130,10 @@
     "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.20.5",
     "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "aws-amplify": "^6.22.2",
     "aws-cdk-lib": "^2.273.0",
+    "aws-sdk-client-mock": "^4.1.0",
     "constructs": "^10.8.1",
     "eslint": "^10.13.0",
     "jsdom": "^29.1.1",

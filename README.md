@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`). The admin People page and the localhost kit are typed stubs that throw `NotImplementedError` until their phase-2 work lands. The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`) and the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)). The admin People page is a typed stub that throws `NotImplementedError` until its phase-2 work lands. The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
 
 ## What it does
 
@@ -15,7 +15,9 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | Guardrails implemented; actions and audit log stubbed |
-| `auth-kit/dev` | The localhost kit: personas, triple-gated "Sign in as…", environment ribbon, production-build check | Gates, sandbox guard, persona validation, ribbon model implemented; seeding, sign-in exchange, component, build check stubbed |
+| `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
+| `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
+| `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
 
 ## Install
 
@@ -209,6 +211,16 @@ Checked against `@aws-amplify/auth` 6.21 (via `aws-amplify` 6.22) and AWS's docu
 
 To check on the first sandbox deploy: passkey sign-in and registration on the relying-party domain, the emailed-code and TOTP paths end to end, that `GetUserAuthFactors` from the browser passes the site's CSP, and step-up with a passkey in Safari (ending the local session adds a round trip before the passkey prompt, which may outlast the click's user activation).
 
+### 7. Localhost: personas and "Sign in as…"
+
+```sh
+npx ampx sandbox --profile personal
+npx auth-kit init-personas --domain reports.test
+npx auth-kit seed-personas --profile personal --account <account id>
+```
+
+Then a dev-only route (`app/api/dev/sign-in/route.dev.ts` with `createDevKit`), the ribbon in the layout, `withDevKit` in `next.config.ts`, and `npx auth-kit check-prod-build` in CI. The [localhost guide](docs/localhost.md) has every file.
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -280,11 +292,13 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Rich text, uploads, drafts | Not in this package yet | App / later |
 | **Foundation** | SES domain identity required by the preset; SPF/DKIM/DMARC, private database, compute role, master keys, break-glass, secrets, branch passwords | Ops / App |
 | **Local development** | | |
-| Sandbox pool tagged `Environment=sandbox`; seeding refuses others | Preset tags it; `assertSandboxPool` | Pkg (seeding P2) |
-| Personas from `personas.json`, `.test` addresses | `parsePersonas`, `defaultPersonas` | Pkg (seeding P2) |
-| "Sign in as…" behind three gates, loopback, sandbox-only admin flow | `checkDevSignInGates`; `ALLOW_ADMIN_USER_PASSWORD_AUTH` only on sandbox clients | Pkg (exchange P2) |
-| Dev sign-in absent from production builds, CI-tested | `checkProductionBuild` | P2 |
-| Ribbon naming environment, pool, persona | `environmentRibbonModel` | Pkg (component P2) |
+| Sandbox pool tagged `Environment=sandbox`; seeding and sign-in refuse others | Preset tags it; `sandboxProblems` also refuses Amplify branches, deletion protection, many users, the wrong account | Pkg |
+| Personas from `personas.json`, `.test` addresses, passwords in `.env.local` | `parsePersonas`, `seedPersonas`, `npx auth-kit seed-personas` (personas get an authenticator too: [ADR 0009](docs/decisions/0009-localhost-kit.md)) | Pkg |
+| "Sign in as…" behind three gates, loopback, sandbox-only admin flow | `createDevKit`: request gates, same-site writes, a checked loopback binding, the sandbox check; `ALLOW_ADMIN_USER_PASSWORD_AUTH` only on sandbox clients | Pkg |
+| Dev sign-in absent from production builds, CI-tested | `withDevKit` (`.dev.ts` routes, `@/dev` alias); `npx auth-kit check-prod-build` and `check-dev-route` | Pkg + App (CI step) |
+| Roles seen as real accounts; View as on the live site | Personas; `ViewAsBanner` (the View as action is the admin module's) | Pkg / App |
+| Ribbon naming environment, pool, persona; `[DEV]` title and favicon | `EnvironmentRibbon`, `environmentMetadata` | Pkg |
+| One `*.localhost` name per app | `localDevServer` | Pkg + App |
 | **Assurance** | | |
 | Auth-matrix tests in CI | `assertAuthMatrix` | Pkg |
 
