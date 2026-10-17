@@ -1,5 +1,5 @@
 import { AmplifyAuth, type AuthProps } from '@aws-amplify/auth-construct';
-import { App, Stack } from 'aws-cdk-lib';
+import { App, Fn, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import { UserPoolOperation, type UserPool } from 'aws-cdk-lib/aws-cognito';
 import { Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
@@ -8,7 +8,9 @@ import {
   type AuthStandardOptions,
   AuthStandardConfigError,
   applyAuthStandard,
+  createSharedAuthWebAcl,
   normalizeOptions,
+  SIGN_IN_OPERATIONS,
   standardAuthProps,
 } from '../../src/amplify/index.js';
 
@@ -215,7 +217,8 @@ describe('Tier 2 pool on a branch', () => {
       deletionProtection: 'ACTIVE',
       userPoolTier: 'ESSENTIALS',
     });
-    expect(applied.webAcl).not.toBeNull();
+    expect(applied.waf.mode).toBe('created');
+    expect(applied.waf.webAcl).not.toBeNull();
   });
 
   it('matches the template snapshot', () => {
@@ -408,10 +411,106 @@ describe('WAF options', () => {
     });
   });
 
-  it('warns when the web ACL is turned off outside a sandbox', () => {
-    const { stack, template } = synth({ ...BASE, waf: { enabled: false } });
+  it('turns the web ACL off only with an explicit acknowledgment, and still warns', () => {
+    expect(() => synth({ ...BASE, waf: false })).toThrow(/acknowledgeNoRateLimit: true/);
+    const { stack, template, applied } = synth({ ...BASE, waf: false, acknowledgeNoRateLimit: true });
     template().resourceCountIs('AWS::WAFv2::WebACL', 0);
-    Annotations.fromStack(stack).hasWarning('*', Match.stringLikeRegexp('WAF rate rule'));
+    template().resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
+    expect(applied.waf).toMatchObject({ mode: 'none', association: null });
+    Annotations.fromStack(stack).hasWarning('*', Match.stringLikeRegexp('no WAF rate rule'));
+  });
+});
+
+/** A literal REGIONAL web ACL ARN built at runtime, so the repo holds no 12-digit account ID. */
+const ACCOUNT = '1'.repeat(12);
+const SHARED_ARN = `arn:aws:wafv2:us-east-1:${ACCOUNT}:regional/webacl/auth-kit-shared-user-pools/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`;
+
+describe('a shared web ACL (one per account and Region)', () => {
+  it('associates the existing ACL with the pool and creates no ACL of its own', () => {
+    const { template, applied } = synth({ ...BASE, waf: { webAclArn: SHARED_ARN } });
+    const t = template();
+    t.resourceCountIs('AWS::WAFv2::WebACL', 0);
+    t.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
+    t.hasResourceProperties('AWS::WAFv2::WebACLAssociation', {
+      ResourceArn: { 'Fn::GetAtt': [Match.stringLikeRegexp('^authUserPool'), 'Arn'] },
+      WebACLArn: SHARED_ARN,
+    });
+    expect(applied.waf).toMatchObject({ mode: 'shared', webAcl: null, webAclArn: SHARED_ARN });
+  });
+
+  it('accepts a CDK token (an imported value) for the ARN', () => {
+    const t = synth({ ...BASE, waf: { webAclArn: Fn.importValue('AuthKitSharedWebAclArn') } }).template();
+    t.hasResourceProperties('AWS::WAFv2::WebACLAssociation', { WebACLArn: { 'Fn::ImportValue': 'AuthKitSharedWebAclArn' } });
+  });
+
+  it('skips sandboxes by default and associates there on request', () => {
+    synth({ ...BASE, waf: { webAclArn: SHARED_ARN } }, { type: 'sandbox' }).template().resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
+    synth({ ...BASE, waf: { webAclArn: SHARED_ARN, enabledInSandbox: true } }, { type: 'sandbox' })
+      .template()
+      .resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
+  });
+
+  it("refuses an ACL in a different Region from the pool's", () => {
+    // An environment-agnostic stack can't tell (its Region is a deploy-time token)...
+    expect(() => synth({ ...BASE, waf: { webAclArn: SHARED_ARN.replace('us-east-1', 'us-west-2') } })).not.toThrow();
+    // ...but a stack with a known Region can.
+    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main' } });
+    const stack = new Stack(app, 'S', { env: { region: 'us-west-2' } });
+    const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(BASE) as unknown as AuthProps);
+    expect(() => applyAuthStandard(auth, { ...BASE, waf: { webAclArn: SHARED_ARN } })).toThrow(/in us-east-1 but the pool is in us-west-2/);
+  });
+
+  it('createSharedAuthWebAcl builds the same rate rules with no association', () => {
+    const stack = new Stack(new App(), 'SharedWaf', { env: { region: 'us-east-1' } });
+    const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl', { waf: { action: 'count' } });
+    const t = Template.fromStack(stack);
+    t.resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
+    t.hasResourceProperties('AWS::WAFv2::WebACL', {
+      Name: 'auth-kit-shared-user-pools',
+      Scope: 'REGIONAL',
+      Rules: [
+        Match.objectLike({ Name: 'auth-kit-sign-in-attempts-per-ip', Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 100 }) } }),
+        Match.objectLike({ Name: 'auth-kit-requests-per-ip', Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 1000 }) } }),
+      ],
+    });
+    expect(acl.attrArn).toBeTruthy();
+    expect(() => createSharedAuthWebAcl(stack, 'Bad', { name: 'has spaces' })).toThrow(/web ACL name/);
+    expect(() => createSharedAuthWebAcl(stack, 'Bad2', { waf: { signInLimit: 1 } })).toThrow(/from 10/);
+  });
+
+  it('counts refreshes only in the overall rule for current Amplify clients (GetTokensFromRefreshToken)', () => {
+    // The sign-in rule matches InitiateAuth (which older clients use with REFRESH_TOKEN_AUTH) and
+    // RespondToAuthChallenge; Amplify JS 6.22 refreshes with GetTokensFromRefreshToken (see ADR 0004).
+    expect(SIGN_IN_OPERATIONS).toEqual(['InitiateAuth', 'RespondToAuthChallenge']);
+    expect(SIGN_IN_OPERATIONS.some((op) => 'awscognitoidentityproviderservice.gettokensfromrefreshtoken'.includes(op.toLowerCase()))).toBe(false);
+    expect('awscognitoidentityproviderservice.initiateauth'.includes('initiateauth')).toBe(true);
+  });
+});
+
+describe('sandbox detection is exact', () => {
+  it('Amplify itself refuses an unknown amplify-backend-type (so a wrong-case value never synthesizes)', () => {
+    expect(() => synth(BASE, { type: 'Sandbox' as never })).toThrow(/Unknown amplify-backend-type/);
+  });
+
+  it.each(['Sandbox', 'SANDBOX', ' sandbox', 'sandbox-2'])('and auth-kit treats %j as production on its own', (type) => {
+    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main' } });
+    const stack = new Stack(app, 'S');
+    const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(BASE) as unknown as AuthProps);
+    // Same pool, but its context lookup answers with the wrong-case deployment type.
+    const node = new Proxy(auth.resources.userPool.node, {
+      get: (target, prop, receiver) =>
+        prop === 'tryGetContext'
+          ? (key: string): unknown => (key === 'amplify-backend-type' ? type : (target.tryGetContext(key) as unknown))
+          : Reflect.get(target, prop, receiver) as unknown,
+    });
+    const userPool = new Proxy(auth.resources.userPool, {
+      get: (target, prop, receiver) => (prop === 'node' ? node : (Reflect.get(target, prop, receiver) as unknown)),
+    });
+    const applied = applyAuthStandard({ resources: { ...auth.resources, userPool } }, BASE);
+    expect(applied).toMatchObject({ isSandbox: false, deletionProtection: 'ACTIVE' });
+    expect(applied.explicitAuthFlows).toEqual(['ALLOW_USER_AUTH', 'ALLOW_REFRESH_TOKEN_AUTH']);
+    expect(applied.environment).not.toBe('sandbox');
+    expect(applied.waf.mode).toBe('created');
   });
 });
 
@@ -457,6 +556,14 @@ describe('option validation', () => {
     ['empty self sign-up list', { selfSignUp: { allowedEmailDomains: [] } }, /at least one domain/],
     ['WAF limit below 10', { waf: { signInLimit: 5 } }, /from 10/],
     ['WAF window not allowed', { waf: { evaluationWindowSec: 30 as 60 } }, /60, 120, 300, or 600/],
+    ['WAF action not allowed', { waf: { action: 'allow' as 'block' } }, /"block" or "count"/],
+    ['waf: false without the acknowledgment', { waf: false }, /acknowledgeNoRateLimit: true/],
+    ['the acknowledgment without waf: false', { acknowledgeNoRateLimit: true }, /applies only with waf: false/],
+    ['the retired waf.enabled', { waf: { enabled: false } }, /waf.enabled is gone/],
+    ['an unknown waf option', { waf: { limit: 5 } }, /no option "limit"/],
+    ['a shared ACL with its own limits', { waf: { webAclArn: 'x', signInLimit: 50 } }, /can't be combined with waf.webAclArn/],
+    ['a malformed web ACL ARN', { waf: { webAclArn: 'arn:aws:wafv2:us-east-1:acct:regional/webacl/x/y' } }, /isn't a REGIONAL web ACL ARN/],
+    ['a CloudFront (global) web ACL', { waf: { webAclArn: `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:global/webacl/x/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` } }, /REGIONAL/],
   ];
   it.each(bad)('rejects %s', (_label, change, message) => {
     expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(AuthStandardConfigError);

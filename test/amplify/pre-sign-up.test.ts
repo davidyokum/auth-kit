@@ -24,6 +24,35 @@ describe('isAllowedEmail', () => {
     expect(isAllowedEmail(email, options)).toBe(allowed);
   });
 
+  describe('address parsing (L8)', () => {
+    const C = String.fromCharCode;
+    it.each([
+      ['a@evil.example@example.edu', 'two @ signs'],
+      ['"a@b"@example.edu', 'a quoted local part'],
+      [`a${C(0)}b@example.edu`, 'a NUL in the local part'],
+      [`a${C(10)}@example.edu`, 'a newline'],
+      [`a${C(9)}b@example.edu`, 'a tab'],
+      ['a b@example.edu', 'a space inside'],
+      [`a@example.edu${C(13)}`, 'a trailing carriage return'],
+      ['.a@example.edu', 'a leading dot'],
+      ['a.@example.edu', 'a trailing dot'],
+      ['a..b@example.edu', 'a doubled dot'],
+      [`${'a'.repeat(65)}@example.edu`, 'a local part over 64 characters'],
+      [`a@${'b'.repeat(60)}.${'c'.repeat(60)}.${'d'.repeat(60)}.${'e'.repeat(60)}.example.edu`, 'an address over 254 characters'],
+      [`a@example.edu${C(0x200b)}`, 'a zero-width space'],
+    ])('refuses %j (%s)', (email) => {
+      expect(isAllowedEmail(email, { allowedEmailDomains: ['example.edu'], allowSubdomains: true })).toBe(false);
+    });
+
+    it.each(['first.last@example.edu', 'a+tag@example.edu', "o'brien@example.edu", 'x_y-z@example.edu'])('accepts %s', (email) => {
+      expect(isAllowedEmail(email, { allowedEmailDomains: ['example.edu'] })).toBe(true);
+    });
+
+    it('refuses a non-string', () => {
+      expect(isAllowedEmail(undefined as never, { allowedEmailDomains: ['example.edu'] })).toBe(false);
+    });
+  });
+
   it('allows subdomains only when asked', () => {
     expect(isAllowedEmail('a@cs.example.edu', { allowedEmailDomains: ['example.edu'], allowSubdomains: true })).toBe(true);
     expect(isAllowedEmail('a@notexample.edu', { allowedEmailDomains: ['example.edu'], allowSubdomains: true })).toBe(false);
