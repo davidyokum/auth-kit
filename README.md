@@ -11,7 +11,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/amplify` | A Gen 2 auth preset: one pool per app, invite-only, passkey first, password + authenticator second, emailed code as the backstop, standard token lifetimes, deletion protection, SES from a verified domain, standard groups, a WAF rate rule, sandbox detection | **Implemented** |
 | `auth-kit/amplify/pre-sign-up` | The one sanctioned exception to invite-only: a preSignUp Lambda that allows self-registration from listed email domains | **Implemented** |
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, record checks (404), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
-| `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh | **Implemented** |
+| `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
@@ -176,6 +176,41 @@ export const proxy = withAuthProxy({
 The proxy refreshes only an Amplify cookie session whose access token is genuine (this pool, this app client) but expired and that has a refresh-token cookie; never an anonymous, forged, or bearer request. Refreshes are public Cognito calls from the server's own IP address, so they count toward the pool's WAF per-IP rules; the proxy limits them per person and per server instance and backs off after failures (`refreshLimits`, `onRefresh` for logging; [ADR 0004](docs/decisions/0004-waf-rate-rule.md)).
 
 The browser writes its own token cookies (sign-in, client-side refreshes) through Amplify's `CookieStorage`, which defaults to a 365-day lifetime; `configureAuthClient` (step 6) gives them the refresh token's lifetime too.
+
+#### A strict Content-Security-Policy with a nonce
+
+The standard asks for a strict CSP because Amplify's token cookies are readable by page scripts. With the App Router that means a fresh nonce per request, set in the proxy: Next reads it from the **request's** `Content-Security-Policy` header and stamps its own scripts with it, and the browser enforces the policy from the response. `nonceCspHeaders` does both through the proxy's `headers` hook:
+
+```ts
+// proxy.ts
+import { nonceCspHeaders, withAuthProxy } from 'auth-kit/proxy';
+
+const dev = process.env.NODE_ENV === 'development';
+
+export const proxy = withAuthProxy({
+  auth,
+  publicRoutes: ['/', '/about', '/legal/*'],
+  headers: nonceCspHeaders((nonce) =>
+    [
+      "default-src 'self'",
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`, // React's dev tooling needs eval
+      `style-src 'self' ${dev ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
+      "img-src 'self' data: blob:",
+      // The browser calls Cognito directly; the breached-password check calls Have I Been Pwned.
+      "connect-src 'self' https://cognito-idp.us-east-1.amazonaws.com https://api.pwnedpasswords.com",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; '),
+  ),
+});
+```
+
+- **Render per request.** A nonce can't be baked into a static page: call `await connection()` (from `next/server`) in the root layout. Pages get the nonce in `x-nonce` for their own `<Script nonce>`.
+- **Every response.** The hook runs once per request, before the auth decision. Its `request` headers reach pages and routes on every pass-through (public or protected); its `response` headers go on every response, sign-in redirects and refusals included. The proxy drops any CSP request header a client sends, so the nonce Next uses only ever comes from the app.
+- **Your own headers.** Pass any function: `headers: (request) => ({ request: { … }, response: { … } })`, sync or async. It can't set what auth depends on: the request's `cookie`, `authorization`, `host`, client-address and `x-forwarded-*` headers, auth-kit's `x-auth-kit-*`, or Next's internals; nor the response headers the proxy owns (`set-cookie`, `location`, `cache-control`, and the refusal's body headers). Those throw, and the request fails closed (`RESERVED_REQUEST_HEADERS`, `RESERVED_RESPONSE_HEADERS`).
+- **Paths the matcher skips** (`/_next/static/*`) get no proxy headers. Send the nonce-free directives (`object-src`, `base-uri`, `form-action`, `frame-ancestors`), HSTS, and `X-Content-Type-Options` from `next.config.ts` `headers()` as a baseline; the proxy's full policy replaces it on the responses it handles. The [template](https://github.com/davidyokum/site-auth-kit-template) has the full set (`lib/security-headers.ts`).
 
 ### 5. Auth-matrix tests
 
@@ -389,7 +424,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
 | Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and record memberships); live checks refuse disabled users at once | Pkg |
-| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; CSP in the template | Pkg / App |
+| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; a per-request nonce CSP through the proxy (`nonceCspHeaders`), with the policy in the site ([template](https://github.com/davidyokum/site-auth-kit-template)) | Pkg / App |
 | Amplify `ssr: true` client | Server reads its cookies and verifies them itself; the adapter refreshes in the proxy | Pkg ([ADR 0007](docs/decisions/0007-verify-tokens-in-auth-kit.md)) |
 | **Enforcement** | | |
 | Default-deny proxy that validates tokens | `withAuthProxy` | Pkg |

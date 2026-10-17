@@ -9,6 +9,8 @@
  *   assets, so every route handler, server action, and data-loading component still calls
  *   `requireUser()` / `requireCan()`. The proxy passes no identity downstream for routes to trust,
  *   and the auth matrix's "without proxy" pass checks each route's own guard.
+ * - **Composes with a nonce CSP.** The `headers` hook adds request headers (Next reads the CSP nonce
+ *   from the request) and response headers on every answer; `nonceCspHeaders` is the CSP one.
  *
  * ```ts
  * // proxy.ts
@@ -66,6 +68,67 @@ export interface RefreshResult {
 /** Refreshes an expired session server-side (see `amplifyAdapterRefresh`). Return null when it can't. */
 export type RefreshHandler = (request: NextRequest) => Promise<RefreshResult | null>;
 
+/** Headers the app adds to one request, from the `headers` option. */
+export interface ProxyHeaders {
+  /**
+   * Added to the request the page or route sees, on every request the proxy lets through (public or
+   * protected). E.g. a Content-Security-Policy with this request's nonce: Next reads the nonce from
+   * the request's CSP header while rendering. Can't name the session, client-address, auth-kit, or
+   * Next-internal headers (see `RESERVED_REQUEST_HEADERS`).
+   */
+  request?: HeadersInit;
+  /**
+   * Set on every response the proxy returns: pass-throughs, sign-in redirects, and refusals alike.
+   * Can't name the headers the proxy owns (see `RESERVED_RESPONSE_HEADERS`).
+   */
+  response?: HeadersInit;
+}
+
+/** Called once per request, before the auth decision; its headers apply whatever the decision. */
+export type ProxyHeadersHook = (request: NextRequest) => ProxyHeaders | null | undefined | Promise<ProxyHeaders | null | undefined>;
+
+/**
+ * Request headers the `headers` hook can't set: the session routes read tokens from, where the
+ * request came from (the dev kit's gates read these), auth-kit's own (the recorded return path, the
+ * matrix mark), and Next's internals. Names starting with `x-forwarded-`, `x-auth-kit-`,
+ * `x-middleware-`, `x-nextjs-`, or `next-` are refused too.
+ */
+export const RESERVED_REQUEST_HEADERS: readonly string[] = Object.freeze([
+  'cookie',
+  'authorization',
+  'proxy-authorization',
+  'host',
+  'forwarded',
+  'x-real-ip',
+  'cf-connecting-ip',
+  'true-client-ip',
+  'x-client-ip',
+  'fastly-client-ip',
+  'rsc',
+]);
+
+/**
+ * Response headers the `headers` hook can't set, because the proxy owns them: session cookies from a
+ * refresh, the sign-in redirect, `Cache-Control: private, no-store` on protected responses, the
+ * refusal's body headers, and auth-kit's and Next's own (`x-auth-kit-`, `x-middleware-`, `x-nextjs-`).
+ */
+export const RESERVED_RESPONSE_HEADERS: readonly string[] = Object.freeze([
+  'set-cookie',
+  'location',
+  'cache-control',
+  'content-type',
+  'content-length',
+  'transfer-encoding',
+  'www-authenticate',
+  'retry-after',
+]);
+
+const RESERVED_REQUEST_PREFIXES = ['x-forwarded-', 'x-auth-kit-', 'x-middleware-', 'x-nextjs-', 'next-'];
+const RESERVED_RESPONSE_PREFIXES = ['x-auth-kit-', 'x-middleware-', 'x-nextjs-'];
+
+/** The request headers Next reads a CSP nonce from: only ever the app's (the hook's), never the client's. */
+const CSP_REQUEST_HEADERS = ['content-security-policy', 'content-security-policy-report-only'];
+
 export interface AuthProxyOptions {
   auth: ProxyAuth;
   /** Paths anyone may load. The sign-in path is always public. */
@@ -88,6 +151,105 @@ export interface AuthProxyOptions {
   onRefresh?: (event: { outcome: RefreshOutcome; path: string }) => void;
   /** Add `Cache-Control: private, no-store` to protected responses. Default `true`. */
   noStore?: boolean;
+  /**
+   * Adds headers to each request and response, e.g. a nonce-based Content-Security-Policy
+   * (`nonceCspHeaders`). Called once per request; `request` headers reach the page or route on every
+   * pass-through, `response` headers go on every response, refusals included. Reserved headers throw.
+   */
+  headers?: ProxyHeadersHook;
+}
+
+interface ExtraHeaders {
+  readonly request: readonly (readonly [string, string])[];
+  readonly response: readonly (readonly [string, string])[];
+}
+
+const NO_EXTRA_HEADERS: ExtraHeaders = Object.freeze({ request: Object.freeze([]), response: Object.freeze([]) });
+
+function isReserved(name: string, names: readonly string[], prefixes: readonly string[]): boolean {
+  return names.includes(name) || prefixes.some((prefix) => name.startsWith(prefix));
+}
+
+/** Validates what the hook returned. A reserved header is a bug in the app: it throws (the request fails, closed). */
+function resolveExtraHeaders(value: unknown): ExtraHeaders {
+  if (value === undefined || value === null) return NO_EXTRA_HEADERS;
+  if (typeof value !== 'object') throw new Error('auth-kit: withAuthProxy `headers` must return { request?, response? } or nothing.');
+  for (const key of Object.keys(value)) {
+    if (key !== 'request' && key !== 'response') throw new Error(`auth-kit: withAuthProxy \`headers\` returned an unknown key "${key}" (use request or response).`);
+  }
+  const { request, response } = value as ProxyHeaders;
+  const toList = (init: HeadersInit | undefined, side: 'request' | 'response'): [string, string][] => {
+    if (init === undefined) return [];
+    const list = [...new Headers(init)];
+    for (const [name] of list) {
+      const reserved =
+        side === 'request'
+          ? isReserved(name, RESERVED_REQUEST_HEADERS, RESERVED_REQUEST_PREFIXES)
+          : isReserved(name, RESERVED_RESPONSE_HEADERS, RESERVED_RESPONSE_PREFIXES);
+      if (reserved) {
+        throw new Error(
+          `auth-kit: withAuthProxy \`headers\` can't set "${name}" on the ${side}: the proxy and auth-kit's checks depend on it.`,
+        );
+      }
+    }
+    return list;
+  };
+  return { request: toList(request, 'request'), response: toList(response, 'response') };
+}
+
+/** A fresh CSP nonce: 128 random bits, base64 (what Next's nonce parser accepts). */
+export function newCspNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+export interface NonceCspOptions {
+  /** Send the policy as `Content-Security-Policy-Report-Only` while you tune it. Default false. */
+  reportOnly?: boolean;
+  /** Also pass the nonce to pages in this request header, for your own `<Script nonce>`. Default `x-nonce`; `false` for none. */
+  nonceHeader?: string | false;
+}
+
+/**
+ * A `headers` hook for a strict, nonce-based Content-Security-Policy, the standard's defense for
+ * Amplify's script-readable token cookies. For each request it makes a fresh nonce, builds the
+ * policy with it, puts the policy on the request (Next reads the nonce from it and stamps its own
+ * scripts) and on every response, and passes the nonce in `x-nonce`. Pages must render per request
+ * (a nonce can't be baked into a static page): call `connection()` in the root layout.
+ *
+ * ```ts
+ * export const proxy = withAuthProxy({
+ *   auth,
+ *   publicRoutes: ['/'],
+ *   headers: nonceCspHeaders((nonce) => `default-src 'self'; script-src 'self' 'nonce-${nonce}' 'strict-dynamic'; …`),
+ * });
+ * ```
+ *
+ * The policy must use the nonce (`'nonce-<nonce>'`), or this throws: a policy without it doesn't need
+ * this hook, and is probably a mistake.
+ */
+export function nonceCspHeaders(policy: (nonce: string) => string, options: NonceCspOptions = {}): ProxyHeadersHook {
+  if (typeof policy !== 'function') throw new Error('auth-kit: nonceCspHeaders needs a function (nonce) => policy.');
+  const nonceHeader = options.nonceHeader ?? 'x-nonce';
+  if (nonceHeader !== false && (typeof nonceHeader !== 'string' || isReserved(nonceHeader.toLowerCase(), RESERVED_REQUEST_HEADERS, RESERVED_REQUEST_PREFIXES))) {
+    throw new Error(`auth-kit: nonceCspHeaders nonceHeader ${JSON.stringify(nonceHeader)} isn't a usable header name.`);
+  }
+  const responseHeader = options.reportOnly === true ? 'content-security-policy-report-only' : 'content-security-policy';
+  return () => {
+    const nonce = newCspNonce();
+    const csp = policy(nonce);
+    if (typeof csp !== 'string' || !csp.includes(`'nonce-${nonce}'`)) {
+      throw new Error("auth-kit: nonceCspHeaders' policy must include the nonce as 'nonce-<nonce>' (in script-src).");
+    }
+    return {
+      // Always the enforcing header name on the request: it's the one Next reads first, and the proxy
+      // never forwards a client's own CSP request headers.
+      request: { 'content-security-policy': csp, ...(nonceHeader !== false && { [nonceHeader]: nonce }) },
+      response: { [responseHeader]: csp },
+    };
+  };
 }
 
 const NEXT_INTERNALS: readonly PublicRoute[] = ['/_next/static/*', '/_next/image', '/favicon.ico'];
@@ -102,6 +264,7 @@ const OPTION_KEYS = new Set<string>([
   'refreshLimits',
   'onRefresh',
   'noStore',
+  'headers',
 ]);
 
 /**
@@ -213,7 +376,7 @@ function validateProxyOptions(options: AuthProxyOptions): void {
   for (const key of ['allowNextInternals', 'noStore'] as const) {
     if (options[key] !== undefined && typeof options[key] !== 'boolean') throw new Error(`auth-kit: ${key} must be true or false.`);
   }
-  for (const key of ['refresh', 'onRefresh'] as const) {
+  for (const key of ['refresh', 'onRefresh', 'headers'] as const) {
     if (options[key] !== undefined && typeof options[key] !== 'function') throw new Error(`auth-kit: ${key} must be a function.`);
   }
   if (options.refreshLimits !== undefined) resolveRefreshLimits(options.refreshLimits);
@@ -305,16 +468,26 @@ export function withAuthProxy(options: AuthProxyOptions): (request: NextRequest)
   const { auth, refresh, onRefresh } = options;
   const gate = refresh ? createRefreshGate<RefreshResult>(options.refreshLimits) : null;
 
-  /** The request headers routes see: the recorded return path (never the client's) and refreshed cookies. */
-  function forwardedHeaders(request: NextRequest, refreshed?: RefreshResult): Headers {
+  /**
+   * The request headers routes see: the app's extra headers (the `headers` hook), then the recorded
+   * return path (never the client's) and refreshed cookies. A client's own CSP request headers are
+   * dropped, so the nonce Next reads only ever comes from the app.
+   */
+  function forwardedHeaders(request: NextRequest, extra: ExtraHeaders, refreshed?: RefreshResult): Headers {
     const headers = new Headers(request.headers);
+    for (const name of CSP_REQUEST_HEADERS) headers.delete(name);
+    for (const [name, value] of extra.request) headers.set(name, value);
     headers.set(RETURN_PATH_HEADER, safeRedirect(`${request.nextUrl.pathname}${request.nextUrl.search}`, '/'));
     if (refreshed) headers.set('cookie', mergeCookieHeader(request.headers.get('cookie'), refreshed.setCookies));
     return headers;
   }
 
-  function pass(request: NextRequest, opts: { protectedRoute: boolean; handlerPass: boolean; refreshed?: RefreshResult }): NextResponse {
-    const response = NextResponse.next({ request: { headers: forwardedHeaders(request, opts.refreshed) } });
+  function pass(
+    request: NextRequest,
+    extra: ExtraHeaders,
+    opts: { protectedRoute: boolean; handlerPass: boolean; refreshed?: RefreshResult },
+  ): NextResponse {
+    const response = NextResponse.next({ request: { headers: forwardedHeaders(request, extra, opts.refreshed) } });
     if (opts.refreshed) for (const cookie of opts.refreshed.setCookies) response.headers.append('set-cookie', cookie);
     if (opts.protectedRoute && noStore) response.headers.set('Cache-Control', PRIVATE_NO_STORE);
     if (opts.handlerPass) response.headers.set(PROXY_RESPONSE_HEADER, PROXY_HANDLER_PASS);
@@ -369,17 +542,17 @@ export function withAuthProxy(options: AuthProxyOptions): (request: NextRequest)
     return result;
   }
 
-  return async function proxy(request: NextRequest): Promise<NextResponse> {
+  async function decide(request: NextRequest, extra: ExtraHeaders): Promise<NextResponse> {
     const handlerPass = isMatrixHandlerPass(request);
-    if (isPublic(request.nextUrl.pathname)) return pass(request, { protectedRoute: false, handlerPass });
-    if (handlerPass) return pass(request, { protectedRoute: true, handlerPass });
+    if (isPublic(request.nextUrl.pathname)) return pass(request, extra, { protectedRoute: false, handlerPass });
+    if (handlerPass) return pass(request, extra, { protectedRoute: true, handlerPass });
     try {
       const found = await auth.tokenSource(toRequestContext(request));
       const state = await check(found.accessToken);
-      if (state.kind === 'valid') return pass(request, { protectedRoute: true, handlerPass: false });
+      if (state.kind === 'valid') return pass(request, extra, { protectedRoute: true, handlerPass: false });
       if (state.kind === 'expired') {
         const refreshed = await tryRefresh(request, found);
-        if (refreshed) return pass(request, { protectedRoute: true, handlerPass: false, refreshed });
+        if (refreshed) return pass(request, extra, { protectedRoute: true, handlerPass: false, refreshed });
       }
       return deny(request, state.error);
     } catch (error) {
@@ -389,6 +562,15 @@ export function withAuthProxy(options: AuthProxyOptions): (request: NextRequest)
         error instanceof AuthUnavailableError ? error : new AuthUnavailableError(undefined, { cause: error }),
       );
     }
+  }
+
+  return async function proxy(request: NextRequest): Promise<NextResponse> {
+    // Outside the auth decision's try block: a hook that throws (or names a reserved header) fails
+    // the request instead of being mistaken for "couldn't check".
+    const extra = options.headers ? resolveExtraHeaders(await options.headers(request)) : NO_EXTRA_HEADERS;
+    const response = await decide(request, extra);
+    for (const [name, value] of extra.response) response.headers.set(name, value);
+    return response;
   };
 }
 
