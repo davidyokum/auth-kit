@@ -13,3 +13,5 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0007](0007-verify-tokens-in-auth-kit.md) | auth-kit verifies tokens itself; the Amplify adapter only refreshes |
 | [0008](0008-client-in-the-browser.md) | The client runs in the browser and fills Amplify v6's gaps with two direct Cognito calls |
 | [0009](0009-localhost-kit.md) | The localhost kit: TOTP personas, a checked loopback binding, a ribbon that ships and a menu that doesn't |
+| [0010](0010-audit-log-intent-then-result.md) | The audit log is append-only, written as an intent before the change and a result after |
+| [0011](0011-people-actions.md) | People actions: live checks, exact roles, owner grants, two invite modes, and where the primer was unclear |

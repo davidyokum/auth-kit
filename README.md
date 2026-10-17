@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`) and the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)). The admin People page is a typed stub that throws `NotImplementedError` until its phase-2 work lands. The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
 
 ## What it does
 
@@ -14,7 +14,9 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh | **Implemented** |
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
-| `auth-kit/admin` | The People page actions and an append-only audit log | Guardrails implemented; actions and audit log stubbed |
+| `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
+| `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
+| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts) | **Implemented** (phase 2) |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
@@ -221,6 +223,74 @@ npx auth-kit seed-personas --profile personal --account <account id>
 
 Then a dev-only route (`app/api/dev/sign-in/route.dev.ts` with `createDevKit`), the ribbon in the layout, `withDevKit` in `next.config.ts`, and `npx auth-kit check-prod-build` in CI. The [localhost guide](docs/localhost.md) has every file.
 
+### 8. The admin area: `auth-kit/admin`
+
+```ts
+// amplify/backend.ts: the audit table
+import { AuditLogTable } from 'auth-kit/admin/cdk';
+const auditLog = new AuditLogTable(backend.createStack('audit-log'), 'AuditLog');
+backend.addOutput({ custom: { auditLogTable: auditLog.tableName } });
+```
+
+```ts
+// lib/admin.ts (server-only)
+import { createDynamoAuditLog, createPeopleActions, createSesInviteMailer } from 'auth-kit/admin';
+
+export const auditLog = createDynamoAuditLog({ tableName: outputs.custom.auditLogTable });
+export const people = createPeopleActions({
+  auth,
+  auditLog,
+  mailer: createSesInviteMailer({ from: 'Example Reports <noreply@example.org>' }),
+  siteName: 'Example Reports',
+  signInUrl: 'https://reports.example.org/sign-in',
+  inviteDomains: ['example.org'],
+  onChange: (event) => alertOwners(event), // grants and removals alert a named person
+});
+```
+
+```ts
+// app/admin/people/actions.ts: library code can't be a server action, so wrap each one
+'use server';
+import { revalidatePath } from 'next/cache';
+import type { ActionResult } from 'auth-kit/admin';
+import { people } from '@/lib/admin';
+
+export async function invite(previous: ActionResult | null, data: FormData) {
+  const result = await people.forms.invite(previous, data);
+  if (result.ok) revalidatePath('/admin/people');
+  return result;
+}
+// …and the same for resend, changeRole, disable, enable, signOutEverywhere, deleteUser
+```
+
+```tsx
+// app/admin/people/page.tsx (server component; admin pages are never cached)
+import { InviteForm, PeopleTable } from 'auth-kit/admin/ui';
+import { changeRole, deleteUser, disable, enable, invite, resend, signOutEverywhere } from './actions';
+
+export const dynamic = 'force-dynamic';
+
+export default async function PeoplePage() {
+  const user = await pages.requireCan('people.manage', { live: true });
+  const viewer = { sub: user.sub, groups: [...user.groups], capabilities: [...user.capabilities] };
+  return (
+    <>
+      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref="/sign-in?step-up=1" />
+      <PeopleTable
+        people={await people.listPeople()}
+        viewer={viewer}
+        actions={{ resend, changeRole, disable, enable, signOutEverywhere, deleteUser }}
+        stepUpHref="/sign-in?step-up=1"
+      />
+    </>
+  );
+}
+```
+
+Every action re-reads the acting person and the target from Cognito, runs the guardrails with a live owner count, asks for a recent sign-in before a grant or a delete (making someone an owner also emails every owner, and is undone if that email can't be sent), and writes the audit intent before any Cognito call and the result after ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md), [ADR 0011](docs/decisions/0011-people-actions.md)). Each returns `{ ok, message }` or `{ ok: false, code, error, changed }`, where `changed` says honestly whether anything happened. The Activity page is `people.listActivity({ cursor })` with `<ActivityLog>`; apps log their own content changes with `recordChange(auditLog, …)`.
+
+The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResourceArns })` (Amplify Hosting's compute role is set in the console, so this returns plain JSON; in CDK, `auditLog.grantAppendAndQuery(role)`). Schedule `createInviteExpirySweep({ userPoolId, auditLog })` daily. The Tier 3 admin pool, which has no emailed codes, uses `inviteMode: 'temporary-password'`: Cognito emails a one-time password the app never sees.
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -258,14 +328,14 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | `AuthSessionValidity` 3 minutes | Preset | Pkg |
 | Passkeys: user verification, count as MFA, final-domain RP ID | `WebAuthnUserVerification`, `WebAuthnFactorConfiguration`, RP ID validation | Pkg |
 | `PreventUserExistenceErrors` | Preset | Pkg |
-| Invites with no password and no `email_verified` | `PeopleActions.invite` | P2 |
+| Invites with no password and no `email_verified` | `people.invite` (`MessageAction: SUPPRESS` + SES) | Pkg |
 | **Sessions** | | |
 | Access/ID 60 min; refresh 30 days (Tier 2) or ≤ 1 day (Tier 3) | Preset (ceilings enforced; admin pools ≤ 1 day) | Pkg |
 | Token revocation on | Preset | Pkg |
-| Global sign-out; people manage their own passkeys | `signOutEverywhere`, `MyAccount` (with a last-way-in guard) | Pkg |
+| Global sign-out; people manage their own passkeys | `MyAccount` (with a last-way-in guard); `people.signOutEverywhere` for admins | Pkg |
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
-| Removal is `AdminDisableUser` | Live checks refuse disabled users at once; the action itself is P2 | Partial |
+| Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and record memberships); live checks refuse disabled users at once | Pkg |
 | Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`, `amplifyCookieRuntimeOptions`, `assertSameOrigin`; CSP in the template | Pkg / App |
 | Amplify `ssr: true` client | Server reads its cookies and verifies them itself; the adapter refreshes in the proxy | Pkg ([ADR 0007](docs/decisions/0007-verify-tokens-in-auth-kit.md)) |
 | **Enforcement** | | |
@@ -281,14 +351,15 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
 | Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
-| Unused invites disabled after 7 days, flagged | `inviteStatus`; `expireStaleInvites` | Partial (P2) |
+| Unused invites disabled after 7 days, flagged | `inviteStatus`; `createInviteExpirySweep` (schedule it daily) | Pkg |
 | Recovery defined | Email recovery (everyday), admin-only (admin pool); admin MFA reset P2 | Partial |
 | Email changes admin-only | Can't be enforced in the pool ([why](#what-the-pool-cant-enforce)) | Gap |
 | First admin bootstrapped once at deploy | Not built | P2 |
 | **Admin area** | | |
-| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles` | Pkg (pages P2) |
-| People page buttons and copy | `PeopleActions`, `PEOPLE_ACTION_COPY` | P2 |
-| Append-only audit log, written with the change | `AuditLogStore` interface (no update or delete) | P2 |
+| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, run live by every action | Pkg |
+| People page buttons and copy | `createPeopleActions`, `peopleActionDetails`, `auth-kit/admin/ui` | Pkg |
+| Append-only audit log, written with the change | `createDynamoAuditLog`, `runAudited` (intent → calls → result), `AuditLogTable` ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md)) | Pkg |
+| Grants and removals alert a named person | `onChange` hook on every completed change | Pkg (alert channel: App) |
 | Rich text, uploads, drafts | Not in this package yet | App / later |
 | **Foundation** | SES domain identity required by the preset; SPF/DKIM/DMARC, private database, compute role, master keys, break-glass, secrets, branch passwords | Ops / App |
 | **Local development** | | |
