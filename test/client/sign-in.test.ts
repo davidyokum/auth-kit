@@ -40,6 +40,21 @@ function setup(props: Partial<SignInProps> = {}, factors: ClientAuthFactors[] = 
 }
 
 const alert = () => screen.getAllByRole('alert')[0]!;
+
+/** WebAuthn in jsdom, with a person who closes the browser's passkey prompt. */
+function stubPasskeyBrowser() {
+  const get = vi.fn((_options: unknown) => Promise.reject(Object.assign(new Error('The operation either timed out or was not allowed.'), { name: 'NotAllowedError' })));
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+  Object.defineProperty(window, 'PublicKeyCredential', { value: function PublicKeyCredential() {}, configurable: true });
+  Object.defineProperty(navigator, 'credentials', { value: { get }, configurable: true });
+  return { get };
+}
+
+function unstubPasskeyBrowser() {
+  for (const [target, key] of [[window, 'isSecureContext'], [window, 'PublicKeyCredential'], [navigator, 'credentials']] as const) {
+    if (Object.getOwnPropertyDescriptor(target, key)?.configurable) Reflect.deleteProperty(target, key);
+  }
+}
 const heading = (name: string | RegExp) => screen.findByRole('heading', { name });
 
 beforeEach(() => {
@@ -47,7 +62,10 @@ beforeEach(() => {
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
   window.localStorage.clear();
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  unstubPasskeyBrowser();
+});
 
 describe('the start screen', () => {
   it('leads with the passkey and marks the email field for password managers', () => {
@@ -112,38 +130,38 @@ describe('passkey sign-in', () => {
     expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
   });
 
-  it('SELECT_CHALLENGE: offers what Cognito allows, then password and TOTP in the same session', async () => {
-    auth.signIn.mockResolvedValue(next({ signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION', availableChallenges: ['PASSWORD', 'PASSWORD_SRP', 'EMAIL_OTP'] }));
-    auth.confirmSignIn
-      .mockResolvedValueOnce(next({ signInStep: 'CONFIRM_SIGN_IN_WITH_PASSWORD' }))
-      .mockResolvedValueOnce(next({ signInStep: 'CONFIRM_SIGN_IN_WITH_TOTP_CODE' }))
-      .mockResolvedValueOnce(SIGNED_IN);
+  it('an account without a passkey gets a passkey prompt that finds nothing, never a list of its other methods (ADR 0018)', async () => {
+    const browser = stubPasskeyBrowser();
+    auth.signIn.mockResolvedValueOnce(next({ signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION', availableChallenges: ['PASSWORD', 'PASSWORD_SRP'] }));
+    auth.signIn.mockResolvedValueOnce(next({ signInStep: 'CONFIRM_SIGN_IN_WITH_TOTP_CODE' }));
+    auth.confirmSignIn.mockResolvedValueOnce(SIGNED_IN);
     const { user, navigate } = setup();
     await user.type(screen.getByLabelText('Email address'), 'ada@example.org{Enter}');
 
-    expect(document.activeElement).toBe(await heading('Choose how to sign in'));
-    expect(screen.queryByRole('button', { name: 'Use a passkey' })).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Use your password' }));
-    expect(auth.confirmSignIn).toHaveBeenLastCalledWith({ challengeResponse: 'PASSWORD' });
+    await waitFor(() => expect(alert().textContent).toMatch(/passkey prompt closed/));
+    expect(browser.get).toHaveBeenCalledTimes(1);
+    const options = browser.get.mock.calls[0]![0] as { publicKey: { allowCredentials: { id: Uint8Array }[]; userVerification: string } };
+    expect(options.publicKey.userVerification).toBe('required');
+    expect(options.publicKey.allowCredentials).toHaveLength(2); // random IDs: no passkey can match
+    expect(screen.queryByRole('heading', { name: /Choose how/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Use your password' })).toBeNull();
+    expect(auth.confirmSignIn).not.toHaveBeenCalled(); // nothing answered Cognito's SELECT_CHALLENGE
 
-    await heading('Enter your password');
+    // The person picks their password themselves, then the authenticator code, as anyone would.
+    await user.click(screen.getByRole('button', { name: 'Use a password instead' }));
     await user.type(screen.getByLabelText('Password'), 'my password{Enter}');
-    expect(auth.confirmSignIn).toHaveBeenLastCalledWith({ challengeResponse: 'my password' });
-
     await heading('Enter your authenticator code');
-    const code = screen.getByLabelText('6-digit code');
-    expect(code.getAttribute('autocomplete')).toBe('one-time-code');
-    expect(code.getAttribute('inputmode')).toBe('numeric');
-    await user.type(code, '123 456{Enter}');
+    await user.type(screen.getByLabelText('6-digit code'), '123 456{Enter}');
     expect(auth.confirmSignIn).toHaveBeenLastCalledWith({ challengeResponse: '123456' });
     await waitFor(() => expect(navigate).toHaveBeenCalled());
   });
 
-  it('SELECT_CHALLENGE with nothing this site offers says so', async () => {
+  it('a browser without passkeys says so the same way for every address', async () => {
+    // No stubPasskeyBrowser(): jsdom has no WebAuthn, like a browser without passkey support.
     auth.signIn.mockResolvedValue(next({ signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION', availableChallenges: ['SMS_OTP'] }));
     const { user } = setup();
     await user.type(screen.getByLabelText('Email address'), 'ada@example.org{Enter}');
-    await waitFor(() => expect(alert().textContent).toMatch(/can't sign in here/));
+    await waitFor(() => expect(alert().textContent).toBe("This browser can't use passkeys here. Choose another way to sign in."));
   });
 });
 
@@ -264,7 +282,9 @@ describe('emailed code (the backstop) and joining', () => {
     expect(auth.signIn.mock.calls[0]![0].options.preferredChallenge).toBe('EMAIL_OTP');
 
     await heading('Check your email');
-    expect(screen.getByRole('status').textContent).toBe('We emailed a code to a***@e***. It works for 3 minutes.');
+    // The typed address, never Cognito's masked one: an unknown address has none (ADR 0018).
+    expect(screen.getByRole('status').textContent).toBe("If ada@example.org has an account here, we've emailed it a code. It works for 3 minutes.");
+    expect(document.body.textContent).not.toContain('a***@e***');
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send a new code' }).disabled).toBe(true);
     await user.type(screen.getByLabelText('Code'), '1234 5678{Enter}');
     await waitFor(() => expect(alert().textContent).toMatch(/isn't right/));

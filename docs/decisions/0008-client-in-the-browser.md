@@ -1,6 +1,6 @@
 # 0008. The client runs in the browser and fills Amplify v6's gaps with two direct Cognito calls
 
-- **Status:** Accepted, 2026-10-17 (the authenticator gate's rendering: [ADR 0015](0015-gate-renders-its-children.md))
+- **Status:** Accepted, 2026-10-17 (the authenticator gate's rendering: [ADR 0015](0015-gate-renders-its-children.md); what the sign-in screens may show before a factor is proven: [ADR 0018](0018-same-screens-for-every-address.md))
 - **Standard:** 03 §2 Sign-in, Sessions; primer §4, §5, §8
 
 ## Context

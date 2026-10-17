@@ -2,11 +2,13 @@
  * Checks on the built package, run in CI after `npm run build` (AUTH_KIT_DIST_TESTS=1), so a stale
  * local `dist` never decides a test run.
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { builtinModules, createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/marker.js';
+import { AWS_BLOCKED_ENV } from '../../src/testing/aws-env.js';
 
 const DIST = join(import.meta.dirname, '..', '..', 'dist');
 const enabled = process.env.AUTH_KIT_DIST_TESTS === '1';
@@ -65,5 +67,38 @@ describe.runIf(enabled)('the built package', () => {
 
   it('the auth-kit command starts with a shebang', () => {
     expect(readFileSync(join(DIST, 'bin', 'auth-kit.js'), 'utf8').startsWith('#!/usr/bin/env node\n')).toBe(true);
+  });
+});
+
+describe.runIf(enabled)('the invite-expiry function bundle (auth-kit/admin/cdk deploys it)', () => {
+  const bundle = join(DIST, 'lambda', 'invite-expiry', 'index.mjs');
+  const code = () => readFileSync(bundle, 'utf8');
+
+  /** Runs the bundle's handler in a fresh Node with AWS unreachable, and returns what it threw. */
+  function invoke(env: Record<string, string>): string {
+    const script = `const m = await import(${JSON.stringify(bundle)}); try { await m.handler(); console.log('resolved'); } catch (e) { console.log(e.name + ': ' + e.message); }`;
+    return execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      // Next's types make NODE_ENV required in ProcessEnv; this child has none on purpose.
+      env: { PATH: process.env.PATH ?? '', ...AWS_BLOCKED_ENV, ...env } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    }).trim();
+  }
+
+  it('is self-contained: it imports only Node built-ins', () => {
+    const specifiers = [...code().matchAll(/^import\s[^'"]*?from\s*['"]([^'"]+)['"]/gm)].map((m) => m[1]!);
+    expect(specifiers.length).toBeGreaterThan(0);
+    for (const s of specifiers) expect(s.startsWith('node:') || builtinModules.includes(s), s).toBe(true);
+  });
+
+  it('carries no dev code', () => {
+    expect(code().includes(DEV_SIGNIN_MARKER) || code().includes(MATRIX_SERVER_MARKER)).toBe(false);
+  });
+
+  it('refuses to run without its configuration', () => {
+    expect(invoke({})).toMatch(/AUTH_KIT_USER_POOL_ID must be a user pool ID/);
+  });
+
+  it('with its configuration, gets as far as AWS credentials (none here), so every module it needs loaded', () => {
+    expect(invoke({ AUTH_KIT_USER_POOL_ID: 'us-east-1_TestPool1', AUTH_KIT_AUDIT_TABLE: 'audit-table' })).toMatch(/^CredentialsProviderError/);
   });
 });

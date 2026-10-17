@@ -1,6 +1,6 @@
 # 0001. Passkey first, then password + authenticator, then emailed code
 
-- **Status:** Accepted, 2026-10-17
+- **Status:** Accepted, 2026-10-17; verified on a live pool 2026-10-17 (below)
 - **Standard:** 03 §2 Sign-in; primer §4
 
 ## Context
@@ -23,3 +23,6 @@ The app client allows only `ALLOW_USER_AUTH` (choice-based sign-in, which covers
 - Passwords stay on, so they get rules, a breached-password check (Plus on Tier 3; a Have I Been Pwned check is phase 2 for Tier 2), and the app-enforced authenticator ([0002](0002-mfa-optional-app-enforced-totp.md)).
 - Changing the relying-party ID later forces everyone to register passkeys again. Cognito does accept an `amplifyapp.com` subdomain as the ID (`amplifyapp.com` itself is a public suffix), but passkeys made there won't work on the custom domain, so the standard waits for the final domain.
 - `FactorConfiguration` matters for everyday pools too: AWS documents that someone with TOTP turned on can't use a passkey to sign in unless passkeys count as MFA.
+- **Verified on the 2026-10-17 demo deploy:** the pool came up with `WebAuthnConfiguration.FactorConfiguration = MULTI_FACTOR_WITH_USER_VERIFICATION`, user verification `required`, and `AllowedFirstAuthFactors` `[WEB_AUTHN, PASSWORD, EMAIL_OTP]`; the app client allows exactly `ALLOW_USER_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH`. Two things to know when checking a pool by hand:
+  - **The AWS CLI hides `FactorConfiguration`.** `aws cognito-idp describe-user-pool` (CLI 2.33.20) omits it because the CLI's service model predates the field. The raw API response has it (run the command with `--debug` and read the response body), and so does the CloudFormation template.
+  - **Allowed first factors live on the pool, not the app client.** They're `Policies.SignInPolicy.AllowedFirstAuthFactors` in `describe-user-pool`; `describe-user-pool-client` shows only the auth flows (`ALLOW_USER_AUTH`).

@@ -132,7 +132,11 @@ const METHOD_TO_CHALLENGE: Readonly<Record<SignInMethod, string>> = {
   'email-code': 'EMAIL_OTP',
 };
 
-/** Answers Cognito's `SELECT_CHALLENGE` (a `choose-method` step) within the same sign-in session. */
+/**
+ * Answers Cognito's `SELECT_CHALLENGE` (a `choose-method` step) within the same sign-in session.
+ * `SignIn` never shows that list: it names the account's own factors, which an unknown address doesn't
+ * get, so showing it tells people who has an account (ADR 0018; see `isFirstFactorUnavailable`).
+ */
 export async function chooseSignInMethod(method: SignInMethod): Promise<SignInStep> {
   return settle(await confirmSignIn({ challengeResponse: METHOD_TO_CHALLENGE[method] }));
 }

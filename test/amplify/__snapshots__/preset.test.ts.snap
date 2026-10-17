@@ -11,7 +11,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
       "Rules": [
         {
           "Action": {
-            "Block": {},
+            "Count": {},
           },
           "Name": "auth-kit-sign-in-attempts-per-ip",
           "Priority": 0,

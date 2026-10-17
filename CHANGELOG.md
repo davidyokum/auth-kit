@@ -2,6 +2,30 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.3-alpha] - 2026-10-17
+
+Fixes for what the first live deploy (a demo site made from [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template)) revealed. Pre-release.
+
+### Security
+
+- **The sign-in screens are the same for every address until a factor is proven.** Under `PreventUserExistenceErrors` an unknown address was never offered emailed codes, while an unused invite can use only emailed codes, and `SignIn` showed Cognito's per-account answer ("Choose how to sign in" with the account's own methods; "Check your email" only when a code was sent). Now an account without the requested factor gets what an unknown address gets: a passkey prompt that finds nothing, "don't match" for a password, or "Check your email" with nothing sent, naming the typed address. **Changed:** `SignIn` has no method chooser and no longer shows Cognito's masked address. New for custom screens: `isFirstFactorUnavailable`, `decoyPasskeyPrompt`, `answerSimulatedCode`. Cognito's responses still differ on the wire; [ADR 0018](docs/decisions/0018-same-screens-for-every-address.md) says what's verified and what to check live.
+- **Invite expiry is enforced.** `InviteExpirySweep` (`auth-kit/admin/cdk`): EventBridge Scheduler runs the sweep hourly in a Lambda, as `system:invite-expiry`, writing audit intent and result rows. The function's role may call only `ListUsers`, `AdminListGroupsForUser`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on its pool, `PutItem` on the audit table, and write its own log; the scheduler's role may only invoke it. Optional alarms on a failed run and a dropped invocation. Its code is a self-contained bundle in the tarball (`dist/lambda/invite-expiry/index.mjs`). [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md).
+
+### Added
+
+- `waf.signInRule` and `waf.overallRule` (`'count'` or `'block'`) on the preset's web ACL and `createSharedAuthWebAcl`. Defaults: the sign-in rule counts, the overall rule blocks. [ADR 0017](docs/decisions/0017-per-rule-waf-modes.md).
+- `AuditLogTable.grantAppend` (`PutItem` only), `inviteExpirySweepPolicy` and `INVITE_EXPIRY_COGNITO_ACTIONS`, `INVITE_EXPIRY_ACTOR`.
+
+### Changed
+
+- **Breaking:** `waf.action` is retired (it set both rules); it's refused with a message naming `signInRule` and `overallRule`. The preset's own web ACL now counts sign-in attempts by default instead of blocking them; set `signInRule: 'block'` after a week of counts.
+- The sweep and `describeAwsError` moved to their own modules; `auth-kit/admin` exports them as before.
+
+### Documentation
+
+- The WAF sign-in rule's header match was verified live: Cognito forwards the bare operation name (`x-amzn-cognito-operation-name: InitiateAuth`). README "Count first, then block the sign-in rule"; ADR 0004 and 0013 amended.
+- `FactorConfiguration` is hidden by the AWS CLI's `describe-user-pool` but present in the raw API response, and allowed first factors live on the pool, not the app client (ADR 0001). The README's "Verify on the first sandbox deploy" is now "Verified on a live pool, and what's left".
+
 ## [0.1.2-alpha] - 2026-10-17
 
 Fixes for the issues found while building [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template) (#7–#11). Pre-release.
@@ -77,6 +101,7 @@ First pre-release. Not yet used in production.
 - `auth-kit/client`: autocomplete tokens, `afterSignInStep`, and typed stubs for the sign-in screens and My account.
 - Decision records, CI (typecheck, lint, test, build on Node 22 and 24).
 
+[0.1.3-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.3-alpha
 [0.1.2-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.2-alpha
 [0.1.1-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.1-alpha
 [0.1.0-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.0-alpha

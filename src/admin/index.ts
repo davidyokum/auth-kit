@@ -7,7 +7,8 @@
  *   re-enable, sign out everywhere, delete, list, Activity), each checked live and guarded.
  * - `createDynamoAuditLog`: the append-only audit log, and `runAudited` / `recordChange`, the
  *   intent → calls → result ordering for any change an app logs.
- * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days.
+ * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days (deployed by
+ *   `InviteExpirySweep` from `auth-kit/admin/cdk`).
  */
 export {
   checkPeopleAction,
@@ -42,17 +43,10 @@ export {
   type LostPasskeyGuide,
   type ActivityLine,
 } from './copy.js';
-export {
-  createPeopleActions,
-  createInviteExpirySweep,
-  describeAwsError,
-  PEOPLE_AUDIT_ACTIONS,
-  type PeopleAdminConfig,
-  type PeopleActions,
-  type PeopleFormActions,
-  type SweepResult,
-  type InviteExpirySweepOptions,
-} from './people.js';
+export { createPeopleActions, type PeopleAdminConfig, type PeopleActions, type PeopleFormActions } from './people.js';
+export { createInviteExpirySweep, INVITE_EXPIRY_ACTOR, type SweepResult, type InviteExpirySweepOptions } from './sweep.js';
+export { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
+export { describeAwsError } from './aws-errors.js';
 export {
   createDynamoAuditLog,
   createMemoryAuditLog,
@@ -86,9 +80,11 @@ export {
   auditLogAppPolicy,
   auditLogResourcePolicy,
   peopleAdminPolicy,
+  inviteExpirySweepPolicy,
   AUDIT_LOG_APP_ACTIONS,
   AUDIT_LOG_DENIED_ITEM_ACTIONS,
   PEOPLE_ADMIN_COGNITO_ACTIONS,
+  INVITE_EXPIRY_COGNITO_ACTIONS,
   type IamPolicyDocument,
   type IamStatement,
   type PeopleAdminPolicyOptions,

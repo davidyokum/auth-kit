@@ -91,6 +91,14 @@ export const WAF_POLICY = {
   signInLimit: 100,
   /** Every request WAF inspects for the pool, including token-authorized calls. */
   overallLimit: 1000,
+  /**
+   * The sign-in rule starts in count mode: its header match was verified live on 2026-10-17, but
+   * which operations token refreshes arrive as (and so how close real sessions come to the limit)
+   * is read from a week of its counts before it blocks (ADR 0017).
+   */
+  signInRule: 'count',
+  /** The overall rule needs no header match, so it blocks from day one: the pool always has a limit. */
+  overallRule: 'block',
 } as const;
 
 /** Local development (primer Chapter 8). */

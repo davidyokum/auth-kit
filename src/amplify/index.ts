@@ -31,6 +31,7 @@ export {
   type PasskeyOptions,
   type WafOptions,
   type WafRuleSettings,
+  type WafRuleMode,
   type NormalizedWafOptions,
   type SelfSignUpOptions,
   type NormalizedAuthStandardOptions,
