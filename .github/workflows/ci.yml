@@ -47,6 +47,11 @@ jobs:
         run: npx vitest run test/dev/dist.test.ts
         env:
           AUTH_KIT_DIST_TESTS: '1'
+      # A fixture app on real Next.js: next build, the auth matrix against next dev, next start.
+      - name: End to end on Next.js (test/e2e)
+        run: npx vitest run test/e2e
+        env:
+          AUTH_KIT_E2E: '1'
 
   # Releases (ADR 0012): a v* tag builds the package once, here, from the tagged commit, packs it,
   # attests its provenance, and attaches the tarball to a GitHub Release. Sites install that tarball

@@ -9,3 +9,7 @@ coverage/
 cdk.out/
 .amplify/
 amplify_outputs.json
+# The e2e fixture app's build output, and the agent notes `next dev` writes there
+test/e2e/app/.next/
+test/e2e/app/next-env.d.ts
+test/e2e/app/AGENTS.md
