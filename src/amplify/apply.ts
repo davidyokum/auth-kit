@@ -75,6 +75,16 @@ function environmentFor(
 }
 
 /**
+ * The pool's From header: `Name <address>`, with the name in double quotes when it holds an RFC 5322
+ * special such as parentheses. Unquoted, `Example Site (NC OSBM)` would be read as the name
+ * "Example Site" plus a comment, and mail clients may drop the comment. The options check refuses
+ * `"`, a backslash, `<`, `>`, and line breaks, so quoting needs no escapes.
+ */
+export function formatSender(name: string, address: string): string {
+  return /[()<>[\]:;@\\,.]/.test(name) ? `"${name}" <${address}>` : `${name} <${address}>`;
+}
+
+/**
  * Applies the settings `defineAuth` can't express. Call it once in `amplify/backend.ts`:
  *
  * ```ts
@@ -180,7 +190,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
       resourceName: o.email.sesIdentity,
       arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
     }),
-    from: `${o.email.fromName} <${o.email.fromAddress}>`,
+    from: formatSender(o.email.fromName, o.email.fromAddress),
     ...(o.email.replyTo !== undefined && { replyToEmailAddress: o.email.replyTo }),
     ...(o.email.configurationSet !== undefined && { configurationSet: o.email.configurationSet }),
   };

@@ -9,6 +9,7 @@ import {
   AuthStandardConfigError,
   applyAuthStandard,
   createSharedAuthWebAcl,
+  formatSender,
   normalizeOptions,
   SIGN_IN_OPERATIONS,
   standardAuthProps,
@@ -94,6 +95,16 @@ describe('Tier 2 pool on a branch', () => {
         },
       },
     });
+  });
+
+  it('quotes a sender name with RFC 5322 specials, so "(NC OSBM)" stays part of the name, not a comment', () => {
+    expect(formatSender('Example Reports', 'noreply@example.org')).toBe('Example Reports <noreply@example.org>');
+    expect(formatSender('Example Site (NC OSBM)', 'sign-in@example.org')).toBe('"Example Site (NC OSBM)" <sign-in@example.org>');
+    expect(formatSender('Example Site (UNC)', 'sign-in@example.org')).toBe('"Example Site (UNC)" <sign-in@example.org>');
+    expect(formatSender('Reports, Example', 'a@example.org')).toBe('"Reports, Example" <a@example.org>');
+    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)' } }).template();
+    quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <noreply@example.org>' }) });
+    expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
 
   it('keeps an old email until a new one is verified (Amplify keepOriginal)', () => {
