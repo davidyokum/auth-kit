@@ -13,7 +13,7 @@
  *   otherwise relies on an internal default in `aws-amplify/adapter-core`;
  * - leaves the cookies the **browser** writes (sign-in and client-side refreshes) to Amplify's client
  *   `CookieStorage`: Secure and SameSite=Lax by default, but a 365-day lifetime unless the app passes
- *   its own (the README shows how);
+ *   its own (`configureAuthClient` in `auth-kit/client` does);
  * - relies on a strict Content-Security-Policy as the main defense against injected scripts, because
  *   any script running in the page can read those cookies.
  *

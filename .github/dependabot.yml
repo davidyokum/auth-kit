@@ -1,0 +1,20 @@
+# Weekly dependency updates (M4 in docs/reviews/2026-10-17-fable-review.md). Actions stay pinned to
+# commit SHAs; Dependabot updates the SHA and the version comment together.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      aws:
+        patterns: ['@aws-amplify/*', '@aws-sdk/*', 'aws-amplify', 'aws-cdk-lib', 'aws-jwt-verify', 'constructs']
+      next-react:
+        patterns: ['next', 'react', 'react-dom', '@types/react']
+      tooling:
+        patterns: ['eslint', '@eslint/*', 'typescript', 'typescript-eslint', 'vitest', 'tsup', '@types/node']
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

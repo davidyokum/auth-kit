@@ -56,7 +56,7 @@ export interface PasskeyOptions {
 }
 
 /**
- * Rate limiting for the pool's public Cognito API (ADR 0004, ADR 0009).
+ * Rate limiting for the pool's public Cognito API (ADR 0004, ADR 0013).
  *
  * - Default: create a web ACL for this pool. Fine for a first site.
  * - `{ webAclArn }`: reuse an existing REGIONAL web ACL and only associate it with this pool. The

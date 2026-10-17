@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.0-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
+> **Status: pre-release (`0.1.1-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) (coming later).
 
 ## What it does
 
@@ -23,13 +23,13 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 
 ## Install
 
-From a GitHub tag (the package isn't on npm):
+From the release tarball (the package isn't on npm):
 
 ```sh
-npm i github:davidyokum/auth-kit#v0.1.0-alpha
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.1-alpha/auth-kit-0.1.1-alpha.tgz
 ```
 
-npm builds the package on install (its `prepare` script installs the build tools and runs the build), which adds about a minute compared with a registry package.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.1-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -112,6 +112,10 @@ export const GET = withAuthErrors(async (_req, { params }) => {
 const user = await pages.requireCan('people.manage', { live: true }); // re-reads groups from Cognito
 ```
 
+`getUser()` is for optional display (a header that says who's signed in). It applies the same authenticator rule as `requireUser()`, so a password user without TOTP comes back as `null` unless you pass `allowMfaEnrollment: true`. Gate with `requireUser` / `requireCan`, which also say *why* someone is refused.
+
+Route handlers that change data call `assertSameOrigin(request, { expectedOrigin: process.env.APP_ORIGIN })`. Set `expectedOrigin` to the site's public origin in production: the origin rebuilt from `request.url` may not match the browser's scheme behind a CDN.
+
 ```ts
 // A risky action (grant a role, export data): require a sign-in in the last 5 minutes
 await auth.requireCan('roles.manage', { live: true, recentSignIn: true });
@@ -129,16 +133,45 @@ export const proxy = withAuthProxy({ auth, publicRoutes: ['/', '/about', '/legal
 export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
 ```
 
-The proxy is the first checkpoint, never the only one. Add `refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession })` so expired sessions refresh server-side instead of bouncing to sign-in every hour.
+The proxy is the first checkpoint, never the only one. Public routes are exact paths, prefixes ending in `/*`, or RegExps anchored as `/^…$/`; a rule that would make every path public (`'/*'`, an unanchored or catch-all pattern) throws at startup, as does any unknown option.
+
+To refresh expired sessions server-side instead of bouncing to sign-in every hour, add the adapter, created with `amplifyCookieRuntimeOptions` so the cookies it writes are Secure, SameSite=Lax, and expire with the refresh token:
+
+```ts
+// lib/amplify-server.ts
+import { createServerRunner } from '@aws-amplify/adapter-nextjs';
+import { amplifyCookieRuntimeOptions } from 'auth-kit/server';
+import outputs from '@/amplify_outputs.json';
+
+export const { runWithAmplifyServerContext } = createServerRunner({
+  config: outputs,
+  runtimeOptions: amplifyCookieRuntimeOptions({
+    refreshTokenMinutes: 43200, // the preset's refreshTokenMinutes
+    localDevOrigin: process.env.NODE_ENV === 'development' ? 'http://app.localhost:3000' : undefined,
+  }),
+});
+
+// proxy.ts
+export const proxy = withAuthProxy({
+  auth,
+  publicRoutes: ['/', '/about', '/legal/*'],
+  refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession }),
+});
+```
+
+The proxy refreshes only an Amplify cookie session whose access token is genuine (this pool, this app client) but expired and that has a refresh-token cookie; never an anonymous, forged, or bearer request. Refreshes are public Cognito calls from the server's own IP address, so they count toward the pool's WAF per-IP rules; the proxy limits them per person and per server instance and backs off after failures (`refreshLimits`, `onRefresh` for logging; [ADR 0004](docs/decisions/0004-waf-rate-rule.md)).
+
+The browser writes its own token cookies (sign-in, client-side refreshes) through Amplify's `CookieStorage`, which defaults to a 365-day lifetime; `configureAuthClient` (step 6) gives them the refresh token's lifetime too.
 
 ### 5. Auth-matrix tests
 
 ```ts
-import { assertAuthMatrix, bearerPersona } from 'auth-kit/testing';
+import { assertAuthMatrix, bearerPersona, routesFromNextBuild } from 'auth-kit/testing';
 
 await assertAuthMatrix({
   request: (req) => fetch(req, { redirect: 'manual' }),
-  baseUrl: 'http://app.localhost:3000',
+  baseUrl: 'http://app.localhost:3000', // a dev server started with AUTH_KIT_MATRIX=1
+  appRoutes: routesFromNextBuild('.next'), // after `next build`
   personas: { anonymous: {}, member: bearerPersona(m), otherMember: bearerPersona(m2), admin: bearerPersona(a) },
   params: { id: memberOwnReportId },
   routes: [
@@ -148,7 +181,13 @@ await assertAuthMatrix({
 });
 ```
 
-It refuses an incomplete matrix: every route needs anonymous, member, and admin; every route that takes a record ID needs the second member, and expects 404 from them.
+What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
+
+- **Each route's own guard.** Every case runs through the proxy and again with the proxy stepped aside, so a route that leans on the proxy for its 401 fails. The proxy steps aside only for the matrix's requests, only outside production builds, only with `AUTH_KIT_MATRIX=1`, and only on a localhost URL (a production build compiles the switch out); without the flag, those cases fail and say why. In-process tests pass `handlerRequest` instead.
+- **Coverage.** Every route in `appRoutes` needs a row, and every row must match an app route, so a mistyped path fails instead of passing on a 404.
+- **The standard's rules.** Every route needs anonymous, member, and admin; record routes need the second member, who gets 404; at least one persona must succeed on each row (`exists: false` marks a row asserting a path is gone).
+
+What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it.
 
 ### 6. Sign-in screens and My account: `auth-kit/client`
 
@@ -295,7 +334,7 @@ The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResour
 
 | Status | Meaning | Error class |
 |---|---|---|
-| 401 | No valid session (missing, forged, expired, revoked, disabled) | `UnauthenticatedError` |
+| 401 | No valid session (missing, forged, expired, revoked, disabled). `token_expired` when a genuine token merely expired, `invalid_token` for anything else wrong with one | `UnauthenticatedError` |
 | 401 | Signed in, but this action needs a fresh sign-in (`WWW-Authenticate: … insufficient_user_authentication`) | `StepUpRequiredError` |
 | 403 | Signed in, and not allowed | `ForbiddenError` |
 | 403 | A password user without an authenticator code: send them to setup | `MfaEnrollmentRequiredError` |
@@ -324,7 +363,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Breached-password check | Plus threat protection on Tier 3; a Have I Been Pwned range check before every new password the client saves | Pkg |
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
 | Essentials plan + SES | `UserPoolTier`, `EmailConfiguration` with the domain identity | Pkg |
-| WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule) | Pkg ([caveat](#verify-on-the-first-sandbox-deploy)) |
+| WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule), or one [shared ACL](#waf-one-web-acl-for-all-your-sites) per account and Region; off only with `acknowledgeNoRateLimit` | Pkg ([caveat](#verify-on-the-first-sandbox-deploy)) |
 | `AuthSessionValidity` 3 minutes | Preset | Pkg |
 | Passkeys: user verification, count as MFA, final-domain RP ID | `WebAuthnUserVerification`, `WebAuthnFactorConfiguration`, RP ID validation | Pkg |
 | `PreventUserExistenceErrors` | Preset | Pkg |
@@ -336,11 +375,11 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
 | Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and record memberships); live checks refuse disabled users at once | Pkg |
-| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`, `amplifyCookieRuntimeOptions`, `assertSameOrigin`; CSP in the template | Pkg / App |
+| Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; CSP in the template | Pkg / App |
 | Amplify `ssr: true` client | Server reads its cookies and verifies them itself; the adapter refreshes in the proxy | Pkg ([ADR 0007](docs/decisions/0007-verify-tokens-in-auth-kit.md)) |
 | **Enforcement** | | |
 | Default-deny proxy that validates tokens | `withAuthProxy` | Pkg |
-| Every route, action, data-loading component checks | `requireUser` / `requireGroup` / `requireCan`; caught by the auth matrix | Pkg + App |
+| Every route, action, data-loading component checks | `requireUser` / `requireGroup` / `requireCan`; the auth matrix's without-proxy pass fails a route that relies on the proxy, and its coverage check fails a route with no row (server actions need rows by hand) | Pkg + App |
 | Record-ID routes check the record; others get 404 | `requireRecordAccess`; the matrix demands 404 for a second member | Pkg |
 | Sensitive data only through checked routes | Site code; posture check later | App |
 | Private pages `Cache-Control: private, no-store` | Proxy sets it on protected responses; `PRIVATE_NO_STORE` | Pkg + App |
@@ -371,7 +410,32 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Ribbon naming environment, pool, persona; `[DEV]` title and favicon | `EnvironmentRibbon`, `environmentMetadata` | Pkg |
 | One `*.localhost` name per app | `localDevServer` | Pkg + App |
 | **Assurance** | | |
-| Auth-matrix tests in CI | `assertAuthMatrix` | Pkg |
+| Auth-matrix tests in CI | `assertAuthMatrix` with `appRoutes: routesFromNextBuild()`, against a dev server with `AUTH_KIT_MATRIX=1` | Pkg (CI wiring in the template) |
+
+## WAF: one web ACL for all your sites
+
+AWS WAF bills about $5 a month per web ACL and $1 per rule, so the preset's default (a web ACL per pool, two rules) costs about $7 a month per site. With several sites, share one web ACL per AWS account and Region instead ([ADR 0013](docs/decisions/0013-shared-web-acl.md)):
+
+```ts
+// A small CDK app of its own, deployed once per account and Region.
+import { App, CfnOutput, Stack } from 'aws-cdk-lib';
+import { createSharedAuthWebAcl } from 'auth-kit/amplify';
+
+const app = new App();
+const stack = new Stack(app, 'AuthKitSharedWaf', { env: { region: 'us-east-1' } });
+const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl'); // same rate rules, no association
+new CfnOutput(stack, 'WebAclArn', { value: acl.attrArn });
+```
+
+```ts
+// Each site's amplify/auth/resource.ts
+export const authOptions = {
+  // ...
+  waf: { webAclArn: 'arn:aws:wafv2:us-east-1:<account-id>:regional/webacl/auth-kit-shared-user-pools/<id>' },
+} satisfies AuthStandardOptions;
+```
+
+The preset then only associates the shared ACL with the pool. Its rate rules count per IP across every pool it protects, so an office using several sites shares one budget: raise the shared ACL's limits if that bites. Turning WAF off entirely takes `waf: false` plus `acknowledgeNoRateLimit: true` (Cognito doesn't lock out wrong emailed codes) and still warns at synthesis.
 
 ## Verify on the first sandbox deploy
 
@@ -379,10 +443,14 @@ These were checked against the installed packages and AWS documentation, but not
 
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
 - **The WAF sign-in rule's header match.** Cognito forwards `x-amzn-cognito-operation-name` to WAF, but AWS doesn't document its value format. The rule matches case-insensitively on the operation name (and on `x-amz-target`). Run it in `count` mode first; the overall per-IP rule needs no header match.
+- **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. After a sandbox session refreshes, read both rules' samples (read-only) and tune the limits with refreshes in mind: `aws wafv2 get-sampled-requests --profile <profile> --scope REGIONAL --web-acl-arn <arn> --rule-metric-name <project>-sign-in-attempts-per-ip --time-window StartTime=<iso>,EndTime=<iso> --max-items 100` (and `<project>-requests-per-ip`).
+- **`request.url`'s scheme behind Amplify Hosting.** If route handlers see `http://` while browsers send `Origin: https://`, every state-changing request fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Choice-based sign-in without a managed-login domain.** AWS's overview says passwordless and passkey sign-in need one; other AWS pages say SDK apps don't. The preset doesn't create a domain.
 
 ## What the pool can't enforce
 
+- **Sign-up enumeration with the self-signup exception.** With `selfSignUp` on, Cognito's `SignUp` answers `UsernameExistsException` for an address that already has an account (`PreventUserExistenceErrors` doesn't cover `SignUp`), so anyone can test whether an allowed-domain address is registered.
+- **Untrusted sibling subdomains.** Amplify's cookie names can't use the `__Host-` prefix, so an app on a sibling subdomain of a custom domain can set cookies for the parent domain and plant a session. auth-kit reads duplicate cookies the way Next does (the last one wins) so every layer agrees, but don't host an app you don't trust under the same parent domain.
 - **Email changes admin-only.** Cognito requires app clients to be able to write required attributes, and email is required, so a signed-in person can start an email change. The pool keeps the old address active until the new one is verified with a code (Amplify's `keepOriginal`). The admin-only rule has to live in the app.
 - **A strictly passkey-only admin pool.** Cognito won't let someone register a passkey before they've signed in once, and in a pool without emailed codes `AdminCreateUser` needs a temporary password. So an admin pool keeps `PASSWORD` as a first factor: a new admin signs in with a one-time password, sets a password and an authenticator (MFA is required), then saves a passkey. Recovery is admin-only. Phase 2 decides how to neutralize the password afterwards.
 

@@ -132,7 +132,7 @@ export interface SharedAuthWebAclProps {
 
 /**
  * One web ACL with auth-kit's rate rules and no association, to share across every user pool in an
- * AWS account and Region (ADR 0009). Deploy it once, in its own small stack, and give each site's
+ * AWS account and Region (ADR 0013). Deploy it once, in its own small stack, and give each site's
  * preset its ARN: `waf: { webAclArn }`. The rate rules count per IP across all the pools it protects.
  *
  * ```ts

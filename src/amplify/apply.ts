@@ -238,7 +238,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   for (const [key, value] of Object.entries(tags)) Tags.of(stack).add(key, value);
 
   // ---- WAF --------------------------------------------------------------------------------------
-  // One web ACL per pool by default, or a shared one per account and Region (ADR 0009).
+  // One web ACL per pool by default, or a shared one per account and Region (ADR 0013).
   let waf: AppliedWaf = { mode: 'none', webAcl: null, webAclArn: null, association: null };
   const wafWanted = o.waf.mode !== 'off' && (!isSandbox || o.waf.enabledInSandbox);
   if (wafWanted && o.waf.mode === 'create') {
