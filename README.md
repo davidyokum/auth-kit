@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.1-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.2-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -12,7 +12,8 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/amplify/pre-sign-up` | The one sanctioned exception to invite-only: a preSignUp Lambda that allows self-registration from listed email domains | **Implemented** |
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, record checks (404), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
-| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), a local test token issuer, cookie personas, a fake Cognito | **Implemented** |
+| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
+| `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
@@ -26,10 +27,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.1-alpha/auth-kit-0.1.1-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.2-alpha/auth-kit-0.1.2-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.1-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.2-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -119,7 +120,9 @@ Route handlers that change data call `assertSameOrigin(request, { expectedOrigin
 ```ts
 // lib/origin.ts: never from request headers
 export const expectedOrigin =
-  process.env.NODE_ENV === 'development' ? 'http://reports.localhost:3000' : process.env.APP_ORIGIN; // localDevServer(...).url in dev
+  process.env.NODE_ENV === 'development'
+    ? (process.env.APP_DEV_ORIGIN ?? 'http://reports.localhost:3000') // localDevServer(...).url; the matrix's server sets its own (step 5)
+    : process.env.APP_ORIGIN;
 
 // app/api/reports/route.ts
 export const POST = withAuthErrors(async (request: Request) => {
@@ -214,21 +217,78 @@ export const proxy = withAuthProxy({
 
 ### 5. Auth-matrix tests
 
-```ts
-import { assertAuthMatrix, bearerPersona, routesFromNextBuild } from 'auth-kit/testing';
+The matrix runs every route as every persona against the real app under `next dev`, in CI, with no AWS at all. `startMatrixServer` mints each persona a session with a local test issuer, starts `next dev` on 127.0.0.1 with `AUTH_KIT_MATRIX=1` and a fixture describing each persona, and hands back their cookies:
 
-await assertAuthMatrix({
-  request: (req) => fetch(req, { redirect: 'manual' }),
-  baseUrl: 'http://app.localhost:3000', // a dev server started with AUTH_KIT_MATRIX=1
-  appRoutes: routesFromNextBuild('.next'), // after `next build`
-  personas: { anonymous: {}, member: bearerPersona(m), otherMember: bearerPersona(m2), admin: bearerPersona(a) },
-  params: { id: memberOwnReportId },
-  routes: [
-    { path: '/api/reports/:id', expect: { anonymous: 401, member: 200, otherMember: 404, admin: 200 } },
-    { method: 'POST', path: '/api/admin/invite', expect: { anonymous: 401, member: 403, admin: 200 } },
-  ],
+```ts
+// test/matrix/auth-matrix.test.ts: run after `next build` (the matrix reads its route manifest)
+import { assertAuthMatrix, routesFromNextBuild, startMatrixServer } from 'auth-kit/testing';
+
+const server = await startMatrixServer({
+  personas: {
+    member: {},
+    otherMember: {},
+    admin: { groups: ['admin'] },
+    noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } }, // a password user without TOTP
+    demotedAdmin: { groups: ['admin'], liveGroups: [] }, // the token says admin, Cognito no longer does
+    disabledAdmin: { groups: ['admin'], enabled: false },
+    revokedSession: { groups: ['editor'], sessionRevoked: true }, // signed out everywhere
+  },
+  env: { APP_DEV_ORIGIN: 'http://127.0.0.1:3210' }, // whatever your expectedOrigin reads in development
+  port: 3210,
 });
+try {
+  await assertAuthMatrix({
+    request: (req) => fetch(req, { redirect: 'manual' }),
+    baseUrl: server.baseUrl,
+    appRoutes: routesFromNextBuild('.next'),
+    personas: server.cookiePersonas, // anonymous plus each persona's Amplify cookies
+    params: { id: memberOwnReportId },
+    routes: [
+      { path: '/api/reports/:id', expect: { anonymous: 401, member: 200, otherMember: 404, admin: 200, noAuthenticator: 403 /* … */ } },
+      { method: 'POST', path: '/api/admin/invite', headers: { origin: server.baseUrl }, expect: { anonymous: 401, member: 403, admin: 200 /* … */ } },
+    ],
+  });
+} finally {
+  await server.stop();
+}
 ```
+
+The app swaps in the **matrix server mode** while it runs, through a dev-only alias like `@/dev` ([ADR 0016](docs/decisions/0016-matrix-server-mode.md)):
+
+```ts
+// lib/dev/matrix.on.ts: what @/dev-matrix means under next dev
+export { matrixServerOverrides as matrixOverrides } from 'auth-kit/testing/matrix-server';
+
+// lib/dev/matrix.off.ts: what it means in every build (tsconfig paths point here too)
+import type { MatrixServerOverrides } from 'auth-kit/testing/matrix-server';
+export function matrixOverrides(): MatrixServerOverrides | null {
+  return null;
+}
+
+// next.config.ts
+import { DEV_ALIAS, DEV_MATRIX_ALIAS, withDevKit } from 'auth-kit/dev';
+export default (phase: string) => withDevKit(phase, config, { aliases: [DEV_ALIAS, DEV_MATRIX_ALIAS] });
+
+// lib/auth.ts
+import { matrixOverrides } from '@/dev-matrix';
+export const auth = createServerAuth({ ...poolConfigFromAmplifyOutputs(outputs), capabilities, ...matrixOverrides()?.serverAuth });
+
+// lib/admin.ts
+const matrix = matrixOverrides();
+export const people = createPeopleActions({
+  auth,
+  auditLog: matrix?.auditLog ?? createDynamoAuditLog({ tableName }),
+  mailer: matrix?.mailer ?? createSesInviteMailer({ from }),
+  ...(matrix && { cognito: matrix.peopleCognito }),
+  // ...
+});
+// and your own stores: matrix?.shared('tickets', createMemoryTicketStore) ?? dynamoTickets
+```
+
+- **What changes while the matrix runs, and nothing else.** Tokens verify against the test issuer's public keys (every claim still checked; a token signed by any other key is a 401, and nothing is fetched from the pool's key endpoint); a scripted Cognito answers the authenticator check and `{ live: true }` re-reads per persona, refusing a disabled account and a revoked session exactly as Cognito does; the People list reads the fixture and every change is refused; no email is sent; the audit log is in memory. The proxy, guards, capability map, pages, and route handlers are the production code.
+- **Never in a build.** `matrixServerOverrides()` returns `null` unless `NODE_ENV` is `development` and `AUTH_KIT_MATRIX=1` (and throws, rather than falling back to AWS, if the flag has no fixture). The alias keeps the module out of builds, and `npx auth-kit check-prod-build` fails a build that contains its marker.
+- **Per bundle.** Next bundles the proxy, each page, and each route separately, each with its own copy of auth-kit, and auth-kit recognizes its errors with `instanceof`. The overrides are built per bundle; only plain data (the audit log's rows, `shared(...)` stores) is shared across bundles, so a record the API creates shows on a page.
+- **No AWS.** The dev server gets `AWS_BLOCKED_ENV` (no credentials can resolve; also exported for your test runner's own `env`), `ALLOW_DEV_SIGNIN=0`, and no `NODE_ENV`; your `env` can't override those or the flag. `startMatrixServer` reads the pool and app client from `amplify_outputs.json` (a placeholder works in CI) or `pool`.
 
 What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
 
@@ -236,7 +296,7 @@ What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
 - **Coverage.** Every route in `appRoutes` needs a row, and every row must match an app route, so a mistyped path fails instead of passing on a 404.
 - **The standard's rules.** Every route needs anonymous, member, and admin; record routes need the second member, who gets 404; at least one persona must succeed on each row (`exists: false` marks a row asserting a path is gone).
 
-What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it.
+What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it. To run your own server instead, `matrixFixture({ issuer, personas })` returns the tokens and the fixture and `matrixServerEnv()` the environment.
 
 ### 6. Sign-in screens and My account: `auth-kit/client`
 
@@ -498,7 +558,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Ribbon naming environment, pool, persona; `[DEV]` title and favicon | `EnvironmentRibbon`, `environmentMetadata` | Pkg |
 | One `*.localhost` name per app | `localDevServer` | Pkg + App |
 | **Assurance** | | |
-| Auth-matrix tests in CI | `assertAuthMatrix` with `appRoutes: routesFromNextBuild()`, against a dev server with `AUTH_KIT_MATRIX=1` | Pkg (CI wiring in the template) |
+| Auth-matrix tests in CI | `startMatrixServer` (`next dev` with the matrix server mode, no AWS) and `assertAuthMatrix` with `appRoutes: routesFromNextBuild()` | Pkg (CI wiring in the [template](https://github.com/davidyokum/site-auth-kit-template)) |
 
 ## WAF: one web ACL for all your sites
 

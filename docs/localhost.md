@@ -9,6 +9,7 @@ Sign in on `localhost` as any role in one click, for you and your AI agent, with
 | Persona menu (dev only) | `PersonaMenu` from `auth-kit/dev/menu` |
 | Environment ribbon, View as banner (ship) | `EnvironmentRibbon`, `ViewAsBanner`, `environmentMetadata` from `auth-kit/ribbon` |
 | Keeping it out of builds | `withDevKit` in `next.config.ts` |
+| The auth matrix's server mode (dev only) | `auth-kit/testing/matrix-server` behind `@/dev-matrix`; `startMatrixServer` from `auth-kit/testing` ([README §5](../README.md#5-auth-matrix-tests)) |
 | Proving it in CI | `npx auth-kit check-prod-build`, `npx auth-kit check-dev-route` |
 
 ## Set up an app (once)
@@ -83,14 +84,15 @@ import { DevRibbon } from '@/dev';
 ```ts
 // next.config.ts
 import type { NextConfig } from 'next';
-import { withDevKit } from 'auth-kit/dev';
+import { DEV_ALIAS, DEV_MATRIX_ALIAS, withDevKit } from 'auth-kit/dev';
 const config: NextConfig = { /* yours */ };
-export default (phase: string) => withDevKit(phase, config);
+// @/dev (this kit) and @/dev-matrix (the auth matrix's server mode, README §5); just @/dev by default.
+export default (phase: string) => withDevKit(phase, config, { aliases: [DEV_ALIAS, DEV_MATRIX_ALIAS] });
 ```
 
 ```jsonc
-// tsconfig.json: type checks see the off module, the shape every build uses
-"paths": { "@/dev": ["./lib/dev/off.tsx"], "@/*": ["./*"] }
+// tsconfig.json: type checks see the off modules, the shape every build uses
+"paths": { "@/dev": ["./lib/dev/off.tsx"], "@/dev-matrix": ["./lib/dev/matrix.off.ts"], "@/*": ["./*"] }
 ```
 
 ```ts
@@ -139,12 +141,12 @@ Checks 1–4 fail silently. From 5 on, the request came from this computer, so t
 ## Out of production, and proven
 
 - **`.dev.ts` routes.** Under `next dev`, `withDevKit` adds `dev.tsx` and `dev.ts` to the page extensions, so `route.dev.ts` is a route. In a build it isn't, and nothing imports it.
-- **The `@/dev` alias.** Under `next dev` it resolves to `lib/dev/on.tsx`; in a build, to `lib/dev/off.tsx`. Only `on.tsx` imports `auth-kit/dev` and the menu.
-- **The marker.** The route handler and the menu carry a marker string. `auth-kit/ribbon` never does (CI checks its built import graph).
+- **The `@/dev` alias.** Under `next dev` it resolves to `lib/dev/on.tsx`; in a build, to `lib/dev/off.tsx`. Only `on.tsx` imports `auth-kit/dev` and the menu. `@/dev-matrix` works the same way for the auth matrix's server mode (`matrix.on.ts` / `matrix.off.ts`).
+- **The markers.** The route handler and the menu carry a marker string, and `auth-kit/testing/matrix-server` one of its own. No subpath that ships does (CI checks their built import graphs).
 - **CI**, after `next build`:
 
 ```sh
-npx auth-kit check-prod-build            # fails if .next contains the marker or registers /api/dev/sign-in
+npx auth-kit check-prod-build            # fails if .next contains either marker or registers /api/dev/sign-in
 npx next start --hostname 127.0.0.1 --port 3100 &
 npx auth-kit check-dev-route --url http://127.0.0.1:3100   # forged requests (Host: localhost, matching Origin) must all get 404
 ```

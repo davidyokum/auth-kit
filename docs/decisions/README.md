@@ -19,3 +19,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0013](0013-shared-web-acl.md) | One shared web ACL per account and Region |
 | [0014](0014-matrix-without-proxy.md) | The auth matrix checks each route's own guard |
 | [0015](0015-gate-renders-its-children.md) | The authenticator gate always renders its children, so it can't mask the server's answer |
+| [0016](0016-matrix-server-mode.md) | The auth matrix's server mode ships in auth-kit |

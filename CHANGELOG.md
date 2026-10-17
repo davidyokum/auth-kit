@@ -2,6 +2,28 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.2-alpha] - 2026-10-17
+
+Fixes for the issues found while building [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template) (#7–#11). Pre-release.
+
+### Security
+
+- **`TOTPEnrollmentGate` can't mask the server's answer (#7).** It rendered only a status on the server, so around a layout's children it turned a nested page's `notFound()` 404 into a 200. Its children now always render, server and browser, inside a wrapper that's `hidden` until the check passes. New `serverChecked` shows them from the first paint after the page's own guard. The README places the gate inside `/account`, not around a layout. **Changed:** the gate's root element is always present, with the children in a new `content` slot. [ADR 0015](docs/decisions/0015-gate-renders-its-children.md).
+- **The proxy drops client-sent `Content-Security-Policy` request headers**, so the nonce Next stamps on scripts only ever comes from the app.
+
+### Added
+
+- **The auth matrix's server mode (#9).** `auth-kit/testing/matrix-server` (dev only, behind a `withDevKit` alias): `matrixServerOverrides()` gives `createServerAuth` the test issuer's keys (with a fetcher that never reaches the pool's JWKS) and a scripted Cognito, and `createPeopleActions` a read-only People client, a refusing mailer, and an in-memory audit log, built per bundle. `startMatrixServer` (in `auth-kit/testing`) runs `next dev` with the fixture and no AWS and returns cookie personas; `matrixFixture`, `matrixServerEnv`, `parseMatrixFixture`. `withDevKit` takes several aliases (`DEV_ALIAS`, `DEV_MATRIX_ALIAS`). `check-prod-build` also fails on the matrix module's marker. [ADR 0016](docs/decisions/0016-matrix-server-mode.md).
+- **`withAuthProxy({ headers })` (#11):** request headers for every pass-through and response headers for every response (redirects and refusals too); reserved session, client-address, auth-kit, and Next headers throw. `nonceCspHeaders(policy)` builds a per-request nonce CSP with it. README section on CSP with the proxy.
+- **"Couldn't check" in production error boundaries (#10).** `AuthUnavailableError` carries its own `digest` (`AUTH_KIT_AUTH_UNAVAILABLE;<reference>`), which Next keeps when it redacts server errors; `isAuthUnavailableError(error)` (from `auth-kit/client` and `auth-kit/server`) reads it. README `error.tsx` example.
+- `AWS_BLOCKED_ENV` in `auth-kit/testing`; auth-kit's own tests run with it, with a canary.
+- An end-to-end test on a real Next 16 fixture app (`npm run test:e2e`, in CI): build, the full matrix on `next dev`, `next start`.
+
+### Fixed
+
+- **The origin check under `next dev` (#8).** Next rewrites `request.url`'s host to `localhost`, so without `expectedOrigin` every POST from `app.localhost` or `127.0.0.1` failed with `origin_mismatch`. In development only, with `request.url` and `Host` both loopback, the browser's origin (`Host`) counts too. A configured `expectedOrigin` still wins, and the README now sets it in every environment.
+- **README (#10):** the admin example's step-up link is `signInUrl('/admin/people', { reauth: true })` (it used `?step-up=1`, which the sign-in page doesn't read, with no return path); the template is linked instead of "coming later".
+
 ## [0.1.1-alpha] - 2026-10-17
 
 Phase 2 of `auth-kit/client` and `auth-kit/dev`, and the fixes from the [2026-10-17 security review](docs/reviews/2026-10-17-fable-review.md). Pre-release; some APIs changed (marked **Breaking**).
@@ -55,5 +77,6 @@ First pre-release. Not yet used in production.
 - `auth-kit/client`: autocomplete tokens, `afterSignInStep`, and typed stubs for the sign-in screens and My account.
 - Decision records, CI (typecheck, lint, test, build on Node 22 and 24).
 
+[0.1.2-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.2-alpha
 [0.1.1-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.1-alpha
 [0.1.0-alpha]: https://github.com/davidyokum/auth-kit/releases/tag/v0.1.0-alpha

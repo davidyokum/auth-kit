@@ -17,6 +17,6 @@ The matrix sent every request through the whole app, so the proxy's 401 hid a ro
 
 ## Consequences
 
-- CI runs the matrix against a dev server started with `AUTH_KIT_MATRIX=1` on a localhost URL, after `next build` for the manifest.
+- CI runs the matrix against a dev server started with `AUTH_KIT_MATRIX=1` on a localhost URL, after `next build` for the manifest. `startMatrixServer` starts it, with the server mode from [ADR 0016](0016-matrix-server-mode.md) so it needs no AWS.
 - Verified end to end against a real `next dev`: an unguarded route fails the second pass; page-guard redirects and route-handler 401s pass; without the flag, every second-pass case fails with the reason.
 - Server actions aren't routes in the manifest, so they still need rows written by hand. The matrix checks responses for the personas it's given, nothing more.
