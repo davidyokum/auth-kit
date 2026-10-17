@@ -75,8 +75,10 @@ describe('MyAccount', () => {
     auth.listWebAuthnCredentials.mockResolvedValue({ credentials: [MACBOOK, YUBIKEY] });
     const { user } = setup({ configured: ['WEB_AUTHN'], mfa: [] });
     await user.click(await screen.findByRole('button', { name: 'Remove MacBook' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Remove passkey' }));
     await user.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(auth.deleteWebAuthnCredential).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Passkeys' }));
   });
 
   it('refuses to remove the last way in', async () => {
@@ -146,6 +148,7 @@ describe('MyAccount', () => {
     auth.updatePassword.mockRejectedValueOnce(awsError('NotAuthorizedException', 'Incorrect username or password.')).mockResolvedValueOnce(undefined);
     const { user } = setup({ configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] });
     await user.click(await screen.findByRole('button', { name: 'Change password' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Change your password' }));
     const current = screen.getByLabelText('Current password');
     expect(current.getAttribute('autocomplete')).toBe('current-password');
     expect(screen.getByLabelText('New password').getAttribute('autocomplete')).toBe('new-password');
@@ -157,6 +160,7 @@ describe('MyAccount', () => {
     await user.type(screen.getByLabelText('New password'), '{Enter}');
     await waitFor(() => expect(auth.updatePassword).toHaveBeenLastCalledWith({ oldPassword: 'right', newPassword: 'a brand new long password' }));
     expect(await screen.findByText('Password changed.')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Password' }));
   });
 
   it('sets a first password, then goes straight to the authenticator', async () => {

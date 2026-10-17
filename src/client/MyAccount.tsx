@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   type PasskeyInfo,
   changePassword,
@@ -85,6 +85,31 @@ export function MyAccount(props: MyAccountProps) {
   const [totp, reloadTotp] = useLoaded(hasAuthenticator, 'account');
   const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
   const [editing, setEditing] = useState<'authenticator' | 'password' | 'authenticator-after-password' | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const lastEditing = useRef<typeof editing>(null);
+
+  // Opening or closing an editor removes the button that had focus: move focus to the editor's
+  // heading, and back to the section's heading when it closes.
+  useEffect(() => {
+    const previous = lastEditing.current;
+    lastEditing.current = editing;
+    if (previous === editing) return;
+    const root = rootRef.current;
+    if (!root) return;
+    if (editing) {
+      root
+        .querySelector<HTMLElement>(
+          ['authenticator-setup', 'change-password', 'set-password'].map((name) => `[data-auth-kit="${name}"] [data-auth-kit-slot="heading"]`).join(', '),
+        )
+        ?.focus();
+    } else if (previous) {
+      document.getElementById(`${errorId}-${previous === 'password' ? 'password' : 'authenticator'}`)?.focus();
+    }
+  }, [editing, errorId]);
+
+  function focusPasskeysHeading() {
+    document.getElementById(`${errorId}-passkeys`)?.focus();
+  }
 
   const emailValue = email.state === 'ready' ? email.value : undefined;
   const factorValue = factors.state === 'ready' ? factors.value : null;
@@ -102,6 +127,7 @@ export function MyAccount(props: MyAccountProps) {
   async function removePasskey(passkey: PasskeyInfo) {
     const result = await fb.run(() => deletePasskey(passkey.id), { context: 'passkey-remove', busyStatus: 'Removing the passkey…' });
     setConfirmingRemoval(null);
+    focusPasskeysHeading();
     if (result.ok) {
       fb.set({ status: 'Passkey removed.' });
       reloadPasskeys();
@@ -147,10 +173,18 @@ export function MyAccount(props: MyAccountProps) {
                 {confirming ? (
                   <span role="group" aria-label={`Remove ${name}?`}>
                     <span>Remove {name}? You won&apos;t be able to sign in with it.</span>{' '}
-                    <Button variant="secondary" classNames={classNames} disabled={fb.busy} onClick={() => void removePasskey(passkey)}>
+                    <Button variant="secondary" classNames={classNames} disabled={fb.busy} autoFocus onClick={() => void removePasskey(passkey)}>
                       Remove passkey
                     </Button>{' '}
-                    <Button variant="link" classNames={classNames} disabled={fb.busy} onClick={() => setConfirmingRemoval(null)}>
+                    <Button
+                      variant="link"
+                      classNames={classNames}
+                      disabled={fb.busy}
+                      onClick={() => {
+                        setConfirmingRemoval(null);
+                        focusPasskeysHeading();
+                      }}
+                    >
                       Keep it
                     </Button>
                   </span>
@@ -296,7 +330,7 @@ export function MyAccount(props: MyAccountProps) {
   }
 
   return (
-    <div data-auth-kit="my-account" {...slot(classNames, 'root', props.className)}>
+    <div ref={rootRef} data-auth-kit="my-account" {...slot(classNames, 'root', props.className)}>
       <Heading level={level} classNames={classNames}>
         My account
       </Heading>
