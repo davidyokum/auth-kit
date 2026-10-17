@@ -143,8 +143,12 @@ export interface ServerAuth<G extends string = string, C extends string = string
    * belongs to it, or holds a capability that covers every record. Otherwise 404, never 403.
    */
   requireRecordAccess<R>(user: AuthUser<C>, record: R | null | undefined, rule: RecordAccessRule<R, C>): R;
-  /** Forgets cached factor and live results for this person (after an enrollment or role change). */
-  invalidate(user: Pick<AuthUser<C>, 'sub' | 'username' | 'tokenId'>): void;
+  /**
+   * Forgets cached results after an enrollment or role change: the live status-and-groups read for
+   * `username` (what the admin module knows about another person), and, given `sub` and `tokenId`
+   * too (an `AuthUser`), that token's authenticator answer.
+   */
+  invalidate(user: { username: string; sub?: string; tokenId?: string }): void;
 }
 
 const ENROLLMENT_RECHECK_MS = 30_000;
@@ -402,7 +406,7 @@ export function createServerAuth<G extends string, C extends string>(
       throw new NotFoundError();
     },
     invalidate(user) {
-      factorCache.delete(factorKey(user));
+      if (user.sub && user.tokenId) factorCache.delete(factorKey({ sub: user.sub, tokenId: user.tokenId }));
       liveCache.delete(user.username);
     },
   };

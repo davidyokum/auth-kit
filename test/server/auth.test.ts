@@ -355,6 +355,16 @@ describe('live checks for the admin area', () => {
     expect(cognito.calls.filter((c) => c.method === 'getLiveUserState')).toHaveLength(2);
   });
 
+  it('invalidate() by username alone (what the admin module knows) forgets the live read', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setLiveState('j', { enabled: true, groups: ['admin'] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'j', groups: ['admin'] }));
+    await auth.requireCan('people.manage', { request: req, live: true });
+    cognito.setLiveState('j', { enabled: true, groups: [] });
+    auth.invalidate({ username: 'j' });
+    expect(await rejection(auth.requireCan('people.manage', { request: req, live: true }))).toBeInstanceOf(ForbiddenError);
+  });
+
   it('invalidate() forgets cached results', async () => {
     const { auth, issuer, cognito } = harness();
     cognito.setLiveState('i', { enabled: true, groups: ['admin'] });
