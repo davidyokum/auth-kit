@@ -1,0 +1,77 @@
+/**
+ * `auth-kit/testing`: helpers for apps' own tests. Node only; never import it from app code.
+ */
+import { amplifyCookieNames } from '../server/tokens.js';
+import type { CognitoGateway, LiveUserState, UserAuthFactors } from '../server/cognito.js';
+import type { PersonaDefinition } from './matrix.js';
+
+export {
+  authMatrixCases,
+  runAuthMatrix,
+  assertAuthMatrix,
+  formatMatrixFailures,
+  bearerPersona,
+  REQUIRED_PERSONAS,
+  SECOND_MEMBER,
+  type AuthMatrixOptions,
+  type MatrixRoute,
+  type MatrixCase,
+  type MatrixResult,
+  type PersonaDefinition,
+} from './matrix.js';
+export {
+  createTestIssuer,
+  tamperToken,
+  unsignedToken,
+  type TestIssuer,
+  type TestIssuerOptions,
+  type MintOptions,
+} from './issuer.js';
+
+/**
+ * A persona that sends Amplify's `ssr: true` cookies, the way a signed-in browser does.
+ * Use `username` = the token's `username` claim.
+ */
+export function amplifyCookiePersona(input: {
+  clientId: string;
+  username: string;
+  accessToken: string;
+  idToken?: string;
+}): PersonaDefinition {
+  const names = amplifyCookieNames(input.clientId, input.username);
+  const pairs = [`${names.lastAuthUser}=${encodeURIComponent(input.username)}`, `${names.accessToken}=${input.accessToken}`];
+  if (input.idToken && names.idToken) pairs.push(`${names.idToken}=${input.idToken}`);
+  return { headers: { cookie: pairs.join('; ') } };
+}
+
+/** A scripted stand-in for Cognito: per-username factors and live state, and a log of calls. */
+export interface FakeCognito extends CognitoGateway {
+  calls: { method: 'getUserAuthFactors' | 'getLiveUserState'; username: string }[];
+  setFactors(username: string, factors: UserAuthFactors | Error): void;
+  setLiveState(username: string, state: LiveUserState | Error): void;
+}
+
+/**
+ * Defaults: everyone has a password and an authenticator, and is enabled with no groups. Script
+ * exceptions per username, including thrown errors (to test "couldn't check").
+ */
+export function createFakeCognito(): FakeCognito {
+  const factors = new Map<string, UserAuthFactors | Error>();
+  const live = new Map<string, LiveUserState | Error>();
+  const calls: FakeCognito['calls'] = [];
+  return {
+    calls,
+    setFactors: (username, value) => void factors.set(username, value),
+    setLiveState: (username, value) => void live.set(username, value),
+    getUserAuthFactors({ username }) {
+      calls.push({ method: 'getUserAuthFactors', username });
+      const value = factors.get(username) ?? { configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] };
+      return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+    },
+    getLiveUserState(username) {
+      calls.push({ method: 'getLiveUserState', username });
+      const value = live.get(username) ?? { enabled: true, groups: [] };
+      return value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+    },
+  };
+}
