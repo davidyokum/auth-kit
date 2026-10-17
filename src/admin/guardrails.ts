@@ -76,7 +76,7 @@ export type GuardrailResult =
   | { ok: true; requiresRecentSignIn: boolean }
   | { ok: false; code: GuardrailCode; reason: string };
 
-function isStandardGroup(role: unknown): role is StandardGroup {
+export function isStandardGroup(role: unknown): role is StandardGroup {
   return typeof role === 'string' && (STANDARD_GROUPS as readonly string[]).includes(role);
 }
 
@@ -92,6 +92,11 @@ export function isKnownRole(role: unknown, knownRoles: readonly string[] = []): 
 /** Rank of a role: admin roles 1-4; app roles, `member`, and anything unrecognized 0. */
 export function roleRank(role: string | null | undefined): number {
   return isStandardGroup(role) ? ADMIN_ROLE_RANK[role] : 0;
+}
+
+/** The person's admin roles (the standard groups they hold), highest first. App roles are left out. */
+export function adminGroupsOf(groups: readonly string[]): StandardGroup[] {
+  return groups.filter(isStandardGroup).sort((a, b) => ADMIN_ROLE_RANK[b] - ADMIN_ROLE_RANK[a]);
 }
 
 /** The person's highest admin role, or null if they hold none. */

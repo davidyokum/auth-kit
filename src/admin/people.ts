@@ -9,8 +9,10 @@ import {
   StepUpRequiredError,
   UnauthenticatedError,
 } from '../server/errors.js';
-import { ADMIN_ROLE_RANK, INVITE_EXPIRY_DAYS, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
+import { ADMIN_ROLE_RANK, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
 import { type AuditLogStore, type AuditedRun, runAudited } from './audit.js';
+import { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
+import { describeAwsError } from './aws-errors.js';
 import { CognitoAdmin, type CognitoPerson } from './cognito-admin.js';
 import { peopleActionDetails, roleLabel } from './copy.js';
 import {
@@ -19,16 +21,19 @@ import {
   type InviteStatus,
   type PeopleAction,
   PEOPLE_ACTION_CAPABILITY,
+  adminGroupsOf,
   checkPeopleAction,
   highestAdminRole,
   inviteExpiresAt,
   inviteStatus,
   isKnownRole,
+  isStandardGroup,
   roleRank,
 } from './guardrails.js';
 import type { InviteMailer, OwnerAlertNotifier } from './mailer.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
+import { type SweepResult, sweepFor } from './sweep.js';
 import {
   type ActionResult,
   type ActivityPage,
@@ -47,17 +52,6 @@ import {
   type TargetInput,
 } from './types.js';
 
-/** The audit `action` each People action writes. */
-export const PEOPLE_AUDIT_ACTIONS = {
-  invite: 'people.invite',
-  resend: 'people.resend',
-  changeRole: 'people.changeRole',
-  disable: 'people.disable',
-  enable: 'people.enable',
-  signOutEverywhere: 'people.signOutEverywhere',
-  delete: 'people.delete',
-  expireInvite: 'people.expireInvite',
-} as const;
 
 export interface PeopleAdminConfig<G extends string = string, C extends string = string> {
   /** The app's server auth. Every action re-reads the acting person's status and groups live. */
@@ -109,15 +103,6 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   sleep?: Sleep;
 }
 
-export interface SweepResult {
-  /** Subs of invites disabled by this run. */
-  disabled: string[];
-  /** Invites that were due but couldn't be disabled (and why). */
-  failed: { sub: string; error: string }[];
-  /** How many accounts were checked. */
-  checked: number;
-  truncated: boolean;
-}
 
 export interface PeopleActions {
   /** Everyone, with live status and groups: a ListUsers snapshot joined with ListUsersInGroup. */
@@ -192,7 +177,6 @@ function emailOf(value: unknown): string {
   return email;
 }
 
-const isStandardGroup = (role: string): role is StandardGroup => (STANDARD_GROUPS as readonly string[]).includes(role);
 
 // ---- Results ------------------------------------------------------------------------------------
 
@@ -214,41 +198,6 @@ function authFailure(error: unknown): Fail | null {
   return null;
 }
 
-function errorName(error: unknown): string {
-  return typeof error === 'object' && error !== null && 'name' in error ? String((error).name) : 'Error';
-}
-
-/** Says why AWS refused, in words an admin can act on. Never a stack trace. */
-export function describeAwsError(error: unknown): string {
-  const name = errorName(error);
-  switch (name) {
-    case 'TooManyRequestsException':
-    case 'ThrottlingException':
-      return 'Cognito is busy: its request quota is shared by every app in this AWS account. Try again in a few seconds.';
-    case 'UserNotFoundException':
-      return 'That person no longer exists in Cognito.';
-    case 'UsernameExistsException':
-      return 'That address already has an account.';
-    case 'AccessDeniedException':
-    case 'AccessDenied':
-      return "The server's AWS role isn't allowed to make this call (check its IAM policy).";
-    case 'NotAuthorizedException':
-      return "Cognito refused the call: the server's role isn't allowed, or the account's state doesn't allow it.";
-    case 'UnsupportedUserStateException':
-      return "Cognito says this account's state doesn't allow that.";
-    case 'LimitExceededException':
-      return 'Cognito refused the call: a limit was reached (a person can be in at most 100 groups).';
-    case 'ResourceNotFoundException':
-      return 'Cognito couldn’t find the user pool or group (check the pool ID and that the group exists).';
-    case 'MessageRejected':
-    case 'MailFromDomainNotVerifiedException':
-    case 'AccountSuspendedException':
-    case 'SendingPausedException':
-      return `SES refused the email (${name}).`;
-    default:
-      return `AWS couldn't complete the call (${name}).`;
-  }
-}
 
 class OwnerAlertFailedError extends Error {
   constructor(cause: unknown, undone: boolean) {
@@ -297,55 +246,7 @@ async function defaultRequestContext(): Promise<AuditRequestContext> {
   }
 }
 
-function adminGroupsOf(groups: readonly string[]): StandardGroup[] {
-  return groups.filter(isStandardGroup).sort((a, b) => ADMIN_ROLE_RANK[b] - ADMIN_ROLE_RANK[a]);
-}
 
-function sweepFor(deps: {
-  cognito: CognitoAdmin;
-  auditLog: AuditLogStore;
-  mode: InviteMode;
-  now: () => number;
-  maxPeople: number;
-  sleep?: Sleep;
-}) {
-  return async (actor: AuditActor, request: AuditRequestContext): Promise<SweepResult> => {
-    const { users, truncated } = await deps.cognito.listUsers(deps.maxPeople);
-    const today = new Date(deps.now());
-    const due = users.filter((u) => inviteStatus(u, today, { mode: deps.mode }) === 'expired');
-    const result: SweepResult = { disabled: [], failed: [], checked: users.length, truncated };
-    for (const person of due) {
-      const groups = adminGroupsOf(await deps.cognito.groupsOf(person.username).catch(() => [] as string[]));
-      const run = await runAudited(
-        deps.auditLog,
-        {
-          intent: {
-            actor,
-            action: PEOPLE_AUDIT_ACTIONS.expireInvite,
-            target: { sub: person.sub, email: person.email },
-            before: { enabled: true, invite: 'expired', createdAt: person.createdAt.toISOString(), groups },
-            after: { enabled: false, groups: [] },
-            reason: `Invite unused for ${INVITE_EXPIRY_DAYS} days`,
-            calls: ['AdminDisableUser', ...groups.map((g) => `AdminRemoveUserFromGroup ${g}`)],
-            ...(request.requestId !== undefined && { requestId: request.requestId }),
-            context: { ...(request.ip && { ip: request.ip }), ...(request.userAgent && { userAgent: request.userAgent }) },
-          },
-          run: async (steps) => {
-            await steps.call('AdminDisableUser', () => deps.cognito.disable(person.username));
-            for (const g of groups) await steps.call(`AdminRemoveUserFromGroup ${g}`, () => deps.cognito.removeFromGroup(person.username, g));
-            return { value: undefined };
-          },
-        },
-        deps.sleep ? { sleep: deps.sleep } : {},
-      );
-      if (run.kind === 'done') result.disabled.push(person.sub);
-      else if (run.kind === 'failed' && run.changed) result.disabled.push(person.sub);
-      if (run.kind === 'not-started') result.failed.push({ sub: person.sub, error: "Couldn't write the audit log; not disabled." });
-      else if (run.kind === 'failed') result.failed.push({ sub: person.sub, error: describeAwsError(run.error) });
-    }
-    return result;
-  };
-}
 
 /**
  * The People page's server actions. Create once (in a server-only module) and call from your own
@@ -1252,35 +1153,3 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   });
 }
 
-export interface InviteExpirySweepOptions {
-  userPoolId: string;
-  region?: string;
-  auditLog: AuditLogStore;
-  inviteMode?: InviteMode;
-  cognito?: CognitoIdentityProviderClient;
-  quota?: QuotaLimiterOptions;
-  maxPeople?: number;
-  now?: () => number;
-  sleep?: Sleep;
-}
-
-/**
- * The scheduled invite-expiry sweep, for a job with no signed-in person (EventBridge Scheduler → an
- * IAM-invoked Lambda, daily). Disables every unaccepted invite older than 7 days and removes its
- * admin roles, logging each as `people.expireInvite` by the `system:invite-expiry` actor.
- */
-export function createInviteExpirySweep(options: InviteExpirySweepOptions): () => Promise<SweepResult> {
-  const region = options.region ?? /^([a-z]{2}(?:-[a-z]+)+-\d+)_/.exec(options.userPoolId)?.[1];
-  if (!region) throw new Error(`auth-kit: userPoolId "${options.userPoolId}" isn't a Cognito user pool ID.`);
-  const client = options.cognito ?? new CognitoIdentityProviderClient({ region, maxAttempts: 1 });
-  const limiter = createQuotaLimiter({ ...(options.sleep !== undefined && { sleep: options.sleep }), ...options.quota });
-  const run = sweepFor({
-    cognito: new CognitoAdmin(client, options.userPoolId, limiter),
-    auditLog: options.auditLog,
-    mode: options.inviteMode ?? 'emailed-code',
-    now: options.now ?? Date.now,
-    maxPeople: options.maxPeople ?? ADMIN_POLICY.maxPeople,
-    ...(options.sleep !== undefined && { sleep: options.sleep }),
-  });
-  return () => run({ sub: 'system:invite-expiry', kind: 'system' }, { requestId: globalThis.crypto.randomUUID() });
-}

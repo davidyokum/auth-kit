@@ -91,7 +91,7 @@
     "auth-kit": "./dist/bin/auth-kit.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tsup --config tsup.lambda.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
