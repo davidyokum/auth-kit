@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
+import type { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { describe, expect, it } from 'vitest';
 import { amplifyAdapterRefresh, RETURN_PATH_HEADER, withAuthProxy, type ProxyAuth } from '../../src/proxy/index.js';
 import { AuthUnavailableError } from '../../src/server/index.js';

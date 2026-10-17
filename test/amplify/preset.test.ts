@@ -434,8 +434,8 @@ describe('option validation', () => {
     ['WAF window not allowed', { waf: { evaluationWindowSec: 30 as 60 } }, /60, 120, 300, or 600/],
   ];
   it.each(bad)('rejects %s', (_label, change, message) => {
-    expect(() => normalizeOptions({ ...BASE, ...change } as AuthStandardOptions)).toThrow(AuthStandardConfigError);
-    expect(() => normalizeOptions({ ...BASE, ...change } as AuthStandardOptions)).toThrow(message);
+    expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(AuthStandardConfigError);
+    expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(message);
   });
 
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {

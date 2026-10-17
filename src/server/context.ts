@@ -1,3 +1,4 @@
+import type * as NextHeaders from 'next/headers.js';
 import type { CookieReader, HeaderReader, RequestContext } from './tokens.js';
 
 /** Anything auth-kit can read a request from: a NextRequest, a plain Request, or a RequestContext. */
@@ -20,7 +21,7 @@ function parseCookieHeader(header: string | null): CookieReader {
 
 function hasCookieReader(value: unknown): value is { cookies: CookieReader } {
   if (typeof value !== 'object' || value === null || !('cookies' in value)) return false;
-  const cookies = (value as { cookies: unknown }).cookies;
+  const cookies = value.cookies;
   return typeof cookies === 'object' && cookies !== null && typeof (cookies as { get?: unknown }).get === 'function';
 }
 
@@ -35,9 +36,9 @@ export function toRequestContext(input: RequestInput): RequestContext {
  * components). Loaded lazily so auth-kit/server also works outside Next when a request is passed.
  */
 export async function nextHeadersContext(): Promise<RequestContext> {
-  let mod: typeof import('next/headers');
+  let mod: typeof NextHeaders;
   try {
-    mod = await import('next/headers');
+    mod = await import('next/headers.js');
   } catch (error) {
     throw new Error('auth-kit: no request was passed and next/headers is unavailable. Pass { request }.', {
       cause: error,

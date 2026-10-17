@@ -22,7 +22,9 @@ const BASE = 'https://safe-redirect.invalid';
 // Control characters plus ASCII and Unicode whitespace.
 const CONTROL_OR_SPACE = new RegExp('[' + '\\u0000-\\u0020\\u007F-\\u00A0\\u1680\\u180E\\u2000-\\u200F\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF' + ']');
 // Characters browsers drop while parsing a URL (tab, LF, CR) or that end a header value.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const STRIPPED_BY_PARSERS = /[\u0000-\u001F\u007F]/;
+// eslint-disable-next-line no-control-regex -- leading control characters before a scheme
 const SCHEME = /^[\s\u0000-\u001F]*[a-z][a-z0-9+.-]*:/i;
 
 function decodeLayers(value: string, depth = 3): string[] {

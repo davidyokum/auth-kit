@@ -16,7 +16,8 @@ export default defineConfig({
   format: ['esm'],
   target: 'node22',
   platform: 'node',
-  dts: true,
+  // tsup's declaration build sets `baseUrl`, which TypeScript 6 deprecates.
+  dts: { compilerOptions: { ignoreDeprecations: '6.0' } },
   sourcemap: true,
   clean: true,
   splitting: true,

@@ -90,7 +90,7 @@ export function createTokenVerifier(options: TokenVerifierOptions): TokenVerifie
               } catch (error) {
                 throw new FetchError(uri, error instanceof Error ? error.message : String(error));
               }
-              return new TextEncoder().encode(JSON.stringify(body)).buffer as ArrayBuffer;
+              return new TextEncoder().encode(JSON.stringify(body)).buffer;
             },
           },
         }
@@ -109,7 +109,7 @@ export function createTokenVerifier(options: TokenVerifierOptions): TokenVerifie
         throw new UnauthenticatedError();
       }
       try {
-        return (await access.verify(token)) as unknown as AccessTokenClaims;
+        return await access.verify(token);
       } catch (error) {
         throw toAuthError(error);
       }
@@ -117,7 +117,7 @@ export function createTokenVerifier(options: TokenVerifierOptions): TokenVerifie
     async verifyIdToken(token) {
       if (typeof token !== 'string' || token.length === 0) throw new UnauthenticatedError();
       try {
-        return (await id.verify(token)) as unknown as IdTokenClaims;
+        return await id.verify(token);
       } catch (error) {
         throw toAuthError(error);
       }

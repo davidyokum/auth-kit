@@ -29,7 +29,7 @@ export function signInUrl(returnTo: string | undefined, options: { signInPath?: 
 
 async function currentPath(): Promise<string | undefined> {
   try {
-    const { headers } = await import('next/headers');
+    const { headers } = await import('next/headers.js');
     return (await headers()).get(RETURN_PATH_HEADER) ?? undefined;
   } catch {
     return undefined;
@@ -43,7 +43,7 @@ async function currentPath(): Promise<string | undefined> {
  */
 export async function handlePageAuthError(error: unknown, options: PageGuardOptions = {}): Promise<never> {
   if (!isAuthError(error) || error instanceof AuthUnavailableError) throw error;
-  const nav = await import('next/navigation');
+  const nav = await import('next/navigation.js');
   switch (error.code) {
     case 'unauthenticated':
     case 'invalid_token':

@@ -19,7 +19,9 @@
  * export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
  * ```
  */
-import { NextResponse, type NextRequest } from 'next/server';
+// Fully specified `.js` paths: Next's bundler aliases them like the bare ones, and plain Node ESM
+// (which can't resolve `next/server` without an exports map) loads them too.
+import { NextResponse, type NextRequest } from 'next/server.js';
 import type { ResolvedPoolConfig } from '../server/config.js';
 import { toRequestContext } from '../server/context.js';
 import { PRIVATE_NO_STORE } from '../server/cookies.js';

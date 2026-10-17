@@ -44,7 +44,7 @@ export interface CognitoGatewayOptions {
 }
 
 function errorName(error: unknown): string {
-  return typeof error === 'object' && error !== null && 'name' in error ? String((error as { name: unknown }).name) : '';
+  return typeof error === 'object' && error !== null && 'name' in error ? String(error.name) : '';
 }
 
 function errorMessage(error: unknown): string {
