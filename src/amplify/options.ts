@@ -79,16 +79,25 @@ export interface WafOptions {
   overallLimit?: number;
   /** Window in seconds: 60, 120, 300 (default), or 600. */
   evaluationWindowSec?: 60 | 120 | 300 | 600;
-  /** `count` to observe before blocking (AWS recommends it when tuning). Default `block`. */
-  action?: 'block' | 'count';
+  /**
+   * The sign-in rule's mode. Default `count`: watch a week of its counts (and which operations
+   * token refreshes arrive as), then switch it to `block` (ADR 0017).
+   */
+  signInRule?: WafRuleMode;
+  /** The overall per-IP rule's mode. Default `block`, so the pool is never without a limit. */
+  overallRule?: WafRuleMode;
 }
+
+/** `count` records matches (AWS recommends it while tuning); `block` refuses requests over the limit. */
+export type WafRuleMode = 'block' | 'count';
 
 /** The rate rules of a web ACL auth-kit creates. */
 export interface WafRuleSettings {
   signInLimit: number;
   overallLimit: number;
   evaluationWindowSec: 60 | 120 | 300 | 600;
-  action: 'block' | 'count';
+  signInRule: WafRuleMode;
+  overallRule: WafRuleMode;
 }
 
 export type NormalizedWafOptions =
@@ -182,8 +191,8 @@ function fail(message: string): never {
   throw new AuthStandardConfigError(message);
 }
 
-const WAF_KEYS = new Set(['webAclArn', 'enabledInSandbox', 'signInLimit', 'overallLimit', 'evaluationWindowSec', 'action']);
-const RULE_KEYS = ['signInLimit', 'overallLimit', 'evaluationWindowSec', 'action'] as const;
+const RULE_KEYS = ['signInLimit', 'overallLimit', 'evaluationWindowSec', 'signInRule', 'overallRule'] as const;
+const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', ...RULE_KEYS]);
 // A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
 const WEB_ACL_ARN_RE =
   /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
@@ -213,6 +222,7 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
   const w = (input ?? {}) as WafOptions & Record<string, unknown>;
   for (const key of Object.keys(w)) {
     if (key === 'enabled') fail('waf.enabled is gone: use waf: false with acknowledgeNoRateLimit: true, or a shared web ACL (waf: { webAclArn }).');
+    if (key === 'action') fail(RETIRED_ACTION('waf'));
     if (!WAF_KEYS.has(key)) fail(`waf has no option "${key}".`);
   }
   if (w.enabledInSandbox !== undefined && typeof w.enabledInSandbox !== 'boolean') fail('waf.enabledInSandbox must be true or false.');
@@ -234,13 +244,35 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
     return { mode: 'shared', webAclArn: arn, enabledInSandbox };
   }
 
-  const rules: WafRuleSettings = {
-    signInLimit: w.signInLimit ?? WAF_POLICY.signInLimit,
-    overallLimit: w.overallLimit ?? WAF_POLICY.overallLimit,
-    evaluationWindowSec: w.evaluationWindowSec ?? WAF_POLICY.evaluationWindowSec,
-    action: w.action ?? 'block',
-  };
-  return { mode: 'create', enabledInSandbox, ...validateWafRules(rules, 'waf') };
+  const { webAclArn: _webAclArn, enabledInSandbox: _enabledInSandbox, ...rules } = w;
+  return { mode: 'create', enabledInSandbox, ...wafRuleSettings(rules, 'waf') };
+}
+
+/** The retired single `action` (it applied to both rules). */
+const RETIRED_ACTION = (label: string) =>
+  `${label}.action is gone: each rule has its own mode now. Set ${label}.signInRule (default "count") and ${label}.overallRule (default "block") to "count" or "block".`;
+
+/**
+ * The rate rules' settings with the standard's defaults filled in (`WAF_POLICY`), checked against
+ * AWS WAF's ranges. Refuses unknown keys and the retired `action`. Throws `AuthStandardConfigError`.
+ */
+export function wafRuleSettings(input: Partial<WafRuleSettings> | undefined, label: string): WafRuleSettings {
+  const raw = (input ?? {}) as Partial<WafRuleSettings> & Record<string, unknown>;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail(`${label} must be an options object.`);
+  for (const key of Object.keys(raw)) {
+    if (key === 'action') fail(RETIRED_ACTION(label));
+    if (!(RULE_KEYS as readonly string[]).includes(key)) fail(`${label} has no option "${key}".`);
+  }
+  return validateWafRules(
+    {
+      signInLimit: raw.signInLimit ?? WAF_POLICY.signInLimit,
+      overallLimit: raw.overallLimit ?? WAF_POLICY.overallLimit,
+      evaluationWindowSec: raw.evaluationWindowSec ?? WAF_POLICY.evaluationWindowSec,
+      signInRule: raw.signInRule ?? WAF_POLICY.signInRule,
+      overallRule: raw.overallRule ?? WAF_POLICY.overallRule,
+    },
+    label,
+  );
 }
 
 /** Checks rate-rule settings against AWS WAF's ranges. */
@@ -251,7 +283,9 @@ export function validateWafRules(rules: WafRuleSettings, label: string): WafRule
     }
   }
   if (![60, 120, 300, 600].includes(rules.evaluationWindowSec)) fail(`${label}.evaluationWindowSec must be 60, 120, 300, or 600.`);
-  if (rules.action !== 'block' && rules.action !== 'count') fail(`${label}.action must be "block" or "count".`);
+  for (const key of ['signInRule', 'overallRule'] as const) {
+    if (rules[key] !== 'block' && rules[key] !== 'count') fail(`${label}.${key} must be "block" or "count".`);
+  }
   return rules;
 }
 

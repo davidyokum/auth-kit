@@ -1,7 +1,6 @@
 import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
 import type { Construct } from 'constructs';
-import { WAF_POLICY } from '../shared/policy.js';
-import { type WafRuleSettings, validateWafRules } from './options.js';
+import { type WafRuleSettings, validateWafRules, wafRuleSettings } from './options.js';
 
 export interface AuthWebAclProps {
   /** ARN of the user pool to protect. */
@@ -18,11 +17,12 @@ export interface AuthWebAcl {
 
 /**
  * The header names WAF can see for user pool API requests. Cognito forwards selected request headers
- * to WAF and documents `x-amzn-cognito-operation-name` as the way to identify the API operation in
- * WAF logs. AWS doesn't document the header's value format, so the match is a lowercase "contains"
- * on the operation name, and `x-amz-target` (the JSON-protocol operation header) is matched too.
- * Confirm the sign-in rule matches in Count mode on a sandbox before relying on it alone; the
- * overall per-IP rule needs no header match and always applies.
+ * to WAF and documents `x-amzn-cognito-operation-name` as the way to identify the API operation.
+ * Verified live on 2026-10-17 (ADR 0017): WAF's sampled requests show Cognito forwards the bare
+ * operation name (`x-amzn-cognito-operation-name: InitiateAuth`) and the JSON-protocol target
+ * (`x-amz-target: AWSCognitoIdentityProviderService.InitiateAuth`), and 110 unauthenticated
+ * `InitiateAuth` calls in 20 seconds put the sender over the sign-in rule's limit and not the overall
+ * rule's. The match is a lowercase "contains" on the operation name, on both headers.
  */
 export const COGNITO_OPERATION_HEADERS = ['x-amzn-cognito-operation-name', 'x-amz-target'] as const;
 /** Sign-in attempts: password and passkey starts, emailed-code sends, and every code or TOTP guess. */
@@ -48,8 +48,9 @@ function operationMatch(header: string, operation: string): CfnWebACL.StatementP
   };
 }
 
+const ruleAction = (mode: WafRuleSettings['signInRule']): CfnWebACL.RuleActionProperty => (mode === 'count' ? { count: {} } : { block: {} });
+
 function rateRules(waf: WafRuleSettings, metricPrefix: string): CfnWebACL.RuleProperty[] {
-  const action = waf.action === 'count' ? { count: {} } : { block: {} };
   const signInScope: CfnWebACL.StatementProperty = {
     orStatement: {
       statements: COGNITO_OPERATION_HEADERS.flatMap((header) =>
@@ -61,7 +62,7 @@ function rateRules(waf: WafRuleSettings, metricPrefix: string): CfnWebACL.RulePr
     {
       name: 'auth-kit-sign-in-attempts-per-ip',
       priority: 0,
-      action,
+      action: ruleAction(waf.signInRule),
       statement: {
         rateBasedStatement: {
           aggregateKeyType: 'IP',
@@ -79,7 +80,7 @@ function rateRules(waf: WafRuleSettings, metricPrefix: string): CfnWebACL.RulePr
     {
       name: 'auth-kit-requests-per-ip',
       priority: 1,
-      action,
+      action: ruleAction(waf.overallRule),
       statement: {
         rateBasedStatement: {
           aggregateKeyType: 'IP',
@@ -126,7 +127,11 @@ export function createAuthWebAcl(scope: Construct, id: string, props: AuthWebAcl
 export interface SharedAuthWebAclProps {
   /** The web ACL's name, unique per account and Region. Default `auth-kit-shared-user-pools`. */
   name?: string;
-  /** Rate rules. Defaults: the standard's limits (`WAF_POLICY`), blocking. */
+  /**
+   * Rate rules. Defaults: the standard's limits (`WAF_POLICY`), the sign-in rule counting
+   * (`signInRule: 'count'`) and the overall rule blocking (`overallRule: 'block'`). After a week of
+   * the sign-in rule's counts, set `signInRule: 'block'` (ADR 0017).
+   */
   waf?: Partial<WafRuleSettings>;
 }
 
@@ -144,15 +149,7 @@ export interface SharedAuthWebAclProps {
 export function createSharedAuthWebAcl(scope: Construct, id: string, props: SharedAuthWebAclProps = {}): CfnWebACL {
   const name = props.name ?? 'auth-kit-shared-user-pools';
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(name)) throw new Error(`auth-kit: web ACL name "${name}" may use only letters, digits, _ and - (1-128).`);
-  const waf = validateWafRules(
-    {
-      signInLimit: props.waf?.signInLimit ?? WAF_POLICY.signInLimit,
-      overallLimit: props.waf?.overallLimit ?? WAF_POLICY.overallLimit,
-      evaluationWindowSec: props.waf?.evaluationWindowSec ?? WAF_POLICY.evaluationWindowSec,
-      action: props.waf?.action ?? 'block',
-    },
-    'waf',
-  );
+  const waf = wafRuleSettings(props.waf, 'waf');
   return new CfnWebACL(scope, id, {
     name,
     scope: 'REGIONAL',

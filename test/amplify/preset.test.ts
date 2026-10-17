@@ -171,7 +171,7 @@ describe('Tier 2 pool on a branch', () => {
         Match.objectLike({
           Name: 'auth-kit-sign-in-attempts-per-ip',
           Priority: 0,
-          Action: { Block: {} },
+          Action: { Count: {} }, // counts first by default (ADR 0017)
           Statement: {
             RateBasedStatement: Match.objectLike({
               AggregateKeyType: 'IP',
@@ -401,14 +401,47 @@ describe('self sign-up allowlist', () => {
 });
 
 describe('WAF options', () => {
-  it('supports count mode and custom limits', () => {
-    const t = synth({ ...BASE, waf: { action: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
+  /** The two rules' actions, sign-in first. */
+  const actions = (t: Template) => {
+    const acl = Object.values(t.findResources('AWS::WAFv2::WebACL'))[0] as { Properties: { Rules: { Name: string; Action: unknown }[] } };
+    return acl.Properties.Rules.map((r) => [r.Name, r.Action]);
+  };
+
+  it('by default the sign-in rule counts and the overall rule blocks (ADR 0017)', () => {
+    expect(actions(synth(BASE).template())).toEqual([
+      ['auth-kit-sign-in-attempts-per-ip', { Count: {} }],
+      ['auth-kit-requests-per-ip', { Block: {} }],
+    ]);
+  });
+
+  it('sets each rule\'s mode on its own, with custom limits', () => {
+    const t = synth({ ...BASE, waf: { signInRule: 'block', overallRule: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
     t.hasResourceProperties('AWS::WAFv2::WebACL', {
       Rules: [
-        Match.objectLike({ Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 50, EvaluationWindowSec: 600 }) } }),
+        Match.objectLike({ Action: { Block: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 50, EvaluationWindowSec: 600 }) } }),
         Match.objectLike({ Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 500 }) } }),
       ],
     });
+    expect(actions(synth({ ...BASE, waf: { signInRule: 'block' } }).template())).toEqual([
+      ['auth-kit-sign-in-attempts-per-ip', { Block: {} }],
+      ['auth-kit-requests-per-ip', { Block: {} }],
+    ]);
+  });
+
+  it('matches the sign-in operations on the header Cognito forwards (verified live: the bare operation name)', () => {
+    const acl = Object.values(synth(BASE).template().findResources('AWS::WAFv2::WebACL'))[0] as {
+      Properties: { Rules: { Statement: { RateBasedStatement: { ScopeDownStatement?: { OrStatement: { Statements: unknown[] } } } } }[] };
+    };
+    const scope = JSON.stringify(acl.Properties.Rules[0]!.Statement.RateBasedStatement.ScopeDownStatement);
+    for (const header of ['x-amzn-cognito-operation-name', 'x-amz-target']) {
+      for (const op of ['initiateauth', 'respondtoauthchallenge']) {
+        expect(scope).toContain(`{"ByteMatchStatement":{"FieldToMatch":{"SingleHeader":{"Name":"${header}"}},"PositionalConstraint":"CONTAINS","SearchString":"${op}"`);
+      }
+    }
+    // The value WAF's samples showed on 2026-10-17 contains the lowercased search string after the LOWERCASE transform.
+    expect('InitiateAuth'.toLowerCase()).toContain('initiateauth');
+    expect('AWSCognitoIdentityProviderService.InitiateAuth'.toLowerCase()).toContain('initiateauth');
+    expect(acl.Properties.Rules[1]!.Statement.RateBasedStatement.ScopeDownStatement).toBeUndefined();
   });
 
   it('turns the web ACL off only with an explicit acknowledgment, and still warns', () => {
@@ -462,20 +495,41 @@ describe('a shared web ACL (one per account and Region)', () => {
 
   it('createSharedAuthWebAcl builds the same rate rules with no association', () => {
     const stack = new Stack(new App(), 'SharedWaf', { env: { region: 'us-east-1' } });
-    const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl', { waf: { action: 'count' } });
+    const acl = createSharedAuthWebAcl(stack, 'SharedAuthWebAcl');
     const t = Template.fromStack(stack);
     t.resourceCountIs('AWS::WAFv2::WebACLAssociation', 0);
     t.hasResourceProperties('AWS::WAFv2::WebACL', {
       Name: 'auth-kit-shared-user-pools',
       Scope: 'REGIONAL',
       Rules: [
+        // Defaults: sign-in counts first, the overall rule blocks from day one (ADR 0017).
         Match.objectLike({ Name: 'auth-kit-sign-in-attempts-per-ip', Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 100 }) } }),
-        Match.objectLike({ Name: 'auth-kit-requests-per-ip', Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 1000 }) } }),
+        Match.objectLike({ Name: 'auth-kit-requests-per-ip', Action: { Block: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 1000 }) } }),
       ],
     });
     expect(acl.attrArn).toBeTruthy();
     expect(() => createSharedAuthWebAcl(stack, 'Bad', { name: 'has spaces' })).toThrow(/web ACL name/);
     expect(() => createSharedAuthWebAcl(stack, 'Bad2', { waf: { signInLimit: 1 } })).toThrow(/from 10/);
+  });
+
+  it('createSharedAuthWebAcl: per-rule modes, after a week of counts the sign-in rule blocks', () => {
+    const stack = new Stack(new App(), 'SharedWaf', { env: { region: 'us-east-1' } });
+    createSharedAuthWebAcl(stack, 'SharedAuthWebAcl', { waf: { signInRule: 'block' } });
+    Template.fromStack(stack).hasResourceProperties('AWS::WAFv2::WebACL', {
+      Rules: [Match.objectLike({ Action: { Block: {} } }), Match.objectLike({ Action: { Block: {} } })],
+    });
+    const stack2 = new Stack(new App(), 'SharedWaf2', { env: { region: 'us-east-1' } });
+    createSharedAuthWebAcl(stack2, 'SharedAuthWebAcl', { waf: { signInRule: 'count', overallRule: 'count' } });
+    Template.fromStack(stack2).hasResourceProperties('AWS::WAFv2::WebACL', {
+      Rules: [Match.objectLike({ Action: { Count: {} } }), Match.objectLike({ Action: { Count: {} } })],
+    });
+  });
+
+  it('createSharedAuthWebAcl refuses the retired single action, unknown options, and bad modes', () => {
+    const stack = new Stack(new App(), 'SharedWaf', { env: { region: 'us-east-1' } });
+    expect(() => createSharedAuthWebAcl(stack, 'A', { waf: { action: 'count' } as never })).toThrow(/waf.action is gone.*signInRule.*overallRule/);
+    expect(() => createSharedAuthWebAcl(stack, 'B', { waf: { webAclArn: 'x' } as never })).toThrow(/no option "webAclArn"/);
+    expect(() => createSharedAuthWebAcl(stack, 'C', { waf: { signInRule: 'allow' as never } })).toThrow(/signInRule must be "block" or "count"/);
   });
 
   it('counts refreshes only in the overall rule for current Amplify clients (GetTokensFromRefreshToken)', () => {
@@ -556,7 +610,9 @@ describe('option validation', () => {
     ['empty self sign-up list', { selfSignUp: { allowedEmailDomains: [] } }, /at least one domain/],
     ['WAF limit below 10', { waf: { signInLimit: 5 } }, /from 10/],
     ['WAF window not allowed', { waf: { evaluationWindowSec: 30 as 60 } }, /60, 120, 300, or 600/],
-    ['WAF action not allowed', { waf: { action: 'allow' as 'block' } }, /"block" or "count"/],
+    ['WAF rule mode not allowed', { waf: { overallRule: 'allow' as 'block' } }, /overallRule must be "block" or "count"/],
+    ['the retired single waf.action', { waf: { action: 'count' } as never }, /waf.action is gone/],
+    ['a shared ACL with its own rule modes', { waf: { webAclArn: 'x', signInRule: 'block' } }, /can't be combined with waf.webAclArn/],
     ['waf: false without the acknowledgment', { waf: false }, /acknowledgeNoRateLimit: true/],
     ['the acknowledgment without waf: false', { acknowledgeNoRateLimit: true }, /applies only with waf: false/],
     ['the retired waf.enabled', { waf: { enabled: false } }, /waf.enabled is gone/],
