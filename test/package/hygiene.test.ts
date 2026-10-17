@@ -95,7 +95,10 @@ describe('package exports', () => {
     exports: Record<string, string | { types: string; import: string }>;
     files: string[];
   };
-  const entries = (tsupConfig as { entry: Record<string, string> }).entry;
+  // `bin/*` entries build the `auth-kit` command, not a subpath.
+  const entries = Object.fromEntries(
+    Object.entries((tsupConfig as { entry: Record<string, string> }).entry).filter(([name]) => !name.startsWith('bin/')),
+  );
 
   it('maps every subpath to a build entry, and every entry to a subpath', () => {
     const subpaths = Object.entries(pkg.exports).filter(([key]) => key !== './package.json');

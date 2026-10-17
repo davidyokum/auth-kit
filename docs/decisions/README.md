@@ -12,3 +12,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0006](0006-preset-props-plus-l1-overrides.md) | The preset returns `defineAuth` props, then applies L1 overrides |
 | [0007](0007-verify-tokens-in-auth-kit.md) | auth-kit verifies tokens itself; the Amplify adapter only refreshes |
 | [0008](0008-client-in-the-browser.md) | The client runs in the browser and fills Amplify v6's gaps with two direct Cognito calls |
+| [0009](0009-localhost-kit.md) | The localhost kit: TOTP personas, a checked loopback binding, a ribbon that ships and a menu that doesn't |

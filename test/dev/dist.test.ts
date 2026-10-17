@@ -1,0 +1,55 @@
+/**
+ * Checks on the built package, run in CI after `npm run build` (AUTH_KIT_DIST_TESTS=1), so a stale
+ * local `dist` never decides a test run.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { DEV_SIGNIN_MARKER } from '../../src/dev/marker.js';
+
+const DIST = join(import.meta.dirname, '..', '..', 'dist');
+const enabled = process.env.AUTH_KIT_DIST_TESTS === '1';
+
+/** Every file an entry loads through relative imports (its chunks), including itself. */
+function graph(entry: string, seen = new Set<string>()): Set<string> {
+  if (seen.has(entry)) return seen;
+  seen.add(entry);
+  const code = readFileSync(entry, 'utf8');
+  for (const m of code.matchAll(/(?:import|export)\s[^'"]*?from\s*['"](\.[^'"]+)['"]|import\s*['"](\.[^'"]+)['"]/g)) {
+    graph(resolve(dirname(entry), m[1] ?? m[2] ?? ''), seen);
+  }
+  return seen;
+}
+
+describe.runIf(enabled)('the built package', () => {
+  it('exists', () => {
+    expect(existsSync(join(DIST, 'dev', 'index.js'))).toBe(true);
+  });
+
+  it('auth-kit/ribbon (which ships) loads no file containing the dev sign-in marker', () => {
+    const files = graph(join(DIST, 'ribbon', 'index.js'));
+    expect(files.size).toBeGreaterThan(1);
+    for (const file of files) expect(readFileSync(file, 'utf8').includes(DEV_SIGNIN_MARKER), file).toBe(false);
+  });
+
+  it('auth-kit/dev and auth-kit/dev/menu do carry the marker, so the build check can find them', () => {
+    for (const entry of ['dev/index.js', 'dev/menu.js']) {
+      const files = [...graph(join(DIST, entry))];
+      expect(files.some((f) => readFileSync(f, 'utf8').includes(DEV_SIGNIN_MARKER)), entry).toBe(true);
+    }
+  });
+
+  it("the persona menu is a client component ('use client' first)", () => {
+    expect(readFileSync(join(DIST, 'dev', 'menu.js'), 'utf8')).toMatch(/^['"]use client['"];/);
+  });
+
+  it('next.config.ts can load auth-kit/dev (Next compiles it to CommonJS and requires it)', () => {
+    const loaded = createRequire(import.meta.url)('auth-kit/dev') as { withDevKit?: unknown };
+    expect(typeof loaded.withDevKit).toBe('function');
+  });
+
+  it('the auth-kit command starts with a shebang', () => {
+    expect(readFileSync(join(DIST, 'bin', 'auth-kit.js'), 'utf8').startsWith('#!/usr/bin/env node\n')).toBe(true);
+  });
+});
