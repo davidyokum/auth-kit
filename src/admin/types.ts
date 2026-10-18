@@ -91,6 +91,38 @@ export type ActionResult =
 /** A server action as `useActionState` calls it. */
 export type FormAction = (previous: ActionResult | null, data: FormData) => Promise<ActionResult>;
 
+// ---- Access requests (ADR 0023) ------------------------------------------------------------------
+
+/** One pending request on the People page. The name and reason are as typed: untrusted. */
+export interface AccessRequestRow {
+  id: string;
+  email: string;
+  name?: string;
+  reason?: string;
+  /** ISO 8601. */
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** The "Pending requests" tab: honest when it can't load, and `off` where the site takes no requests. */
+export type AccessRequestList =
+  | { state: 'ok'; requests: AccessRequestRow[]; truncated: boolean; fetchedAt: string }
+  | { state: 'unavailable'; reason: string }
+  | { state: 'off' };
+
+export interface ApproveRequestInput {
+  id: string;
+  /** Default `member`: the least access, as the invite form. */
+  role?: string;
+  reason?: string;
+}
+
+export interface DeclineRequestInput {
+  id: string;
+  /** Included in the decline note, when the site sends one. */
+  note?: string;
+}
+
 export interface InviteInput {
   email: string;
   /** An admin role (never `owner`), an app role, or `member` for no group. */

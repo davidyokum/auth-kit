@@ -32,6 +32,7 @@ export default defineConfig({
     'admin/index': 'src/admin/index.ts',
     'admin/ui': 'src/admin/ui/index.tsx',
     'admin/cdk': 'src/admin/cdk.ts',
+    'accounts/index': 'src/accounts/index.ts',
     'resources/index': 'src/resources/index.ts',
     'resources/ui': 'src/resources/ui.tsx',
     'dev/index': 'src/dev/index.ts',

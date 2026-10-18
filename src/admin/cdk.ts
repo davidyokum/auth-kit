@@ -5,6 +5,9 @@
  * - `AuditLogTable`: the append-only audit log's DynamoDB table.
  * - `InviteExpirySweep`: the schedule that disables invites unused for 7 days (never the last owner's).
  * - `ResourceAccessTable`: the resource roles' membership table (`auth-kit/resources`, ADR 0022).
+ * - `AccessRequestTable`, `RateLimitTable`, `UnverifiedAccountSweep`, `AccessRequestDigest`: account
+ *   creation (`auth-kit/accounts`, ADR 0023).
+ * - `SiteSettingsTable`: site settings, such as a Super admin's sign-in help address (ADR 0024).
  *
  * ```ts
  * // amplify/backend.ts
@@ -45,7 +48,22 @@ import { AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY, INVITE_EXPIRY_DAYS } from '../shar
 import { AUDIT_TABLE_SCHEMA } from './audit-schema.js';
 import type { InviteMode } from './guardrails.js';
 import { RESOURCE_TABLE_SCHEMA } from '../resources/schema.js';
-import { AUDIT_LOG_APP_ACTIONS, INVITE_EXPIRY_COGNITO_ACTIONS, RESOURCE_ACCESS_APP_ACTIONS, auditLogResourcePolicy } from './iam.js';
+import {
+  ACCESS_REQUEST_APP_ACTIONS,
+  ACCESS_REQUEST_DIGEST_ACTIONS,
+  ACCESS_REQUEST_DIGEST_COGNITO_ACTIONS,
+  AUDIT_LOG_APP_ACTIONS,
+  INVITE_EXPIRY_COGNITO_ACTIONS,
+  RATE_LIMIT_APP_ACTIONS,
+  RESOURCE_ACCESS_APP_ACTIONS,
+  SITE_SETTINGS_APP_ACTIONS,
+  UNVERIFIED_SWEEP_COGNITO_ACTIONS,
+  auditLogResourcePolicy,
+} from './iam.js';
+import { ACCESS_REQUEST_TABLE_SCHEMA, RATE_LIMIT_TABLE_SCHEMA, SITE_SETTINGS_TABLE_SCHEMA } from '../accounts/schema.js';
+import { ACCESS_REQUEST_DIGEST_ENV, UNVERIFIED_SWEEP_ENV } from '../accounts/jobs-env.js';
+import { ACCOUNT_CREATION_POLICY } from '../shared/policy.js';
+import { helpAddressProblems, isThemeFamily, type ThemeFamily } from '../themes/index.js';
 import { INVITE_EXPIRY_ENV } from './invite-expiry-env.js';
 import { ADMIN_POLICY } from './policy.js';
 
@@ -238,6 +256,130 @@ export class ResourceAccessTable extends Construct {
   }
 }
 
+// ---- Scheduled jobs (shared by the sweeps and the digest) --------------------------------------
+
+/** A Lambda bundle's directory in the package, checked: release tarballs include every bundle. */
+export function lambdaBundle(path: string, name: string): string {
+  const bundle = join(packageRoot(), path);
+  if (!existsSync(join(bundle, 'index.mjs'))) {
+    throw new Error(`auth-kit: the ${name} function's bundle is missing (${bundle}). Release tarballs include it; in a checkout of auth-kit, run \`npm run build\`.`);
+  }
+  return bundle;
+}
+
+function sesResources(stack: Stack, identity: string, configurationSet: string | undefined): string[] {
+  const arn = (resource: string, resourceName: string) => stack.formatArn({ service: 'ses', resource, resourceName, arnFormat: ArnFormat.SLASH_RESOURCE_NAME });
+  return [arn('identity', identity), ...(configurationSet !== undefined ? [arn('configuration-set', configurationSet)] : [])];
+}
+
+interface ScheduledJobProps {
+  bundle: string;
+  logRetention?: logs.RetentionDays;
+  roleDescription: string;
+  /** Every permission the function's role gets, in order (least privilege: nothing else is added). */
+  grant: (role: iam.Role, logGroup: logs.LogGroup) => void;
+  functionDescription: string;
+  environment: Record<string, string>;
+  schedulerRoleDescription: string;
+  scheduleDescription: string;
+  expression: string;
+  /** Minutes between runs for a rate; undefined for a cron. */
+  minutes: number | undefined;
+  scheduleTimezone: string;
+  alarmTopic?: sns.ITopic;
+  alarmDescriptions: { failed: string; dropped: string };
+}
+
+interface ScheduledJob {
+  function: lambda.Function;
+  role: iam.Role;
+  schedule: scheduler.CfnSchedule;
+  scheduleGroup: scheduler.CfnScheduleGroup;
+  logGroup: logs.LogGroup;
+  alarms: cloudwatch.Alarm[];
+}
+
+/**
+ * A function the package bundles, run by EventBridge Scheduler in a schedule group of its own,
+ * through a role that may invoke only it; its own log group; and, with an alarm topic, alarms on a
+ * failed run and a dropped invocation. Node 22 on ARM, five minutes, no retries (the next run is the retry).
+ */
+function createScheduledJob(scope: Construct, props: ScheduledJobProps): ScheduledJob {
+  const stack = Stack.of(scope);
+  const logGroup = new logs.LogGroup(scope, 'Logs', { retention: props.logRetention ?? logs.RetentionDays.THREE_MONTHS, removalPolicy: RemovalPolicy.DESTROY });
+  const role = new iam.Role(scope, 'FunctionRole', { assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'), description: props.roleDescription });
+  props.grant(role, logGroup);
+  const fn = new lambda.Function(scope, 'Function', {
+    description: props.functionDescription,
+    runtime: lambda.Runtime.NODEJS_22_X,
+    architecture: lambda.Architecture.ARM_64,
+    handler: 'index.handler',
+    code: lambda.Code.fromAsset(props.bundle),
+    role,
+    memorySize: 256,
+    timeout: Duration.minutes(5),
+    retryAttempts: 0,
+    logGroup,
+    environment: props.environment,
+  });
+
+  const scheduleGroup = new scheduler.CfnScheduleGroup(scope, 'Group');
+  const groupName = scheduleGroup.ref;
+  const schedulerRole = new iam.Role(scope, 'SchedulerRole', {
+    assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com', {
+      conditions: {
+        StringEquals: { 'aws:SourceAccount': stack.account },
+        ArnLike: { 'aws:SourceArn': stack.formatArn({ service: 'scheduler', resource: 'schedule', resourceName: `${groupName}/*` }) },
+      },
+    }),
+    description: props.schedulerRoleDescription,
+  });
+  schedulerRole.addToPrincipalPolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [fn.functionArn] }));
+
+  const schedule = new scheduler.CfnSchedule(scope, 'Schedule', {
+    groupName,
+    description: props.scheduleDescription,
+    scheduleExpression: props.expression,
+    scheduleExpressionTimezone: props.scheduleTimezone,
+    flexibleTimeWindow: { mode: 'OFF' },
+    state: 'ENABLED',
+    target: {
+      arn: fn.functionArn,
+      roleArn: schedulerRole.roleArn,
+      // Retry a delivery that failed (throttling) within the run's own slot, then drop it: the next
+      // run tries again, and the dropped-invocation alarm says so.
+      retryPolicy: { maximumRetryAttempts: 3, maximumEventAgeInSeconds: Math.min(3600, (props.minutes ?? 60) * 60) },
+    },
+  });
+  schedule.addDependency(scheduleGroup);
+
+  const alarms: cloudwatch.Alarm[] = [];
+  if (props.alarmTopic) {
+    const action = new cloudwatchActions.SnsAction(props.alarmTopic);
+    const failed = new cloudwatch.Alarm(scope, 'RunFailed', {
+      alarmDescription: props.alarmDescriptions.failed,
+      metric: fn.metricErrors({ period: Duration.hours(1), statistic: 'Sum' }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    const dropped = new cloudwatch.Alarm(scope, 'InvocationDropped', {
+      alarmDescription: props.alarmDescriptions.dropped,
+      metric: new cloudwatch.Metric({ namespace: 'AWS/Scheduler', metricName: 'InvocationDroppedCount', dimensionsMap: { ScheduleGroup: groupName }, period: Duration.hours(1), statistic: 'Sum' }),
+      threshold: 1,
+      evaluationPeriods: 1,
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+    });
+    for (const alarm of [failed, dropped]) {
+      alarm.addAlarmAction(action);
+      alarms.push(alarm);
+    }
+  }
+  return { function: fn, role, schedule, scheduleGroup, logGroup, alarms };
+}
+
 // ---- The invite-expiry sweep ------------------------------------------------------------------
 
 /** Where the build puts the sweep's self-contained Lambda bundle (`tsup.lambda.config.ts`). */
@@ -395,52 +537,21 @@ export class InviteExpirySweep extends Construct {
     const warnings = props.ownerWarnings;
     const sesIdentity = warnings ? checkOwnerWarnings(warnings) : undefined;
 
-    const bundle = join(packageRoot(), INVITE_EXPIRY_BUNDLE_PATH);
-    if (!existsSync(join(bundle, 'index.mjs'))) {
-      throw new Error(
-        `auth-kit: the invite-expiry function's bundle is missing (${bundle}). Release tarballs include it; in a checkout of auth-kit, run \`npm run build\`.`,
-      );
-    }
+    const bundle = lambdaBundle(INVITE_EXPIRY_BUNDLE_PATH, 'invite-expiry');
 
-    this.logGroup = new logs.LogGroup(this, 'Logs', {
-      retention: props.logRetention ?? logs.RetentionDays.THREE_MONTHS,
-      removalPolicy: RemovalPolicy.DESTROY,
-    });
-
-    this.role = new iam.Role(this, 'FunctionRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      description: `auth-kit invite-expiry sweep: disable invites unused for ${INVITE_EXPIRY_DAYS} days`,
-    });
-    this.role.addToPrincipalPolicy(
-      new iam.PolicyStatement({ actions: [...INVITE_EXPIRY_COGNITO_ACTIONS], resources: [props.userPool.userPoolArn] }),
-    );
-    props.auditLog.grantAppend(this.role);
-    this.logGroup.grantWrite(this.role);
-    if (warnings && sesIdentity !== undefined) {
-      const sesArn = (resource: string, resourceName: string) =>
-        stack.formatArn({ service: 'ses', resource, resourceName, arnFormat: ArnFormat.SLASH_RESOURCE_NAME });
-      this.role.addToPrincipalPolicy(
-        new iam.PolicyStatement({
-          actions: ['ses:SendEmail'],
-          resources: [
-            sesArn('identity', sesIdentity),
-            ...(warnings.configurationSet !== undefined ? [sesArn('configuration-set', warnings.configurationSet)] : []),
-          ],
-        }),
-      );
-    }
-
-    this.function = new lambda.Function(this, 'Function', {
-      description: `auth-kit: disables invites unused for ${INVITE_EXPIRY_DAYS} days, as system:invite-expiry`,
-      runtime: lambda.Runtime.NODEJS_22_X,
-      architecture: lambda.Architecture.ARM_64,
-      handler: 'index.handler',
-      code: lambda.Code.fromAsset(bundle),
-      role: this.role,
-      memorySize: 256,
-      timeout: Duration.minutes(5),
-      retryAttempts: 0,
-      logGroup: this.logGroup,
+    const job = createScheduledJob(this, {
+      bundle,
+      ...(props.logRetention !== undefined && { logRetention: props.logRetention }),
+      roleDescription: `auth-kit invite-expiry sweep: disable invites unused for ${INVITE_EXPIRY_DAYS} days`,
+      grant: (role, logGroup) => {
+        role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: [...INVITE_EXPIRY_COGNITO_ACTIONS], resources: [props.userPool.userPoolArn] }));
+        props.auditLog.grantAppend(role);
+        logGroup.grantWrite(role);
+        if (warnings && sesIdentity !== undefined) {
+          role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: ['ses:SendEmail'], resources: sesResources(stack, sesIdentity, warnings.configurationSet) }));
+        }
+      },
+      functionDescription: `auth-kit: disables invites unused for ${INVITE_EXPIRY_DAYS} days, as system:invite-expiry`,
       environment: {
         [INVITE_EXPIRY_ENV.userPoolId]: props.userPool.userPoolId,
         [INVITE_EXPIRY_ENV.auditTable]: props.auditLog.tableName,
@@ -456,69 +567,368 @@ export class InviteExpirySweep extends Construct {
           ...(warnings.configurationSet !== undefined && { [INVITE_EXPIRY_ENV.mailConfigurationSet]: warnings.configurationSet }),
         }),
       },
-    });
-
-    this.scheduleGroup = new scheduler.CfnScheduleGroup(this, 'Group');
-    const groupName = this.scheduleGroup.ref;
-    const schedulerRole = new iam.Role(this, 'SchedulerRole', {
-      assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com', {
-        conditions: {
-          StringEquals: { 'aws:SourceAccount': stack.account },
-          ArnLike: { 'aws:SourceArn': stack.formatArn({ service: 'scheduler', resource: 'schedule', resourceName: `${groupName}/*` }) },
-        },
-      }),
-      description: 'auth-kit invite-expiry sweep: lets the schedule invoke its function, nothing else',
-    });
-    schedulerRole.addToPrincipalPolicy(new iam.PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [this.function.functionArn] }));
-
-    this.schedule = new scheduler.CfnSchedule(this, 'Schedule', {
-      groupName,
-      description: `auth-kit: disable invites unused for ${INVITE_EXPIRY_DAYS} days`,
-      scheduleExpression: expression,
-      scheduleExpressionTimezone: props.scheduleTimezone ?? 'UTC',
-      flexibleTimeWindow: { mode: 'OFF' },
-      state: 'ENABLED',
-      target: {
-        arn: this.function.functionArn,
-        roleArn: schedulerRole.roleArn,
-        // Retry a delivery that failed (throttling) within the run's own slot, then drop it: the
-        // next run sweeps again, and the dropped-invocation alarm says so.
-        retryPolicy: { maximumRetryAttempts: 3, maximumEventAgeInSeconds: Math.min(3600, (minutes ?? 60) * 60) },
+      schedulerRoleDescription: 'auth-kit invite-expiry sweep: lets the schedule invoke its function, nothing else',
+      scheduleDescription: `auth-kit: disable invites unused for ${INVITE_EXPIRY_DAYS} days`,
+      expression,
+      minutes,
+      scheduleTimezone: props.scheduleTimezone ?? 'UTC',
+      ...(props.alarmTopic !== undefined && { alarmTopic: props.alarmTopic }),
+      alarmDescriptions: {
+        failed: "auth-kit invite-expiry sweep: a run failed (a due invite wasn't disabled, the pool outgrew maxPeople, or an error). Its log says which.",
+        dropped: "auth-kit invite-expiry sweep: the scheduler couldn't invoke the function (after retries), so a run didn't happen.",
       },
     });
-    this.schedule.addDependency(this.scheduleGroup);
-
-    if (props.alarmTopic) {
-      const action = new cloudwatchActions.SnsAction(props.alarmTopic);
-      const failed = new cloudwatch.Alarm(this, 'RunFailed', {
-        alarmDescription: "auth-kit invite-expiry sweep: a run failed (a due invite wasn't disabled, the pool outgrew maxPeople, or an error). Its log says which.",
-        metric: this.function.metricErrors({ period: Duration.hours(1), statistic: 'Sum' }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      });
-      const dropped = new cloudwatch.Alarm(this, 'InvocationDropped', {
-        alarmDescription: "auth-kit invite-expiry sweep: the scheduler couldn't invoke the function (after retries), so a run didn't happen.",
-        metric: new cloudwatch.Metric({
-          namespace: 'AWS/Scheduler',
-          metricName: 'InvocationDroppedCount',
-          dimensionsMap: { ScheduleGroup: groupName },
-          period: Duration.hours(1),
-          statistic: 'Sum',
-        }),
-        threshold: 1,
-        evaluationPeriods: 1,
-        comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
-        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      });
-      for (const alarm of [failed, dropped]) {
-        alarm.addAlarmAction(action);
-        this.alarms.push(alarm);
-      }
-    }
+    this.function = job.function;
+    this.role = job.role;
+    this.schedule = job.schedule;
+    this.scheduleGroup = job.scheduleGroup;
+    this.logGroup = job.logGroup;
+    this.alarms.push(...job.alarms);
 
     Tags.of(this).add('ManagedBy', 'auth-kit');
     Tags.of(this).add('Component', 'invite-expiry');
+  }
+}
+
+// ---- Account creation (ADR 0023) ---------------------------------------------------------------
+
+interface TableProps {
+  /** Default: generated by CloudFormation. */
+  tableName?: string;
+  /** A throwaway sandbox: no deletion protection, removed with the stack. Default: Amplify's sandbox context. */
+  sandbox?: boolean;
+  /** A customer-managed key. Default: DynamoDB's AWS-owned key. */
+  encryptionKey?: kms.IKey;
+}
+
+function keptTable(
+  scope: Construct,
+  props: TableProps,
+  layout: { partitionKey: string; sortKey?: string; ttl?: string; pointInTimeRecovery: boolean; keep: boolean; denySid: string },
+): dynamodb.TableV2 {
+  const sandbox = props.sandbox ?? scope.node.tryGetContext(AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY) === 'sandbox';
+  const keep = layout.keep && !sandbox;
+  return new dynamodb.TableV2(scope, 'Table', {
+    ...(props.tableName !== undefined && { tableName: props.tableName }),
+    partitionKey: { name: layout.partitionKey, type: dynamodb.AttributeType.STRING },
+    ...(layout.sortKey !== undefined && { sortKey: { name: layout.sortKey, type: dynamodb.AttributeType.STRING } }),
+    ...(layout.ttl !== undefined && { timeToLiveAttribute: layout.ttl }),
+    billing: dynamodb.Billing.onDemand(),
+    pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: layout.pointInTimeRecovery },
+    deletionProtection: keep,
+    removalPolicy: keep ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    ...(props.encryptionKey !== undefined && { encryption: dynamodb.TableEncryptionV2.customerManagedKey(props.encryptionKey) }),
+    ...(keep && {
+      resourcePolicy: iam.PolicyDocument.fromJson({
+        Version: '2012-10-17',
+        Statement: [{ Sid: layout.denySid, Effect: 'Deny', Principal: '*', Action: ['dynamodb:DeleteTable'], Resource: '*' }],
+      }),
+    }),
+  });
+}
+
+export type AccessRequestTableProps = TableProps;
+
+/**
+ * The access-request queue (register D3): requests wait here, never as Cognito users.
+ * - partition `pk` (`requests`), sort `sk` (`request#<id>`), `ttl` for DynamoDB's TTL
+ *   (`ACCESS_REQUEST_TABLE_SCHEMA`): a request and its typed name and reason are deleted 30 days after
+ *   it's settled (approved, declined, or expired after 30 days), and the digest deletes them too;
+ * - on-demand, point-in-time recovery, deletion protection, retained on stack delete, `DeleteTable`
+ *   denied to everyone (outside sandboxes).
+ *
+ * Grant the app with `grantApp` (`Query`, `GetItem`, `PutItem`); the digest gets `grantDigest`.
+ */
+export class AccessRequestTable extends Construct {
+  readonly table: dynamodb.TableV2;
+  readonly tableName: string;
+  readonly tableArn: string;
+  private readonly encryptionKey: kms.IKey | undefined;
+
+  constructor(scope: Construct, id: string, props: AccessRequestTableProps = {}) {
+    super(scope, id);
+    this.encryptionKey = props.encryptionKey;
+    const t = ACCESS_REQUEST_TABLE_SCHEMA;
+    this.table = keptTable(this, props, { partitionKey: t.partitionKey, sortKey: t.sortKey, ttl: t.ttlAttribute, pointInTimeRecovery: true, keep: true, denySid: 'AccessRequestsAreKept' });
+    this.tableName = this.table.tableName;
+    this.tableArn = this.table.tableArn;
+    Tags.of(this).add('ManagedBy', 'auth-kit');
+    Tags.of(this).add('Component', 'access-requests');
+  }
+
+  /** `Query`, `GetItem`, and `PutItem` on the table: the request route and the People page's queue. */
+  grantApp(grantee: iam.IGrantable): iam.Grant {
+    const grant = iam.Grant.addToPrincipal({ grantee, actions: [...ACCESS_REQUEST_APP_ACTIONS], resourceArns: [this.tableArn] });
+    this.encryptionKey?.grantEncryptDecrypt(grantee);
+    return grant;
+  }
+
+  /** `Query` and `DeleteItem`: the digest lists requests and deletes those past retention. */
+  grantDigest(grantee: iam.IGrantable): iam.Grant {
+    const grant = iam.Grant.addToPrincipal({ grantee, actions: [...ACCESS_REQUEST_DIGEST_ACTIONS], resourceArns: [this.tableArn] });
+    this.encryptionKey?.grantEncryptDecrypt(grantee);
+    return grant;
+  }
+}
+
+export type RateLimitTableProps = Omit<TableProps, 'sandbox'>;
+
+/**
+ * Per-address and per-IP counters for the sign-up and request routes and email changes
+ * (`RATE_LIMIT_TABLE_SCHEMA`): addresses and IPs are stored only as hashes, and every counter expires
+ * by DynamoDB TTL an hour after its window. Nothing here is worth keeping: no point-in-time recovery,
+ * removed with the stack. Grant the app with `grantApp` (`UpdateItem` only).
+ */
+export class RateLimitTable extends Construct {
+  readonly table: dynamodb.TableV2;
+  readonly tableName: string;
+  readonly tableArn: string;
+  private readonly encryptionKey: kms.IKey | undefined;
+
+  constructor(scope: Construct, id: string, props: RateLimitTableProps = {}) {
+    super(scope, id);
+    this.encryptionKey = props.encryptionKey;
+    const t = RATE_LIMIT_TABLE_SCHEMA;
+    this.table = keptTable(this, { ...props, sandbox: true }, { partitionKey: t.partitionKey, ttl: t.ttlAttribute, pointInTimeRecovery: false, keep: false, denySid: 'RateLimits' });
+    this.tableName = this.table.tableName;
+    this.tableArn = this.table.tableArn;
+    Tags.of(this).add('ManagedBy', 'auth-kit');
+    Tags.of(this).add('Component', 'rate-limits');
+  }
+
+  grantApp(grantee: iam.IGrantable): iam.Grant {
+    const grant = iam.Grant.addToPrincipal({ grantee, actions: [...RATE_LIMIT_APP_ACTIONS], resourceArns: [this.tableArn] });
+    this.encryptionKey?.grantEncryptDecrypt(grantee);
+    return grant;
+  }
+}
+
+export type SiteSettingsTableProps = TableProps;
+
+/**
+ * Site settings an admin changes without a deploy (`SITE_SETTINGS_TABLE_SCHEMA`), such as the Super
+ * admin's sign-in help address (ADR 0024). Every change is also in the audit log. Point-in-time
+ * recovery, deletion protection, retained, `DeleteTable` denied (outside sandboxes). Grant the app
+ * with `grantApp` (`GetItem`, `PutItem`, `DeleteItem`), and readers (the digest) with `grantRead`.
+ */
+export class SiteSettingsTable extends Construct {
+  readonly table: dynamodb.TableV2;
+  readonly tableName: string;
+  readonly tableArn: string;
+  private readonly encryptionKey: kms.IKey | undefined;
+
+  constructor(scope: Construct, id: string, props: SiteSettingsTableProps = {}) {
+    super(scope, id);
+    this.encryptionKey = props.encryptionKey;
+    const t = SITE_SETTINGS_TABLE_SCHEMA;
+    this.table = keptTable(this, props, { partitionKey: t.partitionKey, sortKey: t.sortKey, pointInTimeRecovery: true, keep: true, denySid: 'SiteSettingsAreKept' });
+    this.tableName = this.table.tableName;
+    this.tableArn = this.table.tableArn;
+    Tags.of(this).add('ManagedBy', 'auth-kit');
+    Tags.of(this).add('Component', 'site-settings');
+  }
+
+  grantApp(grantee: iam.IGrantable): iam.Grant {
+    const grant = iam.Grant.addToPrincipal({ grantee, actions: [...SITE_SETTINGS_APP_ACTIONS], resourceArns: [this.tableArn] });
+    this.encryptionKey?.grantEncryptDecrypt(grantee);
+    return grant;
+  }
+
+  grantRead(grantee: iam.IGrantable): iam.Grant {
+    const grant = iam.Grant.addToPrincipal({ grantee, actions: ['dynamodb:GetItem'], resourceArns: [this.tableArn] });
+    this.encryptionKey?.grantDecrypt(grantee);
+    return grant;
+  }
+}
+
+/** Where the build puts the jobs' bundles (`tsup.lambda.config.ts`). */
+export const UNVERIFIED_SWEEP_BUNDLE_PATH = 'dist/lambda/unverified-sweep';
+export const ACCESS_REQUEST_DIGEST_BUNDLE_PATH = 'dist/lambda/access-request-digest';
+
+export interface UnverifiedAccountSweepProps {
+  /** The pool sign-up accounts are made in. */
+  userPool: { readonly userPoolId: string; readonly userPoolArn: string };
+  /** The audit table the sweep writes `accounts.deleteUnverified` rows to (`PutItem` only). */
+  auditLog: AuditLogTable;
+  /** Default `rate(1 hour)`; a `rate` from 10 minutes to a day, or a `cron`. */
+  schedule?: string;
+  scheduleTimezone?: string;
+  /** Default 24 (`ACCOUNT_CREATION_POLICY.unverifiedAccountHours`). */
+  olderThanHours?: number;
+  /** Alarms on a failed run (an account it couldn't delete, a pool past `maxPeople`) or a dropped invocation. */
+  alarmTopic?: sns.ITopic;
+  maxPeople?: number;
+  logRetention?: logs.RetentionDays;
+}
+
+/**
+ * Deletes sign-up accounts whose address is never verified, 24 hours after they were made (D3),
+ * modelled on `InviteExpirySweep` (ADR 0019): EventBridge Scheduler, hourly by default, a Lambda from
+ * the release bundle, intent → `AdminDeleteUser` → result in the audit log as
+ * `system:unverified-sweep`. Only accounts marked `custom:authkit_origin = signup`, never one with a
+ * role (so never the owner), never a disabled one, never an admin's invite (unmarked: those keep the
+ * 7-day disable). Its role: `ListUsers`, `AdminListGroupsForUser`, `AdminDeleteUser` on this pool,
+ * `PutItem` on the audit table, its own log group.
+ */
+export class UnverifiedAccountSweep extends Construct {
+  readonly function: lambda.Function;
+  readonly role: iam.Role;
+  readonly schedule: scheduler.CfnSchedule;
+  readonly scheduleGroup: scheduler.CfnScheduleGroup;
+  readonly logGroup: logs.LogGroup;
+  readonly alarms: cloudwatch.Alarm[] = [];
+
+  constructor(scope: Construct, id: string, props: UnverifiedAccountSweepProps) {
+    super(scope, id);
+    const expression = (props.schedule ?? INVITE_EXPIRY_DEFAULT_SCHEDULE).trim();
+    const minutes = inviteExpiryScheduleMinutes(expression);
+    if (minutes !== undefined && (minutes < 10 || minutes > 1440)) throw new Error(`auth-kit: schedule "${expression}" must run between every 10 minutes and once a day.`);
+    const hours = props.olderThanHours ?? ACCOUNT_CREATION_POLICY.unverifiedAccountHours;
+    if (!Number.isInteger(hours) || hours < 1) throw new Error('auth-kit: olderThanHours must be a whole number of at least 1.');
+    const maxPeople = props.maxPeople ?? ADMIN_POLICY.maxPeople;
+    if (!Number.isInteger(maxPeople) || maxPeople < 1) throw new Error('auth-kit: maxPeople must be a whole number of at least 1.');
+    const job = createScheduledJob(this, {
+      bundle: lambdaBundle(UNVERIFIED_SWEEP_BUNDLE_PATH, 'unverified-sweep'),
+      ...(props.logRetention !== undefined && { logRetention: props.logRetention }),
+      roleDescription: `auth-kit unverified-account sweep: delete sign-up accounts never verified within ${hours} hours`,
+      grant: (role, logGroup) => {
+        role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: [...UNVERIFIED_SWEEP_COGNITO_ACTIONS], resources: [props.userPool.userPoolArn] }));
+        props.auditLog.grantAppend(role);
+        logGroup.grantWrite(role);
+      },
+      functionDescription: `auth-kit: deletes sign-up accounts never verified within ${hours} hours, as system:unverified-sweep`,
+      environment: {
+        [UNVERIFIED_SWEEP_ENV.userPoolId]: props.userPool.userPoolId,
+        [UNVERIFIED_SWEEP_ENV.auditTable]: props.auditLog.tableName,
+        [UNVERIFIED_SWEEP_ENV.maxPeople]: String(maxPeople),
+        [UNVERIFIED_SWEEP_ENV.olderThanHours]: String(hours),
+      },
+      schedulerRoleDescription: 'auth-kit unverified-account sweep: lets the schedule invoke its function, nothing else',
+      scheduleDescription: `auth-kit: delete sign-up accounts never verified within ${hours} hours`,
+      expression,
+      minutes,
+      scheduleTimezone: props.scheduleTimezone ?? 'UTC',
+      ...(props.alarmTopic !== undefined && { alarmTopic: props.alarmTopic }),
+      alarmDescriptions: {
+        failed: "auth-kit unverified-account sweep: a run failed (a due account wasn't deleted, the pool outgrew maxPeople, or an error). Its log says which.",
+        dropped: "auth-kit unverified-account sweep: the scheduler couldn't invoke the function (after retries), so a run didn't happen.",
+      },
+    });
+    this.function = job.function;
+    this.role = job.role;
+    this.schedule = job.schedule;
+    this.scheduleGroup = job.scheduleGroup;
+    this.logGroup = job.logGroup;
+    this.alarms.push(...job.alarms);
+    Tags.of(this).add('ManagedBy', 'auth-kit');
+    Tags.of(this).add('Component', 'unverified-sweep');
+  }
+}
+
+export interface AccessRequestDigestProps {
+  userPool: { readonly userPoolId: string; readonly userPoolArn: string };
+  requests: AccessRequestTable;
+  /** Read the Super admin's help-address override from here (falls back to `helpEmail`). */
+  settings?: SiteSettingsTable;
+  siteName: string;
+  /** The site's family, for the email's look and footer. */
+  family: ThemeFamily;
+  /** Absolute https URLs: the sign-in page and the People page. */
+  signInUrl: string;
+  peopleUrl: string;
+  /** The configured help address (required; a placeholder is refused). */
+  helpEmail: string;
+  /** The sender, on a verified SES identity: `Example Reports (NC OSBM) <sign-in@example.org>`. */
+  from: string;
+  /** The SES identity `from` sends through. Default: `from`'s domain. */
+  sesIdentity?: string;
+  configurationSet?: string;
+  /** Groups whose members get the digest. Default: the standard groups that manage people. */
+  recipientGroups?: readonly string[];
+  /** Default daily at 8:00 in `America/New_York` (`cron(0 8 * * ? *)`). */
+  schedule?: string;
+  scheduleTimezone?: string;
+  alarmTopic?: sns.ITopic;
+  logRetention?: logs.RetentionDays;
+}
+
+/** The digest's default: every morning at 8:00 Eastern. */
+export const ACCESS_REQUEST_DIGEST_DEFAULT_SCHEDULE = 'cron(0 8 * * ? *)';
+
+/**
+ * The daily digest of pending access requests to the admins who manage people (D3: a badge and a
+ * daily digest, not one email per request), which also deletes requests past their retention. Its
+ * role: `ListUsersInGroup` on this pool, `Query` and `DeleteItem` on the request table, `GetItem` on
+ * the settings table (with `settings`), `ses:SendEmail` from the sender's identity only, its own log group.
+ */
+export class AccessRequestDigest extends Construct {
+  readonly function: lambda.Function;
+  readonly role: iam.Role;
+  readonly schedule: scheduler.CfnSchedule;
+  readonly scheduleGroup: scheduler.CfnScheduleGroup;
+  readonly logGroup: logs.LogGroup;
+  readonly alarms: cloudwatch.Alarm[] = [];
+
+  constructor(scope: Construct, id: string, props: AccessRequestDigestProps) {
+    super(scope, id);
+    const stack = Stack.of(this);
+    const expression = (props.schedule ?? ACCESS_REQUEST_DIGEST_DEFAULT_SCHEDULE).trim();
+    const minutes = inviteExpiryScheduleMinutes(expression);
+    if (minutes !== undefined && (minutes < 60 || minutes > 1440)) throw new Error(`auth-kit: the digest's schedule "${expression}" must run between hourly and once a day.`);
+    const literal = (v: string) => !Token.isUnresolved(v);
+    if (literal(props.siteName) && !props.siteName.trim()) throw new Error('auth-kit: AccessRequestDigest needs a siteName.');
+    if (!isThemeFamily(props.family)) throw new Error('auth-kit: AccessRequestDigest family must be osbm, unc, or personal.');
+    for (const [key, url] of [['signInUrl', props.signInUrl], ['peopleUrl', props.peopleUrl]] as const) {
+      if (literal(url) && !/^https:\/\/[^\s]+$/.test(url)) throw new Error(`auth-kit: AccessRequestDigest ${key} must be an absolute https URL.`);
+    }
+    if (literal(props.helpEmail)) {
+      const problems = helpAddressProblems(props.helpEmail);
+      if (problems.length > 0) throw new Error(`auth-kit: AccessRequestDigest helpEmail: ${problems.join(' ')}`);
+    }
+    const sesIdentity = checkOwnerWarnings({ siteName: props.siteName, from: props.from, ...(props.sesIdentity !== undefined && { sesIdentity: props.sesIdentity }) });
+    const job = createScheduledJob(this, {
+      bundle: lambdaBundle(ACCESS_REQUEST_DIGEST_BUNDLE_PATH, 'access-request-digest'),
+      ...(props.logRetention !== undefined && { logRetention: props.logRetention }),
+      roleDescription: 'auth-kit access-request digest: email pending requests to the admins who manage people',
+      grant: (role, logGroup) => {
+        role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: [...ACCESS_REQUEST_DIGEST_COGNITO_ACTIONS], resources: [props.userPool.userPoolArn] }));
+        props.requests.grantDigest(role);
+        props.settings?.grantRead(role);
+        logGroup.grantWrite(role);
+        role.addToPrincipalPolicy(new iam.PolicyStatement({ actions: ['ses:SendEmail'], resources: sesResources(stack, sesIdentity, props.configurationSet) }));
+      },
+      functionDescription: 'auth-kit: emails pending access requests to the admins who manage people, daily',
+      environment: {
+        [ACCESS_REQUEST_DIGEST_ENV.userPoolId]: props.userPool.userPoolId,
+        [ACCESS_REQUEST_DIGEST_ENV.requestTable]: props.requests.tableName,
+        ...(props.settings && { [ACCESS_REQUEST_DIGEST_ENV.settingsTable]: props.settings.tableName }),
+        [ACCESS_REQUEST_DIGEST_ENV.siteName]: props.siteName,
+        [ACCESS_REQUEST_DIGEST_ENV.family]: props.family,
+        [ACCESS_REQUEST_DIGEST_ENV.signInUrl]: props.signInUrl,
+        [ACCESS_REQUEST_DIGEST_ENV.peopleUrl]: props.peopleUrl,
+        [ACCESS_REQUEST_DIGEST_ENV.helpEmail]: props.helpEmail,
+        [ACCESS_REQUEST_DIGEST_ENV.mailFrom]: props.from,
+        ...(props.configurationSet !== undefined && { [ACCESS_REQUEST_DIGEST_ENV.mailConfigurationSet]: props.configurationSet }),
+        ...(props.recipientGroups !== undefined && { [ACCESS_REQUEST_DIGEST_ENV.recipientGroups]: props.recipientGroups.join(',') }),
+      },
+      schedulerRoleDescription: 'auth-kit access-request digest: lets the schedule invoke its function, nothing else',
+      scheduleDescription: 'auth-kit: the daily digest of pending access requests',
+      expression,
+      minutes,
+      scheduleTimezone: props.scheduleTimezone ?? 'America/New_York',
+      ...(props.alarmTopic !== undefined && { alarmTopic: props.alarmTopic }),
+      alarmDescriptions: {
+        failed: "auth-kit access-request digest: a run failed (requests are waiting and nobody could be told, SES refused, or an error). Its log says which.",
+        dropped: "auth-kit access-request digest: the scheduler couldn't invoke the function (after retries), so a digest didn't go out.",
+      },
+    });
+    this.function = job.function;
+    this.role = job.role;
+    this.schedule = job.schedule;
+    this.scheduleGroup = job.scheduleGroup;
+    this.logGroup = job.logGroup;
+    this.alarms.push(...job.alarms);
+    Tags.of(this).add('ManagedBy', 'auth-kit');
+    Tags.of(this).add('Component', 'access-request-digest');
   }
 }

@@ -28,16 +28,23 @@ const invite = {
 };
 
 describe('invite email', () => {
-  it('says where to sign in and when it expires, escapes HTML, and carries no secret', () => {
-    const email = renderInviteEmail(invite);
-    expect(email.subject).toBe("You're invited to Example & Co");
-    expect(email.text).toContain('Sign in at https://reports.example.org/sign-in?x="1"');
-    expect(email.text).toContain('expires on October 24, 2026 (UTC)');
-    expect(email.html).toContain('Alice &lt;script&gt;');
+  it('says where to sign in and when it expires, escapes HTML, and carries no secret (Card Studio, REPORT §5.2a)', () => {
+    const email = renderInviteEmail({ ...invite, invitedBy: { name: 'Jordan <b>', email: 'jordan@example.org' }, roleLabel: 'Admin – view only', helpEmail: 'help@example.org', theme: 'osbm' });
+    expect(email.subject).toBe('Jordan <b> invited you to Example & Co');
+    expect(email.text).toContain('Jordan <b> gave you access to Example & Co. Your role: Admin – view only.');
+    expect(email.text).toContain('1. Go to https://reports.example.org/sign-in?x="1"');
+    expect(email.text).toContain('2. Enter this email address: alice@example.org');
+    expect(email.text).toContain('This invitation expires on Saturday, October 24 at 8:00 AM Eastern.');
+    expect(email.html).toContain('Jordan &lt;b&gt;');
     expect(email.html).toContain('Example &amp; Co');
     expect(email.html).toContain('href="https://reports.example.org/sign-in?x=&quot;1&quot;"');
-    expect(email.html).not.toContain('<script>');
-    expect(`${email.text}${email.html}`).not.toMatch(/password|\{####\}/i);
+    expect(email.html).not.toContain('<b>');
+    expect(email.text).toContain('This site is managed by the NC Office of State Budget and Management. Help: help@example.org.');
+    expect(email.replyTo).toEqual(['jordan@example.org']);
+    expect(`${email.text}${email.html}`).not.toMatch(/\{####\}/);
+    const plain = renderInviteEmail(invite);
+    expect(plain.subject).toBe('You’re invited to Example & Co');
+    expect(plain.text).toContain('You’ve been given access to Example & Co. Your role: Member.');
   });
 
   it('sends through SESv2 from the verified identity', async () => {
@@ -52,8 +59,14 @@ describe('invite email', () => {
       Destination: { ToAddresses: ['alice@example.org'] },
       ConfigurationSetName: 'auth',
       ReplyToAddresses: ['help@example.org'],
-      Content: { Simple: { Subject: { Data: "You're invited to Example & Co", Charset: 'UTF-8' } } },
+      Content: { Simple: { Subject: { Data: 'You’re invited to Example & Co', Charset: 'UTF-8' } } },
     });
+    // An email with its own Reply-To (an invite from someone) wins over the mailer's.
+    await mailer.sendInvite({ ...invite, invitedBy: { email: 'jordan@example.org' } });
+    expect(ses.commandCalls(SendEmailCommand)[1]!.args[0].input.ReplyToAddresses).toEqual(['jordan@example.org']);
+    await mailer.sendEmail({ to: ['x@example.org'], email: { subject: 'S', text: 'T', html: 'H' }, replyTo: ['help@example.org'] });
+    expect(ses.commandCalls(SendEmailCommand)[2]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['x@example.org'] }, ReplyToAddresses: ['help@example.org'] });
+    await expect(mailer.sendEmail({ to: [], email: { subject: 'S', text: 'T', html: 'H' } })).rejects.toThrow(/recipient/);
     expect(() => createSesInviteMailer({ from: '' })).toThrow(/from/);
   });
 });

@@ -348,7 +348,9 @@ export function inviteEmail(site: EmailSite, input: InviteEmailContent): Rendere
     ? p(`${who ?? 'Someone'} approved your request and gave you access as `, strong(role), '.')
     : input.item
       ? p(`${who ?? 'Someone'} added you to `, strong(input.item.name ? `the ${input.item.noun} “${input.item.name}”` : `a ${input.item.noun}`), ` as ${input.item.roleLabel}.`)
-      : p(`${who ?? 'Someone'} gave you access to ${site.siteName}. Your role: `, strong(role), '.');
+      : who
+        ? p(`${who} gave you access to ${site.siteName}. Your role: `, strong(role), '.')
+        : p(`You’ve been given access to ${site.siteName}. Your role: `, strong(role), '.');
   const replyTo = input.invitedBy?.email ? [input.invitedBy.email] : undefined;
   return renderEmail({
     site,

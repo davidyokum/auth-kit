@@ -215,6 +215,14 @@ const DONE: Readonly<Record<string, string>> = {
   'resources.remove': 'removed the access of',
   'resources.invite': 'invited',
   'resources.delete': 'removed all access to',
+  'accounts.signUp': 'created an account for',
+  'accounts.deleteUnverified': 'deleted the never-verified sign-up for',
+  'people.approveRequest': 'approved the request from',
+  'people.declineRequest': 'declined the request from',
+  'account.delete': 'deleted their own account',
+  'account.requestEmailChange': 'asked to change their own email address',
+  'account.changeEmail': 'changed their own email address',
+  'settings.signInHelp': 'changed the sign-in help address',
 };
 
 const TRIED: Readonly<Record<string, string>> = {
@@ -233,6 +241,21 @@ const TRIED: Readonly<Record<string, string>> = {
   'resources.remove': 'tried to remove the access of',
   'resources.invite': 'tried to invite',
   'resources.delete': 'tried to remove all access to',
+  'accounts.signUp': 'tried to create an account for',
+  'accounts.deleteUnverified': 'tried to delete the never-verified sign-up for',
+  'people.approveRequest': 'tried to approve the request from',
+  'people.declineRequest': 'tried to decline the request from',
+  'account.delete': 'tried to delete their own account',
+  'account.requestEmailChange': 'tried to ask to change their own email address',
+  'account.changeEmail': 'tried to change their own email address',
+  'settings.signInHelp': 'tried to change the sign-in help address',
+};
+
+/** How the Activity page names a system actor. */
+const SYSTEM_ACTORS: Readonly<Record<string, string>> = {
+  'system:sign-up': 'The sign-up form',
+  'system:unverified-sweep': 'Scheduled job',
+  'system:invite-expiry': 'Scheduled job',
 };
 
 const isResourceRoleName = (value: unknown): value is ResourceRole => typeof value === 'string' && value in RESOURCE_ROLE_LABEL;
@@ -326,7 +349,7 @@ export function describeActivity(
   options: DescribeActivityOptions = {},
 ): ActivityLine {
   const e: AuditEvent = entry.event;
-  const actor = e.actor.kind === 'system' ? 'Scheduled job' : (names(e.actor.sub) ?? e.actor.email ?? NO_EMAIL);
+  const actor = e.actor.kind === 'system' ? (SYSTEM_ACTORS[e.actor.sub] ?? 'Scheduled job') : (names(e.actor.sub) ?? e.actor.email ?? NO_EMAIL);
   const failed = entry.status === 'failed' || entry.status === 'refused' || entry.status === 'unknown';
   const verb = (failed ? TRIED[e.action] : DONE[e.action]) ?? e.action;
   const person = e.target && (e.target.sub ?? e.target.email) !== undefined ? ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? NO_EMAIL) : undefined;
@@ -344,6 +367,13 @@ export function describeActivity(
     case 'resources.changeRole':
     case 'resources.remove':
       target = [person, what && `on ${what}`].filter(Boolean).join(', ');
+      break;
+    case 'account.delete':
+    case 'account.requestEmailChange':
+    case 'account.changeEmail':
+    case 'settings.signInHelp':
+      // The actor acted on themselves, or on a setting: the verb says it all.
+      target = '';
       break;
     default:
       target = person ?? what ?? '';

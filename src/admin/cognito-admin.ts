@@ -8,12 +8,16 @@ import {
   AdminEnableUserCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
+  AdminUpdateUserAttributesCommand,
   AdminUserGlobalSignOutCommand,
   type AttributeType,
   ListUsersCommand,
   ListUsersInGroupCommand,
   type UserType,
+  VerifyUserAttributeCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
+import type { SIGN_UP_ORIGIN_VALUE } from '../shared/account-creation.js';
+import { SIGN_UP_ORIGIN_ATTRIBUTE } from '../shared/account-creation.js';
 import type { InviteMode } from './guardrails.js';
 import type { QuotaLimiter } from './quota.js';
 
@@ -27,6 +31,8 @@ export interface CognitoPerson {
   enabled: boolean;
   status: string;
   createdAt: Date;
+  /** `signup` for an account auth-kit's sign-up route made (read only on sign-up sites). */
+  origin?: string;
 }
 
 function attr(attributes: AttributeType[] | undefined, name: string): string | undefined {
@@ -49,6 +55,7 @@ export function personFromUser(user: UserType | undefined): CognitoPerson | null
     enabled: user.Enabled === true,
     status: user.UserStatus ?? 'UNKNOWN',
     createdAt: user.UserCreateDate instanceof Date ? user.UserCreateDate : new Date(user.UserCreateDate ?? 0),
+    ...(attr(attributes, SIGN_UP_ORIGIN_ATTRIBUTE) !== undefined && { origin: attr(attributes, SIGN_UP_ORIGIN_ATTRIBUTE) }),
   };
 }
 
@@ -64,12 +71,22 @@ const LIST_ATTRIBUTES = ['sub', 'email', 'email_verified', 'name'];
  * The Admin* and List* calls the People page makes, each spent against its quota category. Reads
  * retry transient failures; writes retry only throttling (which guarantees the call didn't run).
  */
+export interface CognitoAdminOptions {
+  /** Also read the sign-up mark (`custom:authkit_origin`). Only on sign-up sites, whose pools have it. */
+  signUpOrigin?: boolean;
+}
+
 export class CognitoAdmin {
+  private readonly attributes: string[];
+
   constructor(
     readonly client: CognitoIdentityProviderClient,
     readonly userPoolId: string,
     private readonly limiter: QuotaLimiter,
-  ) {}
+    options: CognitoAdminOptions = {},
+  ) {
+    this.attributes = options.signUpOrigin ? [...LIST_ATTRIBUTES, SIGN_UP_ORIGIN_ATTRIBUTE] : LIST_ATTRIBUTES;
+  }
 
   /** Everyone, 60 a page (ListUsers' maximum), stopping at `max`. */
   async listUsers(max: number): Promise<{ users: CognitoPerson[]; truncated: boolean }> {
@@ -80,7 +97,7 @@ export class CognitoAdmin {
         'UserList',
         () =>
           this.client.send(
-            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, AttributesToGet: LIST_ATTRIBUTES, PaginationToken: token }),
+            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, AttributesToGet: this.attributes, PaginationToken: token }),
           ),
         { read: true },
       );
@@ -118,7 +135,7 @@ export class CognitoAdmin {
   private async findOne(filter: string): Promise<CognitoPerson | null> {
     const page = await this.limiter.run(
       'UserList',
-      () => this.client.send(new ListUsersCommand({ UserPoolId: this.userPoolId, Filter: filter, Limit: 2, AttributesToGet: LIST_ATTRIBUTES })),
+      () => this.client.send(new ListUsersCommand({ UserPoolId: this.userPoolId, Filter: filter, Limit: 2, AttributesToGet: this.attributes })),
       { read: true },
     );
     return personFromUser(page.Users?.[0]);
@@ -156,9 +173,12 @@ export class CognitoAdmin {
    * - `temporary-password`: Cognito generates a one-time password and emails it with the pool's
    *   invitation template. The app never sees it.
    */
-  async createInvitedUser(input: { email: string; name?: string; mode: InviteMode }): Promise<CognitoPerson> {
+  async createInvitedUser(input: { email: string; name?: string; mode: InviteMode; origin?: typeof SIGN_UP_ORIGIN_VALUE }): Promise<CognitoPerson> {
     const attributes: AttributeType[] = [{ Name: 'email', Value: input.email }];
     if (input.name) attributes.push({ Name: 'name', Value: input.name });
+    // Sign-up accounts are marked once, here (the attribute is immutable): the sweep, the preSignUp
+    // trigger, and the code email all tell them from admin invites by it.
+    if (input.origin) attributes.push({ Name: SIGN_UP_ORIGIN_ATTRIBUTE, Value: input.origin });
     const out = await this.limiter.run('UserCreation', () =>
       this.client.send(
         new AdminCreateUserCommand({
@@ -208,6 +228,22 @@ export class CognitoAdmin {
     await this.limiter.run('UserUpdate', () =>
       this.client.send(new AdminUserGlobalSignOutCommand({ UserPoolId: this.userPoolId, Username: username })),
     );
+  }
+
+  /**
+   * AdminUpdateUserAttributes with a new email address. With the pool's
+   * `AttributesRequireVerificationBeforeUpdate`, the old address stays in effect and Cognito sends a
+   * code to the new one; the change happens when the person enters it (`verifyEmailWithToken`).
+   */
+  async updateEmail(username: string, email: string): Promise<void> {
+    await this.limiter.run('UserUpdate', () =>
+      this.client.send(new AdminUpdateUserAttributesCommand({ UserPoolId: this.userPoolId, Username: username, UserAttributes: [{ Name: 'email', Value: email }] })),
+    );
+  }
+
+  /** VerifyUserAttribute with the person's own access token: the code to their new address. */
+  async verifyEmailWithToken(accessToken: string, code: string): Promise<void> {
+    await this.client.send(new VerifyUserAttributeCommand({ AccessToken: accessToken, AttributeName: 'email', Code: code }));
   }
 
   async deleteUser(username: string): Promise<void> {

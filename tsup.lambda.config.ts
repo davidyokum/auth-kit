@@ -7,7 +7,11 @@ import { defineConfig } from 'tsup';
  * Unminified, so a stack trace in the function's log stays readable without a source map.
  */
 export default defineConfig({
-  entry: { 'lambda/invite-expiry/index': 'src/admin/invite-expiry-handler.ts' },
+  entry: {
+    'lambda/invite-expiry/index': 'src/admin/invite-expiry-handler.ts',
+    'lambda/unverified-sweep/index': 'src/accounts/unverified-sweep-handler.ts',
+    'lambda/access-request-digest/index': 'src/accounts/digest-handler.ts',
+  },
   outDir: 'dist',
   format: ['esm'],
   outExtension: () => ({ js: '.mjs' }),

@@ -166,3 +166,64 @@ export function inviteExpirySweepPolicy(options: {
   }
   return { Version: '2012-10-17', Statement: statements };
 }
+
+// ---- Account creation (ADR 0023) and site settings (ADR 0024) -----------------------------------
+
+/** The request queue's calls from the app: list (`Query`), read one (`GetItem`), file and settle (`PutItem`). */
+export const ACCESS_REQUEST_APP_ACTIONS = ['dynamodb:Query', 'dynamodb:GetItem', 'dynamodb:PutItem'] as const;
+/** The daily digest's calls: list, and delete requests past their retention. */
+export const ACCESS_REQUEST_DIGEST_ACTIONS = ['dynamodb:Query', 'dynamodb:DeleteItem'] as const;
+/** The rate-limit counters: one `UpdateItem` per attempt. */
+export const RATE_LIMIT_APP_ACTIONS = ['dynamodb:UpdateItem'] as const;
+/** Site settings: read, write with a version check, remove. */
+export const SITE_SETTINGS_APP_ACTIONS = ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'] as const;
+
+/** Cognito calls the sign-up route makes: find the address, create the account (and delete it again if a later step fails). */
+export const SIGN_UP_COGNITO_ACTIONS = ['cognito-idp:ListUsers', 'cognito-idp:AdminCreateUser', 'cognito-idp:AdminDeleteUser'] as const;
+/** Cognito calls a member's own account actions make (sign-up sites): read themselves, change their address, delete themselves. */
+export const SELF_SERVICE_COGNITO_ACTIONS = [
+  'cognito-idp:ListUsers',
+  'cognito-idp:AdminGetUser',
+  'cognito-idp:AdminListGroupsForUser',
+  'cognito-idp:AdminUpdateUserAttributes',
+  'cognito-idp:AdminUserGlobalSignOut',
+  'cognito-idp:AdminDeleteUser',
+] as const;
+/** The unverified-account sweep: list everyone, read a due account's roles, delete it. */
+export const UNVERIFIED_SWEEP_COGNITO_ACTIONS = ['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminDeleteUser'] as const;
+/** The digest reads who manages people. */
+export const ACCESS_REQUEST_DIGEST_COGNITO_ACTIONS = ['cognito-idp:ListUsersInGroup'] as const;
+
+/**
+ * The app's policy for account creation: the sign-up and request routes, the request queue on the
+ * People page, and (on sign-up sites) members' own account actions. Each table gets only its calls.
+ */
+export function accountCreationAppPolicy(options: {
+  userPoolArn: string;
+  /** `RateLimitTable` (the routes and the email change). */
+  rateLimitTableArn: string;
+  /** `AccessRequestTable`, where the site takes requests. */
+  accessRequestTableArn?: string;
+  /** Sign-up sites: the sign-up route's and members' own Cognito calls. */
+  selfSignUp: boolean;
+  /** SES identity (and configuration set) ARNs, for "you already have an account" and the notices. */
+  sesResourceArns?: readonly string[];
+}): IamPolicyDocument {
+  const cognito = [
+    ...(options.selfSignUp ? [...SIGN_UP_COGNITO_ACTIONS, ...SELF_SERVICE_COGNITO_ACTIONS] : []),
+    // The request route checks whether the address has an account.
+    ...(options.accessRequestTableArn ? ['cognito-idp:ListUsers'] : []),
+  ];
+  const statements: IamStatement[] = [{ Sid: 'AccountCreationRateLimits', Effect: 'Allow', Action: [...RATE_LIMIT_APP_ACTIONS], Resource: options.rateLimitTableArn }];
+  if (cognito.length > 0) statements.push({ Sid: 'AccountCreationCognito', Effect: 'Allow', Action: [...new Set(cognito)], Resource: options.userPoolArn });
+  if (options.accessRequestTableArn) statements.push({ Sid: 'AccessRequests', Effect: 'Allow', Action: [...ACCESS_REQUEST_APP_ACTIONS], Resource: options.accessRequestTableArn });
+  if (options.sesResourceArns && options.sesResourceArns.length > 0) {
+    statements.push({ Sid: 'AccountCreationEmail', Effect: 'Allow', Action: ['ses:SendEmail'], Resource: [...options.sesResourceArns] });
+  }
+  return { Version: '2012-10-17', Statement: statements };
+}
+
+/** The app's policy for the site settings table (`createSignInHelp`, `createSignInHelpActions`). */
+export function siteSettingsAppPolicy(tableArn: string): IamPolicyDocument {
+  return { Version: '2012-10-17', Statement: [{ Sid: 'SiteSettings', Effect: 'Allow', Action: [...SITE_SETTINGS_APP_ACTIONS], Resource: tableArn }] };
+}

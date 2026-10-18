@@ -68,6 +68,8 @@ export interface InvitedAccountInput {
   /** Display name, already checked by the caller. */
   name?: string;
   mode: InviteMode;
+  /** `signup`: the sign-up route's self-invite (ADR 0023), marked so the sweep and triggers can tell. */
+  origin?: 'signup';
 }
 
 /**

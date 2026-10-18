@@ -10,6 +10,7 @@
  * Never logs addresses.
  */
 import { createDynamoAuditLog } from './audit.js';
+import { redactAddresses } from './redact.js';
 import type { InviteMode } from './guardrails.js';
 import { INVITE_EXPIRY_ENV } from './invite-expiry-env.js';
 import { createSesInviteMailer } from './mailer.js';
@@ -92,10 +93,7 @@ export function inviteExpiryConfig(env: Readonly<Record<string, string | undefin
   };
 }
 
-/** AWS error messages can quote an address (SES names an unverified recipient): the log never does. */
-export function redactAddresses(text: string): string {
-  return text.replace(/[^\s@<>"'(),;:]+@[^\s@<>"'(),;:]+/g, '[address]');
-}
+export { redactAddresses };
 
 /** What one run reports in its log line: counts and subs, never addresses. */
 export interface InviteExpiryReport {

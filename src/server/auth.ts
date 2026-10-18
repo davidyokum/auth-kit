@@ -215,6 +215,16 @@ export interface ServerAuth<G extends string = string, C extends string = string
 
 const ENROLLMENT_RECHECK_MS = 30_000;
 
+// Every person's raw access token, across server auth instances, for auth-kit's own server actions
+// that must call a Cognito API as that person (VerifyUserAttribute). Never on the user object, so it
+// can't leak into props or logs; not exported from `auth-kit/server`.
+const ACCESS_TOKENS = new WeakMap<object, string>();
+
+/** Internal: the raw access token behind a user from `requireUser`/`getUser`/`requireCan`. */
+export function accessTokenOf(user: object): string | undefined {
+  return ACCESS_TOKENS.get(user);
+}
+
 const OPTION_KEYS = new Set<string>([
   'userPoolId',
   'clientId',
@@ -342,6 +352,7 @@ export function createServerAuth<G extends string, C extends string>(
       claims: Object.freeze({ ...claims }),
     });
     rawTokens.set(user, accessToken);
+    ACCESS_TOKENS.set(user, accessToken);
     return user;
   }
 

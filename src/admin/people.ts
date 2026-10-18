@@ -37,7 +37,12 @@ import {
   roleRank,
 } from './guardrails.js';
 import { InviteMisconfiguredError, createInvitedAccount, removeInvitedAccount, sendInviteEmail } from './invite-core.js';
-import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
+import type { EmailSender, InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
+import { ACCOUNT_AUDIT_ACTIONS } from './audit-actions.js';
+import { type SignInHelpSource, helpAddressOf } from '../accounts/sign-in-help.js';
+import { type AccessRequest, AccessRequestConflictError, type AccessRequestStore, isRequestId } from '../accounts/stores.js';
+import { requestDeclinedEmail } from '../shared/emails.js';
+import type { AuthTheme, ThemeFamily } from '../themes/index.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
 import { type SweepResult, sweepFor } from './sweep.js';
@@ -58,6 +63,9 @@ import {
   type PersonRow,
   type TargetInput,
   type TransferOwnershipInput,
+  type AccessRequestList,
+  type ApproveRequestInput,
+  type DeclineRequestInput,
 } from './types.js';
 
 
@@ -107,6 +115,19 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   onChange?: (event: AuditEvent) => void | Promise<void>;
   /** Errors the actions handle without failing (a refused row or an alert that couldn't be written). */
   onError?: (error: unknown, context: string) => void;
+  /** The site's family or theme, for the invite email (colors, footer identity line). Default personal. */
+  theme?: AuthTheme | ThemeFamily;
+  /** The help address in effect (an address, or `createSignInHelp` from `auth-kit/accounts`): the emails' "Help:" line. */
+  help?: SignInHelpSource;
+  /**
+   * The access-request queue (`accountCreation` mode `request`, or `domains` with `requestsAlso`;
+   * ADR 0023): the People page's "Pending requests" tab, approve (the ordinary invite), and decline.
+   */
+  accessRequests?: AccessRequestStore;
+  /** Send "Your request wasn’t approved" when a request is declined (REPORT §5.2k). Default false: declining is silent. */
+  notifyOnDecline?: boolean;
+  /** Sends the decline note (`createSesInviteMailer` is one). Default: the mailer, when it can. */
+  emailSender?: EmailSender;
   /** Inject a Cognito client (tests). Default: one for the pool's region, with retries left to auth-kit. */
   cognito?: CognitoIdentityProviderClient;
   quota?: QuotaLimiterOptions;
@@ -150,12 +171,20 @@ export interface PeopleActions {
   expireStaleInvites(): Promise<SweepResult | { error: ActionResult }>;
   /** The Activity page: merged audit entries, newest first. Needs `audit.read`. */
   listActivity(query?: AuditLogQuery): Promise<ActivityPage>;
+  /** Pending access requests, newest first (the badge counts them). Needs `people.manage`. */
+  listAccessRequests(): Promise<AccessRequestList>;
+  /** Approves a request: the ordinary invite (default Member), then the request is marked approved. Needs `people.manage`. */
+  approveRequest(input: ApproveRequestInput): Promise<ActionResult>;
+  /** Declines a request: removed from the queue, silently unless `notifyOnDecline`. Needs `people.manage`. */
+  declineRequest(input: DeclineRequestInput): Promise<ActionResult>;
   /** The same actions taking FormData, for `useActionState` and `auth-kit/admin/ui`. */
   readonly forms: PeopleFormActions;
 }
 
 export interface PeopleFormActions {
   invite: FormAction;
+  approveRequest: FormAction;
+  declineRequest: FormAction;
   resend: FormAction;
   changeRole: FormAction;
   transferOwnership: FormAction;
@@ -503,6 +532,13 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   // ---- invite ---------------------------------------------------------------------------------
 
+  interface InviteFields {
+    email: string;
+    role: string;
+    name?: string;
+    reason?: string;
+  }
+
   async function invite(input: InviteInput): Promise<ActionResult> {
     const auditAction = PEOPLE_AUDIT_ACTIONS.invite;
     let acting_: Acting<C>;
@@ -512,28 +548,42 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       await logForbidden(auditAction, error);
       return authFailure(error) ?? fail('unavailable', describeAwsError(error));
     }
-    let email: string, role: string, name: string | undefined, reason: string | undefined, confirmOutside: boolean;
+    let fields: InviteFields, confirmOutside: boolean;
     try {
       const raw = record(input);
-      email = emailOf(raw.email);
+      const email = emailOf(raw.email);
       // Role names are taken verbatim: no trimming or case folding (a near-miss is refused, not guessed).
-      role = typeof raw.role === 'string' ? raw.role : '';
+      const role = typeof raw.role === 'string' ? raw.role : '';
       if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
-      name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
-      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      const name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
+      const reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      fields = { email, role, ...(name !== undefined && { name }), ...(reason !== undefined && { reason }) };
       confirmOutside = checked(raw.confirmOutsideDomain);
     } catch (error) {
       return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
     }
 
-    if (outsideDomains(email, inviteDomains) && !confirmOutside) {
+    if (outsideDomains(fields.email, inviteDomains) && !confirmOutside) {
       return fail(
         'refused',
-        `${email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
+        `${fields.email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
         { guardrail: 'domain' },
       );
     }
+    return inviteAs(acting_, fields, { auditAction });
+  }
 
+  /**
+   * The invite's checks and audited calls, shared by the invite form and an approved access request
+   * (which is the ordinary invite: same guardrails, same account steps, the approved wording).
+   */
+  async function inviteAs(
+    acting_: Acting<C>,
+    fields: InviteFields,
+    opts: { auditAction: string; approved?: { requestId: string } },
+  ): Promise<ActionResult> {
+    const { auditAction } = opts;
+    const { email, role, name, reason } = fields;
     const g = guard(acting_, 'invite', undefined, { toRole: role, ...(reason !== undefined && { reason }) });
     if (!g.ok) return refuse(acting_, auditAction, { email }, g.code, g.reason, { after: { role }, ...(reason !== undefined && { reason }) });
     if (roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'] && (reason ?? '').length < ADMIN_POLICY.reasonMinLength) {
@@ -553,6 +603,12 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     const blocked = stepUp(acting_, g.requiresRecentSignIn || superadminGrant);
     if (blocked) return blocked;
 
+    let helpEmail: string | undefined;
+    try {
+      helpEmail = config.help !== undefined ? await helpAddressOf(config.help) : undefined;
+    } catch (error) {
+      report(error, 'help address');
+    }
     const plannedExpiry = inviteExpiresAt(new Date(now()));
     const run = await runAudited(
       auditLog,
@@ -562,7 +618,14 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           action: auditAction,
           target: { email },
           before: null,
-          after: { email, ...(name !== undefined && { name }), role, status: 'invited', expiresAt: plannedExpiry.toISOString() },
+          after: {
+            email,
+            ...(name !== undefined && { name }),
+            role,
+            status: 'invited',
+            expiresAt: plannedExpiry.toISOString(),
+            ...(opts.approved && { request: 'approved' }),
+          },
           ...(reason !== undefined && { reason }),
           calls: [...details.invite.calls, ...(superadminGrant ? ['Super admin alert (to the owner)'] : [])],
           ...contextOf(acting_.request),
@@ -595,6 +658,11 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               siteName: config.siteName,
               signInUrl: signInUrl.toString(),
               expiresAt,
+              ...(config.theme !== undefined && { theme: config.theme }),
+              ...(helpEmail !== undefined && { helpEmail }),
+              invitedBy: { ...(acting_.user.profile?.name !== undefined && { name: acting_.user.profile.name }), ...(acting_.actor.email !== undefined && { email: acting_.actor.email }) },
+              roleLabel: roleLabel(role),
+              ...(opts.approved && { approved: true }),
             });
           }
           return {
@@ -608,6 +676,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               invitedAt: created.createdAt.toISOString(),
               expiresAt: expiresAt.toISOString(),
               ...(ownerAlert !== undefined && { ownerAlert: { sentTo: ownerAlert } }),
+              ...(opts.approved && { request: 'approved' }),
             },
           };
         },
@@ -626,6 +695,139 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       },
       ({ created }) => ({ sub: created.sub, email }),
     );
+  }
+
+  // ---- access requests (ADR 0023) ---------------------------------------------------------------
+
+  const REQUESTS_OFF = 'This site doesn’t take access requests.';
+
+  async function listAccessRequests(): Promise<AccessRequestList> {
+    if (!config.accessRequests) return { state: 'off' };
+    try {
+      await acting('people.manage');
+    } catch (error) {
+      const f = authFailure(error);
+      return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
+    }
+    try {
+      const at = new Date(now());
+      const { requests, truncated } = await config.accessRequests.list(at);
+      return { state: 'ok', requests: requests.map(requestRow), truncated, fetchedAt: at.toISOString() };
+    } catch (error) {
+      report(error, 'requests: list');
+      return { state: 'unavailable', reason: `Couldn't load requests: ${describeAwsError(error)} This isn't a count of zero.` };
+    }
+  }
+
+  const requestRow = (r: AccessRequest) => ({
+    id: r.id,
+    email: r.email,
+    ...(r.name !== undefined && { name: r.name }),
+    ...(r.reason !== undefined && { reason: r.reason }),
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+  });
+
+  /** Authorizes and loads a pending request. */
+  async function beginRequest(action: string, input: unknown): Promise<{ who: Acting<C>; request: AccessRequest; raw: Record<string, unknown> } | Fail> {
+    if (!config.accessRequests) return fail('refused', REQUESTS_OFF, { guardrail: 'not_available' });
+    let who: Acting<C>;
+    try {
+      who = await acting('people.manage');
+    } catch (error) {
+      await logForbidden(action, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let raw: Record<string, unknown>;
+    try {
+      raw = record(input);
+      if (!isRequestId(raw.id)) throw new InputError('That request is invalid.');
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    let request: AccessRequest | null;
+    try {
+      request = await config.accessRequests.get(raw.id, new Date(now()));
+    } catch (error) {
+      return fail('unavailable', `Couldn't read the request: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    if (!request) return fail('not_found', 'That request is gone (it was deleted after 30 days).');
+    if (request.status !== 'pending') return fail('stale', request.status === 'expired' ? 'That request expired after 30 days with no answer.' : `That request was already ${request.status}.`);
+    return { who, request, raw };
+  }
+
+  async function approveRequest(input: ApproveRequestInput): Promise<ActionResult> {
+    const start = await beginRequest(ACCOUNT_AUDIT_ACTIONS.approveRequest, input);
+    if ('ok' in start) return start;
+    const { who: w, request, raw } = start;
+    let role: string, reason: string | undefined;
+    try {
+      role = typeof raw.role === 'string' && raw.role !== '' ? raw.role : MEMBER_ROLE;
+      if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
+      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    const result = await inviteAs(
+      w,
+      { email: request.email, role, ...(request.name !== undefined && { name: request.name }), ...(reason !== undefined && { reason }) },
+      { auditAction: ACCOUNT_AUDIT_ACTIONS.approveRequest, approved: { requestId: request.id } },
+    );
+    if (!result.ok && result.code === 'refused' && result.guardrail === 'exists') {
+      // Someone made the account another way meanwhile: settle the request so it leaves the queue.
+      await config.accessRequests!.settle(request.id, { status: 'approved', by: w.actor, now: new Date(now()) }).catch((error: unknown) => report(error, 'requests: settle'));
+      return fail('refused', `${request.email} already has an account, so no invite was sent. The request is closed.`, { guardrail: 'exists' });
+    }
+    if (!result.ok) return result;
+    try {
+      await config.accessRequests!.settle(request.id, { status: 'approved', by: w.actor, now: new Date(now()) });
+    } catch (error) {
+      report(error, 'requests: settle after approve');
+      return { ...result, message: `${result.message} The request still shows as pending (${error instanceof AccessRequestConflictError ? error.message : describeAwsError(error)}); decline it to clear it.` };
+    }
+    return { ...result, message: `Approved. ${result.message}` };
+  }
+
+  async function declineRequest(input: DeclineRequestInput): Promise<ActionResult> {
+    const start = await beginRequest(ACCOUNT_AUDIT_ACTIONS.declineRequest, input);
+    if ('ok' in start) return start;
+    const { who: w, request, raw } = start;
+    let note: string | undefined;
+    try {
+      note = text(raw.note, 'Note', ADMIN_POLICY.reasonMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    const sender: EmailSender | undefined = config.emailSender ?? (typeof (config.mailer as Partial<EmailSender> | undefined)?.sendEmail === 'function' ? (config.mailer as unknown as EmailSender) : undefined);
+    const tell = config.notifyOnDecline === true;
+    if (tell && !sender) return fail('refused', 'Declining sends a note (notifyOnDecline), and no email sender is configured. Nothing changed.', { guardrail: 'mailer_unavailable' });
+    const run = await runAudited(auditLog, {
+      intent: {
+        actor: w.actor,
+        action: ACCOUNT_AUDIT_ACTIONS.declineRequest,
+        // The address only: the typed name and reason stay out of the append-only log, so they can be deleted after 30 days.
+        target: { email: request.email },
+        before: { status: 'pending' },
+        after: { status: 'declined', ...(tell && { notified: true }) },
+        calls: ['DynamoDB PutItem request', ...(tell ? ['SES SendEmail'] : [])],
+        ...contextOf(w.request),
+      },
+      run: async (steps) => {
+        await steps.call('DynamoDB PutItem request', () => config.accessRequests!.settle(request.id, { status: 'declined', by: w.actor, now: new Date(now()) }));
+        if (tell && sender) {
+          try {
+            const helpEmail = config.help !== undefined ? await helpAddressOf(config.help) : '';
+            const site = { siteName: config.siteName, signInUrl: signInUrl.toString(), helpEmail, ...(config.theme !== undefined && { theme: config.theme }) };
+            await steps.call('SES SendEmail', () => sender.sendEmail({ to: [request.email], email: requestDeclinedEmail(site, { requestedAt: new Date(request.createdAt), ...(note !== undefined && { note }) }), ...(helpEmail && { replyTo: [helpEmail] }) }));
+          } catch (error) {
+            report(error, 'requests: the decline note');
+          }
+        }
+        return { value: undefined };
+      },
+    });
+    if (run.kind === 'failed' && run.error instanceof AccessRequestConflictError) return fail('stale', run.error.message);
+    return finish(run, { ok: () => (tell ? `Declined. ${request.email} was told.` : `Declined. ${request.email} wasn’t told (declining is silent on this site).`) });
   }
 
   // ---- resend ---------------------------------------------------------------------------------
@@ -1175,6 +1377,16 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   const targetFrom = (data: FormData) => ({ sub: field(data, F.sub), reason: field(data, F.reason) });
 
   const forms: PeopleFormActions = {
+    approveRequest: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return approveRequest({ id: field(d, 'id') ?? '', role: field(d, F.role), reason: field(d, F.reason) });
+    },
+    declineRequest: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return declineRequest({ id: field(d, 'id') ?? '', note: field(d, 'note') });
+    },
     invite: (_prev, data) => {
       const d = formOf(data);
       if (!d) return badForm();
@@ -1219,6 +1431,9 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     deleteUser,
     expireStaleInvites,
     listActivity,
+    listAccessRequests,
+    approveRequest,
+    declineRequest,
     forms: Object.freeze(forms),
   });
 }
