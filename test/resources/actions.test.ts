@@ -242,7 +242,7 @@ describe('change a role, and the last Manager', () => {
       const m2 = current.members.find((m) => m.sub === 'm-2')!;
       await t.store.commit(P, { expectedVersion: current.meta!.version, meta: { ...current.meta!, version: current.meta!.version + 1, managers: 1 }, put: [{ ...m2, role: 'reader' }] });
     };
-    const commit = t.store.commit;
+    const commit = t.store.commit.bind(t.store);
     let once = true;
     t.store.commit = async (ref, change) => {
       if (once) {
@@ -498,7 +498,7 @@ describe('the People page’s disable hook (removeResourceMemberships)', () => {
   it('plugs into createPeopleActions: disabling someone removes their item access, recorded in the disable row', async () => {
     const r = resourceSetup();
     await r.seed('project', 'p-1', { 'm-1': 'manager', 'm-2': 'reader' });
-    const t = peopleSetup({ actor: { sub: 'admin-1', groups: ['admin-content-people'] }, config: { removeResourceMemberships: r.actions.removeResourceMemberships } });
+    const t = peopleSetup({ actor: { sub: 'admin-1', groups: ['admin-content-people'] }, config: { removeResourceMemberships: (p) => r.actions.removeResourceMemberships(p) } });
     t.pool.add({ sub: 'm-1', email: 'm-1@example.org' });
     expect(await t.people.disable({ sub: 'm-1', reason: 'Left' })).toMatchObject({ ok: true });
     expect(t.auditLog.rows.at(-1)).toMatchObject({

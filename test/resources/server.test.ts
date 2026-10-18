@@ -37,7 +37,7 @@ const FLOOR: Record<string, Action[]> = {
 const ROLE: Record<ResourceRole, Action[]> = { manager: ['view', 'edit', 'manage-access', 'invite'], contributor: ['view', 'edit'], reader: ['view'] };
 const ACTIONS: Action[] = ['view', 'edit', 'manage-access', 'invite'];
 
-async function world() {
+function world() {
   const store = createMemoryResourceStore();
   const h = harness({ resources: { types: TYPES, store } });
   const give = async (id: string, sub: string, role: ResourceRole) => {
@@ -74,7 +74,7 @@ describe('requireResourceRole: every site role × resource role × action', () =
   const cases = Object.keys(SITE).flatMap((site) => (['manager', 'contributor', 'reader', null] as const).map((role) => ({ site, role })));
 
   it.each(cases)('$site with role $role', async ({ site, role }) => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     const sub = `${site}-person`;
     if (role) await give('p-1', sub, role);
     const request = as(sub, SITE[site]!);
@@ -88,7 +88,7 @@ describe('requireResourceRole: every site role × resource role × action', () =
 
 describe('requireResourceRole', () => {
   it('returns what the person may do, their role, and what their site role alone grants', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'c-1', 'contributor');
     const access = await h.auth.requireResourceRole('project', 'p-1', 'edit', { request: as('c-1', []) });
     expect(access).toMatchObject({ type: 'project', id: 'p-1', role: 'contributor' });
@@ -101,7 +101,7 @@ describe('requireResourceRole', () => {
   });
 
   it('a minimum role means "every action that role has": Admin – content only passes Contributor, not Manager', async () => {
-    const { h, as } = await world();
+    const { h, as } = world();
     const request = as('ac-1', ['admin-content']);
     expect(await outcome(() => h.auth.requireResourceRole('project', 'p-1', 'contributor', { request }))).toBe(200);
     expect(await outcome(() => h.auth.requireResourceRole('project', 'p-1', 'manager', { request }))).toBe(403);
@@ -110,7 +110,7 @@ describe('requireResourceRole', () => {
   });
 
   it('answers 404 alike for an item that doesn’t exist, someone else’s item, and an ID that can’t name one', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'm-1', 'manager');
     const stranger = as('m-2', []);
     for (const id of ['p-1', 'p-missing', 'a#b', '../etc', '']) {
@@ -121,7 +121,7 @@ describe('requireResourceRole', () => {
   });
 
   it('needs a valid session first (401 before any membership read)', async () => {
-    const { h, store } = await world();
+    const { h, store } = world();
     let reads = 0;
     const get = store.getMembership.bind(store);
     store.getMembership = (r, s) => (reads++, get(r, s));
@@ -130,20 +130,20 @@ describe('requireResourceRole', () => {
   });
 
   it('fails closed with 503 when memberships can’t be read', async () => {
-    const { h, store, as } = await world();
+    const { h, store, as } = world();
     store.failNext('read');
     await expect(h.auth.requireResourceRole('project', 'p-1', 'view', { request: as('o-1', ['owner']) })).rejects.toBeInstanceOf(AuthUnavailableError);
   });
 
   it('throws (a programming mistake, not a 404) for a type or action the app didn’t declare', async () => {
-    const { h, as } = await world();
+    const { h, as } = world();
     const request = as('m-1', []);
     await expect(h.auth.requireResourceRole('ticket', 'p-1', 'view', { request })).rejects.toThrow(/isn't declared/);
     await expect(h.auth.requireResourceRole('project', 'p-1', 'comment', { request })).rejects.toThrow(/isn't a role or an action/);
   });
 
   it('with live: true, a demoted admin loses the site floor at once', async () => {
-    const { h } = await world();
+    const { h } = world();
     const nowSec = Math.floor(h.clock.now / 1000);
     const request = bearer(h.issuer.mintAccessToken({ sub: 'd-1', groups: ['admin-content-people'], authTime: nowSec - 30 }));
     h.cognito.setLiveState('d-1', { enabled: true, groups: [] });
@@ -152,14 +152,14 @@ describe('requireResourceRole', () => {
   });
 
   it('checks a recent sign-in after access, so someone without access still gets 404', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'm-1', 'manager');
     await expect(h.auth.requireResourceRole('project', 'p-1', 'manage-access', { request: as('m-1', [], 3600), recentSignIn: true })).rejects.toBeInstanceOf(StepUpRequiredError);
     expect(await outcome(() => h.auth.requireResourceRole('project', 'p-1', 'manage-access', { request: as('m-2', [], 3600), recentSignIn: true }))).toBe(404);
   });
 
   it('takes a user the page already has from this auth, and refuses one from anywhere else', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'm-1', 'reader');
     const user = await h.auth.requireUser({ request: as('m-1', []) });
     expect((await h.auth.requireResourceRole('project', 'p-1', 'view', { user })).role).toBe('reader');
@@ -168,14 +168,14 @@ describe('requireResourceRole', () => {
   });
 
   it('resourceAccess answers without refusing (possibly nothing)', async () => {
-    const { h, as } = await world();
+    const { h, as } = world();
     const access = await h.auth.resourceAccess('project', 'p-1', { request: as('m-2', []) });
     expect(access.role).toBeNull();
     expect(access.actions.size).toBe(0);
   });
 
   it('page guards render the not-found page for 403 and 404', async () => {
-    const { h, as } = await world();
+    const { h, as } = world();
     const { createPageGuards } = await import('../../src/server/index.js');
     const pages = createPageGuards(h.auth);
     // Next's notFound() throws its own error; outside Next it surfaces as a thrown error with its digest.
@@ -189,7 +189,7 @@ describe('requireResourceRole', () => {
 
 describe('listMyResources', () => {
   it('a member gets their own items, with their role on each', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'm-1', 'contributor');
     await give('p-2', 'm-1', 'manager');
     await give('p-3', 'm-2', 'manager');
@@ -203,7 +203,7 @@ describe('listMyResources', () => {
   });
 
   it('a site role that sees every item gets "all" (the app lists its own items), with the roles it holds', async () => {
-    const { h, give, as } = await world();
+    const { h, give, as } = world();
     await give('p-1', 'av-1', 'reader');
     for (const groups of [['admin-view'], ['admin-content'], ['owner']]) {
       const all = await h.auth.listMyResources('project', { request: as('av-1', groups) });
@@ -213,12 +213,12 @@ describe('listMyResources', () => {
   });
 
   it('a shared directory gives everyone "all", read-only', async () => {
-    const { h, as } = await world();
+    const { h, as } = world();
     expect(await h.auth.listMyResources('idea', { request: as('m-1', []) })).toMatchObject({ scope: 'all', reason: 'shared-directory' });
   });
 
   it('fails closed with 503 when the list can’t be read', async () => {
-    const { h, store, as } = await world();
+    const { h, store, as } = world();
     store.failNext('read');
     await expect(h.auth.listMyResources('project', { request: as('m-1', []) })).rejects.toBeInstanceOf(AuthUnavailableError);
   });

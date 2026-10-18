@@ -107,6 +107,16 @@ describe('module boundaries', () => {
   it('shared policy has no imports', () => {
     expect(importsOf('src/shared/policy.ts')).toEqual([]);
   });
+
+  it('auth-kit/resources/ui imports nothing server-side (safe in client components)', () => {
+    // The panel, and the pure modules it reads: the rules, the plain types, the key layout.
+    const allowed = /^(\.\/(policy|types)\.js$|\.\.\/shared\/policy\.js$|\.\.\/admin\/types\.js$|\.\.\/admin\/ui\/index\.js$|react$)/;
+    for (const spec of importsOf('src/resources/ui.tsx')) expect(spec, `ui.tsx imports ${spec}`).toMatch(allowed);
+    for (const spec of importsOf('src/resources/policy.ts')) expect(spec).toBe('../shared/policy.js');
+    expect(importsOf('src/resources/schema.ts')).toEqual([]);
+    for (const spec of importsOf('src/resources/types.ts')) expect(spec).toMatch(/^(\.\.\/admin\/guardrails\.js|\.\.\/shared\/policy\.js|\.\/policy\.js)$/);
+    expect(readFileSync(join(ROOT, 'src/resources/ui.tsx'), 'utf8').startsWith("'use client';")).toBe(true);
+  });
 });
 
 describe('package exports', () => {
