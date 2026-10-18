@@ -24,7 +24,7 @@
 import { SIGN_UP_ORIGIN_ATTRIBUTE, SIGN_UP_ORIGIN_VALUE } from '../shared/account-creation.js';
 import { COGNITO_CODE_PLACEHOLDER, type EmailSite, type RenderedEmail, confirmNewEmailEmail, passwordResetEmail, signInCodeEmail, signUpCodeEmail } from '../shared/emails.js';
 import { codeLifetimeMinutes } from '../shared/policy.js';
-import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
+import { type AuthTheme, type ThemeFamily, helpAddressProblems, resolveTheme } from '../themes/index.js';
 
 /** The fields of Cognito's custom message event this handler reads and writes. */
 export interface CustomMessageTriggerEvent {
@@ -73,6 +73,8 @@ export function customMessageHandler(options: CustomMessageOptions) {
   } catch {
     throw new Error('auth-kit: customMessageHandler needs signInUrl as an absolute URL.');
   }
+  const helpProblems = helpAddressProblems(options.helpEmail);
+  if (helpProblems.length > 0) throw new Error(`auth-kit: customMessageHandler helpEmail: ${helpProblems.join(' ')}`);
   const minutes = codeLifetimeMinutes(options.codeLifetimeMinutes);
   const site: EmailSite = { ...options, theme: resolveTheme(options.theme) };
 

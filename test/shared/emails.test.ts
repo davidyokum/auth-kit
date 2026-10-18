@@ -56,19 +56,19 @@ describe('every auth email (REPORT §5.1)', () => {
     expect(email.html).not.toMatch(/<a /);
   });
 
-  it('match the card: no letterhead; the footer is the card’s identity line, then the help line (David, 2026-10-18)', () => {
+  it('match the card: no letterhead; the footer is the card’s identity sentence, then the help line (David, 2026-10-18; Card Studio v4)', () => {
     for (const [name, email] of [...codeEmails(OSBM), ...appEmails(OSBM)]) {
-      expect(email.text.endsWith('This site is managed by the NC Office of State Budget and Management\nHelp: help@example.org'), name).toBe(true);
-      expect(email.text.split('\n')[0], name).not.toBe('NC Office of State Budget and Management');
-      expect(email.html, name).toContain('This site is managed by the NC Office of State Budget and Management<br>Help: help@example.org');
+      expect(email.text.endsWith('\nThis site is managed by the NC Office of State Budget and Management. Help: help@example.org.'), name).toBe(true);
+      expect(email.text, name).not.toMatch(/^NC Office of State Budget and Management$/m);
+      expect(email.html, name).toContain('This site is managed by the NC Office of State Budget and Management. Help: help@example.org.');
     }
     const unc = signInCodeEmail({ ...OSBM, theme: 'unc' }, { code: CODE, codeLifetimeMinutes: 3 });
-    expect(unc.text.endsWith('This site is managed by UNC-Chapel Hill\nHelp: help@example.org')).toBe(true);
+    expect(unc.text.endsWith('\nThis site is managed by UNC-Chapel Hill. Help: help@example.org.')).toBe(true);
   });
 
   it('name nobody on personal sites: the footer is the help line alone', () => {
     for (const [name, email] of [...codeEmails(PERSONAL), ...appEmails(PERSONAL)]) {
-      expect(email.text.endsWith('\nHelp: help@example.org'), name).toBe(true);
+      expect(email.text.endsWith('\nHelp: help@example.org.'), name).toBe(true);
       expect(email.text, name).not.toMatch(/managed by|Yokum/);
     }
   });

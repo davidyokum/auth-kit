@@ -8,7 +8,10 @@
  * - the footer identity line ("This site is managed by the NC Office of State Budget and
  *   Management"; personal sites name nobody), on the card and at the foot of every email;
  * - the email field's example address (a site may set its own, A9);
- * - the help route (how the owner confirms it's you, and the OSBM Teams check);
+ * - the help route: the role-based help mailbox (required, never a person's own address, and no
+ *   default ships), whether screens name the site's owner or say "the {Site} team", how the team
+ *   confirms it's you, where to go for the email account, device, or app itself (the IT desk), and
+ *   the OSBM Teams check;
  * - an optional authorized-use line (OSBM; off by default while register A10 is open).
  *
  * Pure: no React, no AWS. The client, the server's mailer, and the custom message trigger all read it.
@@ -45,6 +48,30 @@ export interface ThemeColors {
   fieldBorder: string;
 }
 
+/**
+ * Who helps, and with what (David, 2026-10-18). The site helps only with the person's account on
+ * this site (a password reset, resetting the authenticator on their account, moving the account to a
+ * new address after confirming it's them); for their email account, device, or authenticator app
+ * itself, the screens point to `itDesk`.
+ */
+export interface ThemeHelp {
+  /**
+   * The family's role-based help mailbox: one per family, never per site and never a person's own
+   * address. It's also the Reply-To on auth emails and the "Help:" line in their footer. Required, and
+   * no default ships: set it with `authTheme(family, { helpAddress })` (a site may override it, and a
+   * Super admin may override that without a deploy; `auth-kit/accounts`' sign-in help setting).
+   */
+  address: string | null;
+  /** Name the site's owner ("Jordan Lee looks after Example Reports"), or say "the {Site} team". */
+  named: boolean;
+  /** How the team confirms it's you before resetting anything: "on Teams or by phone". */
+  verify: string;
+  /** Who helps with the email account, device, or app itself: "your agency’s IT help desk". */
+  itDesk: string;
+  /** Offer "Not sure an email is really from us? Ask {owner} on Teams." (OSBM). */
+  teamsCheck: boolean;
+}
+
 export interface AuthTheme {
   family: ThemeFamily;
   /** The family's short name, e.g. `NC OSBM`. */
@@ -63,18 +90,35 @@ export interface AuthTheme {
   footer: string | null;
   /** The email field's example address (E2). A site may set its own (A9). */
   emailHint: string;
-  /** The help route (REPORT §7.2): how the owner confirms identity, and whether to offer the Teams check. */
-  help: Readonly<{ verify: string; teamsCheck: boolean }>;
+  /** The help route (REPORT §7.2, Card Studio v4; ADR 0024). */
+  help: Readonly<ThemeHelp>;
   /** The family's authorized-use line, when it has one. Shown only with `showAuthorizedUse`. */
   authorizedUseLine: string | null;
   /** Show the authorized-use line on the sign-in card. Default false (register A10 is still Proposed). */
   showAuthorizedUse: boolean;
   /** `defined` (default): a line in the family ink that reaches 3:1 on every backdrop color. `soft`: a hairline. */
   cardEdge: CardEdge;
+  /**
+   * The passkey glyph (register E4d): `fingerprint` (default; Lucide's, ISC) or `fido`, the official
+   * FIDO passkey icon, which auth-kit doesn't bundle or imitate (a trademark under FIDO's usage
+   * agreement): a site that chooses it supplies the asset (`passkeyIconSrc`).
+   */
+  passkeyIcon: PasskeyIcon;
+  /** The site's own copy of the FIDO passkey icon (a URL or a root-relative path), with `passkeyIcon: 'fido'` only. */
+  passkeyIconSrc: string | null;
 }
 
+export type PasskeyIcon = 'fingerprint' | 'fido';
+
 /** What a site may change about its family's theme. */
-export type AuthThemeOverrides = Partial<Pick<AuthTheme, 'emailHint' | 'showAuthorizedUse' | 'cardEdge'>>;
+export interface AuthThemeOverrides extends Partial<Pick<AuthTheme, 'emailHint' | 'showAuthorizedUse' | 'cardEdge' | 'passkeyIcon'>> {
+  /** The FIDO passkey icon's URL or root-relative path; required with `passkeyIcon: 'fido'`. */
+  passkeyIconSrc?: string;
+  /** The help mailbox (required before a deploy; `helpAddressProblems` says why one can't be used). */
+  helpAddress?: string;
+  /** Override whether screens name the owner: a public site in a named family says "the {Site} team". */
+  helpNamed?: boolean;
+}
 
 const CORE = { surface: '#ffffff', text: '#3c434b', muted: '#56606b', error: '#b42318', fieldBorder: '#6b7480' } as const;
 
@@ -100,6 +144,8 @@ const base = (family: ThemeFamily) => ({
   palette: BACKDROP_FAMILIES[family].palette,
   showAuthorizedUse: false,
   cardEdge: 'defined' as const,
+  passkeyIcon: 'fingerprint' as const,
+  passkeyIconSrc: null,
 });
 
 /** The three families, exactly as REPORT §7.2 and the register (E1, E2, E4) set them. Brand constants. */
@@ -111,7 +157,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'NC OSBM',
     footer: 'This site is managed by the NC Office of State Budget and Management',
     emailHint: 'name@osbm.nc.gov',
-    help: Object.freeze({ verify: 'on Teams or by phone', teamsCheck: true }),
+    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', teamsCheck: true }),
     authorizedUseLine: 'This is a State of North Carolina system for authorized use.',
   }),
   unc: Object.freeze({
@@ -121,7 +167,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'UNC',
     footer: 'This site is managed by UNC-Chapel Hill',
     emailHint: 'name@unc.edu',
-    help: Object.freeze({ verify: 'by phone or in person', teamsCheck: false }),
+    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', teamsCheck: false }),
     authorizedUseLine: null,
   }),
   personal: Object.freeze({
@@ -131,7 +177,13 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: null,
     footer: null,
     emailHint: 'name@example.com',
-    help: Object.freeze({ verify: 'by phone or a video call', teamsCheck: false }),
+    help: Object.freeze({
+      address: null,
+      named: false,
+      verify: 'by email',
+      itDesk: 'your email provider, or your IT help desk if your organization runs your email',
+      teamsCheck: false,
+    }),
     authorizedUseLine: null,
   }),
 });
@@ -152,7 +204,7 @@ export function isThemeFamily(value: unknown): value is ThemeFamily {
 export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {}): AuthTheme {
   if (!isThemeFamily(family)) throw new Error(`auth-kit/themes: family "${String(family)}" isn't one of ${THEME_FAMILIES.join(', ')}.`);
   for (const key of Object.keys(overrides)) {
-    if (!['emailHint', 'showAuthorizedUse', 'cardEdge'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
+    if (!['emailHint', 'showAuthorizedUse', 'cardEdge', 'helpAddress', 'helpNamed', 'passkeyIcon', 'passkeyIconSrc'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
   }
   if (overrides.cardEdge !== undefined && overrides.cardEdge !== 'defined' && overrides.cardEdge !== 'soft') {
     throw new Error(`auth-kit/themes: cardEdge must be 'defined' or 'soft'.`);
@@ -160,16 +212,72 @@ export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {
   if (overrides.showAuthorizedUse !== undefined && typeof overrides.showAuthorizedUse !== 'boolean') {
     throw new Error('auth-kit/themes: showAuthorizedUse must be true or false.');
   }
+  if (overrides.passkeyIcon !== undefined && overrides.passkeyIcon !== 'fingerprint' && overrides.passkeyIcon !== 'fido') {
+    throw new Error("auth-kit/themes: passkeyIcon must be 'fingerprint' or 'fido'.");
+  }
+  const iconSrc = overrides.passkeyIconSrc?.trim();
+  if (overrides.passkeyIcon === 'fido' && !iconSrc) {
+    throw new Error(
+      "auth-kit/themes: passkeyIcon 'fido' needs passkeyIconSrc, the site's own copy of the official FIDO passkey icon. auth-kit doesn't ship it or draw a look-alike: " +
+        "it's FIDO Alliance's trademark, used under their usage agreement. Use 'fingerprint' (the default) until the site has the asset and the agreement.",
+    );
+  }
+  if (iconSrc !== undefined && overrides.passkeyIcon !== 'fido') throw new Error("auth-kit/themes: passkeyIconSrc applies only with passkeyIcon: 'fido'.");
+  if (iconSrc !== undefined && !/^(https:\/\/[^\s"'<>]+|\/[^\s"'<>]*)$/.test(iconSrc)) throw new Error('auth-kit/themes: passkeyIconSrc must be an https URL or a root-relative path.');
+  if (overrides.helpNamed !== undefined && typeof overrides.helpNamed !== 'boolean') throw new Error('auth-kit/themes: helpNamed must be true or false.');
+  let helpAddress: string | undefined;
+  if (overrides.helpAddress !== undefined) {
+    helpAddress = overrides.helpAddress.trim().toLowerCase();
+    const problems = helpAddressProblems(helpAddress);
+    if (problems.length > 0) throw new Error(`auth-kit/themes: helpAddress: ${problems.join(' ')}`);
+  }
   const hint = overrides.emailHint?.trim();
   if (overrides.emailHint !== undefined && (!hint || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hint))) {
     throw new Error(`auth-kit/themes: emailHint must be an example address like name@example.org.`);
   }
+  const familyTheme = FAMILY_THEMES[family];
+  const help = Object.freeze({
+    ...familyTheme.help,
+    ...(helpAddress !== undefined && { address: helpAddress }),
+    ...(overrides.helpNamed !== undefined && { named: overrides.helpNamed }),
+  });
   return Object.freeze({
-    ...FAMILY_THEMES[family],
+    ...familyTheme,
+    help,
     ...(hint !== undefined && { emailHint: hint }),
     ...(overrides.showAuthorizedUse !== undefined && { showAuthorizedUse: overrides.showAuthorizedUse }),
     ...(overrides.cardEdge !== undefined && { cardEdge: overrides.cardEdge }),
+    ...(overrides.passkeyIcon !== undefined && { passkeyIcon: overrides.passkeyIcon }),
+    ...(iconSrc !== undefined && { passkeyIconSrc: iconSrc }),
   });
+}
+
+// ---- The help address ---------------------------------------------------------------------------
+
+/** What a site writes until it has a real help mailbox. `helpAddressProblems` refuses it. */
+export const HELP_ADDRESS_PLACEHOLDER = 'apps-help@replace-me.invalid';
+
+const PLACEHOLDER_MARKERS = /replace[-_]?me|placeholder|change[-_]?me|\btodo\b|your[-_.]?(help|domain|address|email)|xxx/i;
+const RESERVED_TLDS = ['invalid', 'test', 'localhost', 'example'];
+const PERSONAL_LOCAL_PART = /^([a-z]+)\.([a-z]+)$/;
+const ROLE_WORDS = new Set(['help', 'helpdesk', 'support', 'apps', 'app', 'admin', 'admins', 'info', 'team', 'desk', 'service', 'services', 'it', 'sign', 'signin', 'access', 'accounts', 'web', 'office', 'contact']);
+
+/**
+ * Why an address can't be the site's help mailbox, or `[]` when it can. Refused: nothing at all, a
+ * malformed address, a placeholder (`replace-me`, `placeholder`, `changeme`, `todo`, or a reserved
+ * test domain such as `.invalid` or `.test`), and an address with an obvious person's name
+ * (`first.last@…`, unless either part is a role word like `help`): the help mailbox is role-based, so it outlives whoever answers it.
+ */
+export function helpAddressProblems(address: string | null | undefined): string[] {
+  const value = (address ?? '').trim().toLowerCase();
+  if (value === '') return ['The site needs a help address: a role-based mailbox, like apps-help@your-agency.gov, on the help screens and as the Reply-To on auth emails.'];
+  if (!/^[^\s@<>"(),;:]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)) return [`"${address}" isn't an email address.`];
+  const [local = '', domain = ''] = value.split('@');
+  const tld = domain.slice(domain.lastIndexOf('.') + 1);
+  if (PLACEHOLDER_MARKERS.test(value) || RESERVED_TLDS.includes(tld)) return [`"${address}" is a placeholder: set the site's real help mailbox.`];
+  const personal = PERSONAL_LOCAL_PART.exec(local);
+  if (personal && !ROLE_WORDS.has(personal[1]!) && !ROLE_WORDS.has(personal[2]!)) return [`"${address}" looks like a person's own address. Use a role-based mailbox (apps-help@…, help@…) that outlives whoever answers it.`];
+  return [];
 }
 
 /** A theme from either a theme or a family name (the screens' `theme` prop takes both). Default personal. */

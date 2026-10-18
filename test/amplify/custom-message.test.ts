@@ -36,9 +36,14 @@ describe('the custom message trigger (ADR 0024)', () => {
     expect((await handler(event('CustomMessage_SignUp'))).response).toEqual({});
   });
 
+  it('refuses a missing or placeholder help address at load', () => {
+    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: '' })).toThrow(/help address/);
+    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: 'apps-help@replace-me.invalid' })).toThrow(/placeholder/);
+  });
+
   it('refuses a bad configuration at load', () => {
-    expect(() => customMessageHandler({ siteName: '', theme: 'osbm', signInUrl: 'https://x.example.org' })).toThrow(/siteName/);
-    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: '/sign-in' })).toThrow(/absolute URL/);
-    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: 'https://x.example.org', codeLifetimeMinutes: 30 })).toThrow(/3 to 15/);
+    expect(() => customMessageHandler({ siteName: '', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: 'help@example.org' })).toThrow(/siteName/);
+    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: '/sign-in', helpEmail: 'help@example.org' })).toThrow(/absolute URL/);
+    expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: 'help@example.org', codeLifetimeMinutes: 30 })).toThrow(/3 to 15/);
   });
 });

@@ -5,8 +5,10 @@ import {
   FAMILY_THEMES,
   authTheme,
   cardEdgeColor,
+  HELP_ADDRESS_PLACEHOLDER,
   checkCardEdge,
   definedCardEdge,
+  helpAddressProblems,
   senderDisplayName,
   softCardEdge,
   themeCssVariables,
@@ -54,6 +56,40 @@ describe('families as themes (E1, E2, E4, A9)', () => {
       expect(contrastRatio(c.focus, c.surface)).toBeGreaterThanOrEqual(3);
       expect(contrastRatio(c.fieldBorder, c.surface)).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe('the help route (David, 2026-10-18; Card Studio v4)', () => {
+  it('ships no help address, names the owner on OSBM and UNC sites, and the team on personal ones', () => {
+    for (const theme of Object.values(FAMILY_THEMES)) expect(theme.help.address).toBeNull();
+    expect([FAMILY_THEMES.osbm.help.named, FAMILY_THEMES.unc.help.named, FAMILY_THEMES.personal.help.named]).toEqual([true, true, false]);
+    expect(FAMILY_THEMES.osbm.help.itDesk).toBe('your agency’s IT help desk');
+    expect(FAMILY_THEMES.unc.help.itDesk).toBe('the UNC IT help desk');
+    expect(FAMILY_THEMES.personal.help.itDesk).toBe('your email provider, or your IT help desk if your organization runs your email');
+    expect(authTheme('osbm', { helpNamed: false }).help.named).toBe(false);
+  });
+
+  it('takes a role-based help mailbox, and refuses a missing, placeholder, or personal one', () => {
+    expect(authTheme('osbm', { helpAddress: 'Apps-Help@Agency.example.org' }).help.address).toBe('apps-help@agency.example.org');
+    expect(helpAddressProblems(undefined)[0]).toMatch(/needs a help address/);
+    expect(helpAddressProblems(HELP_ADDRESS_PLACEHOLDER)[0]).toMatch(/placeholder/);
+    for (const bad of ['help@site.test', 'todo@example.org', 'changeme@example.org', 'help@your-domain.org']) expect(helpAddressProblems(bad)[0], bad).toMatch(/placeholder/);
+    expect(helpAddressProblems('jordan.lee@example.org')[0]).toMatch(/person's own address/);
+    expect(helpAddressProblems('not an address')[0]).toMatch(/isn't an email address/);
+    expect(() => authTheme('osbm', { helpAddress: HELP_ADDRESS_PLACEHOLDER })).toThrow(/placeholder/);
+  });
+});
+
+describe('the passkey icon (register E4d)', () => {
+  it('defaults to the fingerprint glyph and never ships the FIDO icon', () => {
+    for (const theme of Object.values(FAMILY_THEMES)) expect([theme.passkeyIcon, theme.passkeyIconSrc]).toEqual(['fingerprint', null]);
+  });
+
+  it("takes the FIDO icon only with the site's own asset, and says why at build", () => {
+    expect(authTheme('osbm', { passkeyIcon: 'fido', passkeyIconSrc: '/brand/passkey.svg' })).toMatchObject({ passkeyIcon: 'fido', passkeyIconSrc: '/brand/passkey.svg' });
+    expect(() => authTheme('osbm', { passkeyIcon: 'fido' })).toThrow(/needs passkeyIconSrc.*trademark/s);
+    expect(() => authTheme('osbm', { passkeyIconSrc: '/x.svg' })).toThrow(/only with passkeyIcon: 'fido'/);
+    expect(() => authTheme('osbm', { passkeyIcon: 'fido', passkeyIconSrc: 'javascript:alert(1)' })).toThrow(/https URL or a root-relative path/);
   });
 });
 

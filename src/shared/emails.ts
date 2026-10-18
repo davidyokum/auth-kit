@@ -10,9 +10,9 @@
  * - the same phishing-safe line; links only in invites and alerts, written out in full;
  * - multipart (HTML and the same words as text), `lang="en"`, layout tables marked presentational,
  *   a text wordmark, and colors that survive dark mode;
- * - no letterhead: the family's identity is a footer line in the card's own words ("This site is
- *   managed by the NC Office of State Budget and Management"; nothing on personal sites), followed by
- *   "Help: {help address}" (David, 2026-10-18: emails match the card; ADR 0024).
+ * - no letterhead: the footer repeats the card's identity sentence, then the help line ("This site is
+ *   managed by the NC Office of State Budget and Management. Help: {help address}."; personal sites:
+ *   the help line alone). David, 2026-10-18: emails match the card (ADR 0024).
  */
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 
@@ -33,8 +33,8 @@ export interface EmailSite {
   theme?: AuthTheme | ThemeFamily;
   /** The site's address, e.g. `https://reports.example.org/sign-in`: its host is the "only enter codes at" domain. */
   signInUrl: string;
-  /** The help mailbox (REPORT §7.2's help route). Omitted: emails don't name one. */
-  helpEmail?: string;
+  /** The help mailbox in effect (the theme's, a site's, or a Super admin's override): the footer's "Help:" line. */
+  helpEmail: string;
   /** IANA time zone for dates and times. Default `America/New_York`. */
   timeZone?: string;
   /** How that zone is named after a time. Default `Eastern`. */
@@ -118,19 +118,19 @@ interface LayoutInput {
 }
 
 /**
- * The footer: the family's identity line, in the card's own words, then "Help: {help address}".
- * Personal sites have no identity line, so their footer is the help line alone (or nothing).
+ * The footer (Card Studio v4): the card's identity sentence, then "Help: {help address}." Personal
+ * sites have no identity sentence, so their footer is the help line alone.
  */
-export function footerLines(site: EmailSite): string[] {
+export function footerLine(site: EmailSite): string {
   const theme = resolveTheme(site.theme);
-  return [...(theme.footer ? [theme.footer] : []), ...(site.helpEmail ? [`Help: ${site.helpEmail}`] : [])];
+  return [...(theme.footer ? [`${theme.footer}.`] : []), ...(site.helpEmail ? [`Help: ${site.helpEmail}.`] : [])].join(' ');
 }
 
 /** Renders the blocks into the shared layout: HTML (presentational tables, a text wordmark) and text. */
 export function renderEmail(input: LayoutInput): RenderedEmail {
   const theme = resolveTheme(input.site.theme);
   const { ink, text: body, muted, link: linkColor } = theme.colors;
-  const footer = footerLines(input.site);
+  const footer = footerLine(input.site);
 
   const textLines: string[] = [];
   for (const block of input.blocks) {
@@ -161,7 +161,7 @@ export function renderEmail(input: LayoutInput): RenderedEmail {
         break;
     }
   }
-  textLines.push(...footer);
+  if (footer) textLines.push(footer);
 
   const html: string[] = [];
   for (const block of input.blocks) {
@@ -216,8 +216,8 @@ export function renderEmail(input: LayoutInput): RenderedEmail {
     `<p style="margin:0 0 20px;font-size:15px;font-weight:700;color:${ink}">${escapeHtml(input.site.siteName)}</p>`,
     ...html,
     '</td></tr>',
-    ...(footer.length > 0
-      ? [`<tr><td style="padding:0 28px 24px"><p style="margin:16px 0 0;padding-top:16px;border-top:1px solid #e3e6ea;font-size:13px;color:${muted}">${footer.map(escapeHtml).join('<br>')}</p></td></tr>`]
+    ...(footer
+      ? [`<tr><td style="padding:0 28px 24px"><p style="margin:16px 0 0;padding-top:16px;border-top:1px solid #e3e6ea;font-size:13px;color:${muted}">${escapeHtml(footer)}</p></td></tr>`]
       : []),
     '</table>',
     '</td></tr>',
@@ -466,7 +466,7 @@ export function emailChangedEmail(site: EmailSite, input: { newEmail: string; at
         `The email address for your ${site.siteName} account changed from this one to ${maskEmail(input.newEmail)} on ${clockDateTime(input.at, site)}. ${input.byAdmin ? `${input.byAdmin}, an admin, made the change.` : 'You made the change.'}`,
       ),
       p('If this was you, you don’t need to do anything. Sign in with the new address from now on.'),
-      p(`If it wasn’t, reply to this email${site.helpEmail ? ` or contact ${site.helpEmail}` : ''} right away, and we’ll lock the account while we check.`),
+      p(`If it wasn’t, reply to this email or contact ${site.helpEmail} right away, and we’ll lock the account while we check.`),
     ],
   });
 }
@@ -483,7 +483,7 @@ export function accountDeletedEmail(site: EmailSite, input: { email: string; at:
         `Your ${site.siteName} account for ${input.email} was deleted on ${clockDateTime(input.at, site)}${input.byAdmin ? ` by ${input.byAdmin}, an admin` : ' at your request'}. You’ve been signed out everywhere.${input.items ? ` ${input.items}` : ''}`,
       ),
       p(`If this was you, you don’t need to do anything. To come back later, ${input.comeBack === 'sign-up' ? 'create a new account' : 'ask for a new invitation'}.`),
-      p(`If it wasn’t, reply to this email${site.helpEmail ? ` or contact ${site.helpEmail}` : ''} right away.`),
+      p(`If it wasn’t, reply to this email or contact ${site.helpEmail} right away.`),
     ],
   });
 }
