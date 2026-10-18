@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.5-alpha",
+  "version": "0.1.6-alpha",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -16,7 +16,8 @@
     "passkeys",
     "webauthn",
     "nextjs",
-    "authorization"
+    "authorization",
+    "generative-art"
   ],
   "type": "module",
   "sideEffects": false,
@@ -85,6 +86,19 @@
       "types": "./dist/ribbon/index.d.ts",
       "import": "./dist/ribbon/index.js"
     },
+    "./backdrops": {
+      "types": "./dist/backdrops/index.d.ts",
+      "import": "./dist/backdrops/index.js",
+      "default": "./dist/backdrops/index.js"
+    },
+    "./backdrops/react": {
+      "types": "./dist/backdrops/react.d.ts",
+      "import": "./dist/backdrops/react.js"
+    },
+    "./backdrops/picker": {
+      "types": "./dist/backdrops/picker.d.ts",
+      "import": "./dist/backdrops/picker.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -97,7 +111,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build",
-    "test:e2e": "AUTH_KIT_E2E=1 vitest run test/e2e"
+    "test:e2e": "AUTH_KIT_E2E=1 vitest run test/e2e",
+    "demo:backdrops": "npm run build && node scripts/serve-docs.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1152.0",

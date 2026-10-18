@@ -4,7 +4,7 @@ Guidance for AI agents (and people) working on auth-kit.
 
 ## What this is
 
-A public TypeScript package (ESM, Node 22+) that implements David Yokum's login standard for his AWS Amplify Gen 2 + Next.js 16 sites. The standard's rule text lives in his private `passwords-flow` repo (`03-gold-standard-and-plan.md` §2 and `00-login-security-primer.md`); the README maps each rule to code. Pre-release: `0.1.5-alpha`, not in production. The starter site is [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template).
+A public TypeScript package (ESM, Node 22+) that implements David Yokum's login standard for his AWS Amplify Gen 2 + Next.js 16 sites. The standard's rule text lives in his private `passwords-flow` repo (`03-gold-standard-and-plan.md` §2 and `00-login-security-primer.md`); the README maps each rule to code. Pre-release: `0.1.6-alpha`, not in production. The starter site is [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template).
 
 ## Rules
 
@@ -13,6 +13,7 @@ A public TypeScript package (ESM, Node 22+) that implements David Yokum's login 
 - **Verify API shapes** against the installed packages' type definitions and AWS documentation. Where Amplify lacks a setting, use an L1 override and record why (see `docs/decisions/0006-*`).
 - **Fail closed.** "Couldn't check" is 503 (`AuthUnavailableError`), never a pass and never "signed out".
 - **Capabilities, not role names**, in any example or code path.
+- **Backdrops are decorative, never security.** No code or copy asks anyone to recognize a picture (ADR 0021). Released style versions and `kernel/v1` never change; see Layout.
 - Write files with escapes intact: some tools turn `\uXXXX` escapes into literal characters, which breaks regexes (use `String.fromCharCode` in tests).
 
 ## Commands
@@ -32,6 +33,7 @@ npm run test:e2e   # after build: the fixture app on real Next.js (test/e2e; CI 
 - `src/client` sign-in screens, the authenticator gate, and My account (React client components on Amplify JS v6; ADR 0008); `parity.ts` keeps the screens the same for every address until a factor is proven (ADR 0018): never show Cognito's per-account answer to a first-factor request
 - `src/admin` People actions, the audit log, and the invite-expiry sweep (`sweep.ts`, kept free of Next.js and React because `invite-expiry-handler.ts` is bundled into a Lambda); `cdk.ts` holds `AuditLogTable` and `InviteExpirySweep` (ADR 0019)
 - `src/dev` the localhost kit (`auth-kit/dev`, `auth-kit/dev/menu`, `auth-kit/ribbon`, the `auth-kit` command; see `docs/localhost.md`). Only `ribbon.tsx` and `ribbon-model.ts` may reach a production build: never import the marker or other dev modules from them
+- `src/backdrops` the art behind the sign-in card (ADR 0021): `kernel/v1/` (generator, noise, colors; **frozen**), `styles/<id>/v<n>.ts` (one file per released style version; **frozen once released**: a change in look is a new version file) registered in `styles/registry.ts`, `render.ts` (the loop and its rules: reduced motion, visibility, caps, passive pointer), `card.ts` and `contrast.ts` (the card carries its own contrast; nothing fades the art around it), `variations.ts` (choices, defaults, the lock check), `react.tsx`, and `picker.tsx` (dev only; carries `BACKDROP_PICKER_MARKER`). `test/backdrops/frozen.json` pins every released version; add a version's hash with `AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts`, never by editing an existing one. `npm run demo:backdrops` serves `docs/backdrops/`
 - `src/shared/policy.ts` every concrete setting (lifetimes, limits, the site-wide roles and their labels, descriptions, capabilities, and `ROLE_MATRIX`; ADR 0020); `src/shared/matrix-protocol.ts` the proxy ↔ matrix handler-pass contract
 - `tsup.lambda.config.ts` the self-contained Lambda bundles (`dist/lambda/*`, AWS SDK included) that `auth-kit/admin/cdk` deploys; `npm run build` runs it after the main build, and the CDK tests build it if it's missing
 - `scripts/check-tarball.mjs` release tarball check (CI)

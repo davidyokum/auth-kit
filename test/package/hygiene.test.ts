@@ -85,6 +85,25 @@ describe('module boundaries', () => {
     expect(importsOf('src/amplify/pre-sign-up.ts')).toEqual([]);
   });
 
+  it('auth-kit/backdrops is framework-free: the core imports only its own files', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${dir}/${e.name}`] : []));
+    const core = walk('src/backdrops').filter((f) => !/\/(react|picker)\.tsx$/.test(f));
+    expect(core.length).toBeGreaterThan(20);
+    for (const file of core) for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^\.\.?\//);
+    // The React component adds React; the dev-only picker adds the marker module.
+    for (const spec of importsOf('src/backdrops/react.tsx')) expect(spec).toMatch(/^(\.\/|react$)/);
+    for (const spec of importsOf('src/backdrops/picker.tsx')) expect(spec).toMatch(/^(\.\/|react$|\.\.\/dev\/marker\.js$)/);
+    // Style versions draw only through the frozen kernel and the style contract.
+    for (const file of core.filter((f) => /\/styles\/[^/]+\/v\d+\.ts$/.test(f))) {
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\.\/\.\.\/kernel\/v\d+\/|\.\.\/define\.js$)/);
+    }
+  });
+
+  it("auth-kit/backdrops/react and the picker are React client modules ('use client')", () => {
+    for (const file of ['src/backdrops/react.tsx', 'src/backdrops/picker.tsx']) expect(readFileSync(join(ROOT, file), 'utf8').startsWith("'use client';"), file).toBe(true);
+  });
+
   it('shared policy has no imports', () => {
     expect(importsOf('src/shared/policy.ts')).toEqual([]);
   });

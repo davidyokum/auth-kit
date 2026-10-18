@@ -86,6 +86,22 @@ describe('the start screen', () => {
     expect(screen.getByLabelText('Password').getAttribute('autocomplete')).toBe('current-password');
   });
 
+  it('shows the site’s email hint as a placeholder under the always-visible label, on every email field', async () => {
+    const { user } = setup({ emailHint: '  name@example.org ' });
+    const email = screen.getByLabelText('Email address');
+    expect(email.getAttribute('placeholder')).toBe('name@example.org');
+    // The label stays a real, visible <label>: the hint never replaces it.
+    expect(document.querySelector('label[for]')?.textContent).toBe('Email address');
+    await user.click(screen.getByRole('button', { name: 'Use a password instead' }));
+    expect(screen.getByLabelText('Email address').getAttribute('placeholder')).toBe('name@example.org');
+    expect(screen.getByLabelText('Password').hasAttribute('placeholder')).toBe(false);
+  });
+
+  it('has no placeholder without a hint (or with a blank one)', () => {
+    setup({ emailHint: '   ' });
+    expect(screen.getByLabelText('Email address').hasAttribute('placeholder')).toBe(false);
+  });
+
   it('asks for an email before calling Cognito, and announces it', async () => {
     const { user } = setup();
     await user.click(screen.getByRole('button', { name: 'Sign in with a passkey' }));

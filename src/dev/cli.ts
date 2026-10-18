@@ -3,7 +3,7 @@
  *
  *   init-personas      write a starter personas.json
  *   seed-personas      create or update the personas in your sandbox pool
- *   check-prod-build   fail if a production build contains dev sign-in or the matrix server mode
+ *   check-prod-build   fail if a production build contains dev sign-in, the matrix server mode, or the backdrop picker
  *   check-dev-route    fail unless a running production build answers the dev route with 404
  */
 import type { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
@@ -50,7 +50,8 @@ Usage: npx auth-kit <command> [options]
                        --no-totp              don't enroll authenticators
                        --dry-run              report what would change; write nothing
 
-  check-prod-build   Fail if a production build contains dev sign-in or the matrix server mode (run after next build)
+  check-prod-build   Fail if a production build contains dev sign-in, the matrix server mode, or the
+                     backdrop picker (run after next build)
                        --dir <path>           default .next
                        --route <path>         default ${DEV_SIGN_IN_ROUTE}
 
@@ -175,7 +176,7 @@ async function checkBuild(args: string[], io: CliIo): Promise<number> {
   const buildDir = resolve(io.cwd, values.dir ?? '.next');
   const result = await checkProductionBuild({ buildDir, ...(values.route !== undefined && { devRoute: values.route }) });
   if (result.ok) {
-    io.out(`OK: no dev sign-in or matrix server code, and no dev route, in ${buildDir} (${result.filesScanned} files scanned).`);
+    io.out(`OK: no dev sign-in, matrix server, or backdrop picker code, and no dev route, in ${buildDir} (${result.filesScanned} files scanned).`);
     return 0;
   }
   io.err(`FAIL: dev-only code is in the production build ${buildDir}:`);

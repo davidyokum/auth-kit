@@ -38,12 +38,12 @@ jobs:
       - run: npm run build
       - name: Every subpath loads from the build
         run: |
-          for s in amplify amplify/pre-sign-up server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk; do
+          for s in amplify amplify/pre-sign-up server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk backdrops backdrops/react backdrops/picker; do
             node --input-type=module -e "await import('auth-kit/$s')"
           done
       - name: The auth-kit command runs from the build
         run: node dist/bin/auth-kit.js help
-      - name: Built-package checks (no dev sign-in reachable from auth-kit/ribbon; 'use client' kept)
+      - name: Built-package checks (no dev code reachable from what ships; 'use client' kept)
         run: npx vitest run test/dev/dist.test.ts
         env:
           AUTH_KIT_DIST_TESTS: '1'

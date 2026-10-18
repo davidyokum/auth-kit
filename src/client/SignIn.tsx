@@ -59,6 +59,12 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   renderQrCode?: (otpauthUri: string) => ReactNode;
   /** Shown on the authenticator-code step. Default: ask the site's admin. */
   lostAuthenticatorHelp?: ReactNode;
+  /**
+   * An example address for the email field, shown as its placeholder (e.g. `name@example.org`), so
+   * people know which address this site expects. It's a hint inside the field, under the
+   * always-visible "Email address" label, never a replacement for it.
+   */
+  emailHint?: string;
 }
 
 type View =
@@ -318,6 +324,7 @@ export function SignIn(props: SignInProps) {
       autoCapitalize="none"
       spellCheck={false}
       autoComplete={SIGN_IN_AUTOCOMPLETE.email}
+      {...(props.emailHint?.trim() ? { placeholder: props.emailHint.trim() } : {})}
       value={email}
       onChange={(e) => setEmail(e.target.value)}
       invalid={fb.field === 'email'}
