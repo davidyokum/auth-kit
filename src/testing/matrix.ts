@@ -51,6 +51,13 @@ import { type AppRouteInput, type CompiledRoute, compileAppRoute, resolveAppRout
 export const REQUIRED_PERSONAS = ['anonymous', 'member', 'admin'] as const;
 /** The persona used for the second-member check on record routes. */
 export const SECOND_MEMBER = 'otherMember';
+/**
+ * A freshly signed-up Member (register D4, ADR 0023): an account the sign-up route made a moment ago,
+ * signed in by its first emailed code, with no role, no item access, and no passkey or password yet.
+ * On a sign-up site (`signUpSite: true`) it runs against every route, and it may never get further
+ * than `member`: no check may treat "signed in" as "trusted".
+ */
+export const NEW_MEMBER = 'newMember';
 
 export type MatrixPass = 'with-proxy' | 'without-proxy';
 export const MATRIX_PASSES: readonly MatrixPass[] = ['with-proxy', 'without-proxy'];
@@ -117,6 +124,12 @@ export interface AuthMatrixOptions {
   baseUrl?: string;
   /** Placeholder values shared by all routes (the member's own record IDs). */
   params?: Record<string, string>;
+  /**
+   * The site lets people create their own account (`accountCreation` mode `domains` or `open`): the
+   * `newMember` persona is required, and every route runs as it too, expecting what a member gets
+   * unless the row says otherwise; a row that lets it succeed where a member can't is refused.
+   */
+  signUpSite?: boolean;
 }
 
 export interface MatrixCase {
@@ -164,8 +177,15 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
   const problems: string[] = [];
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
-  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : [])]) {
-    if (!options.personas[p]) problems.push(`persona "${p}" is required but not defined.`);
+  const newMember = options.signUpSite === true || options.personas[NEW_MEMBER] !== undefined;
+  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : []), ...(options.signUpSite === true ? [NEW_MEMBER] : [])]) {
+    if (!options.personas[p]) {
+      problems.push(
+        p === NEW_MEMBER
+          ? `persona "${NEW_MEMBER}" is required on a sign-up site: a freshly signed-up Member (FRESH_SIGN_UP_MEMBER) must run against every route.`
+          : `persona "${p}" is required but not defined.`,
+      );
+    }
   }
 
   let appRoutes: CompiledRoute[] = [];
@@ -205,7 +225,18 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
         problems.push(`${label}: expectWithoutProxy names "${persona}", which has no expectation in expect.`);
       }
     }
-    const statuses = Object.values(route.expect).flatMap((v) => [...asList(v)]);
+    // A freshly signed-up Member is held to a member's expectations, row by row, and never beyond them.
+    // On a route that takes an item's ID it's someone else's item, so it's held to the second member's.
+    const peer = isRecordRoute(route) && route.expect[SECOND_MEMBER] !== undefined ? SECOND_MEMBER : 'member';
+    const expect: Expectations = newMember && route.expect[NEW_MEMBER] === undefined && route.expect[peer] !== undefined ? { ...route.expect, [NEW_MEMBER]: route.expect[peer] } : route.expect;
+    if (newMember && route.expect[NEW_MEMBER] !== undefined) {
+      const memberSucceeds = asList(route.expect[peer]).some((s) => s < 400);
+      const newMemberSucceeds = asList(route.expect[NEW_MEMBER]).some((s) => s < 400);
+      if (newMemberSucceeds && !memberSucceeds) {
+        problems.push(`${label}: expects "${NEW_MEMBER}" to succeed where "${peer}" can't. A freshly signed-up account gets no more than a member: nothing may treat "signed in" as trusted.`);
+      }
+    }
+    const statuses = Object.values(expect).flatMap((v) => [...asList(v)]);
     if (route.exists === false) {
       if (statuses.some((s) => s !== 404)) problems.push(`${label}: exists: false rows must expect 404 for every persona.`);
     } else if (!statuses.some((s) => s < 400)) {
@@ -236,14 +267,17 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
       }
     }
 
-    for (const [persona, expected] of Object.entries(route.expect)) {
+    for (const [persona, expected] of Object.entries(expect)) {
       if (expected === undefined) continue;
       if (!options.personas[persona]) {
         problems.push(`${label}: expectation for unknown persona "${persona}".`);
         continue;
       }
       for (const pass of MATRIX_PASSES) {
-        const value = pass === 'without-proxy' ? (route.expectWithoutProxy?.[persona] ?? expected) : expected;
+        const value =
+          pass === 'without-proxy'
+            ? (route.expectWithoutProxy?.[persona] ?? (persona === NEW_MEMBER && route.expect[NEW_MEMBER] === undefined ? route.expectWithoutProxy?.[peer] : undefined) ?? expected)
+            : expected;
         cases.push({
           routeIndex,
           route: label,

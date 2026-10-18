@@ -14,6 +14,7 @@ export {
   bearerPersona,
   REQUIRED_PERSONAS,
   SECOND_MEMBER,
+  NEW_MEMBER,
   MATRIX_PASSES,
   type MatrixPass,
   type AuthMatrixOptions,
@@ -52,6 +53,7 @@ export { AWS_BLOCKED_ENV } from './aws-env.js';
 export {
   startMatrixServer,
   matrixFixture,
+  FRESH_SIGN_UP_MEMBER,
   matrixServerEnv,
   type StartMatrixServerOptions,
   type MatrixServer,

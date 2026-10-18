@@ -15,6 +15,8 @@ import {
   runAuthMatrix,
   type AuthMatrixOptions,
   type MatrixRoute,
+  NEW_MEMBER,
+  FRESH_SIGN_UP_MEMBER,
 } from '../../src/testing/index.js';
 import { CLIENT_ID, harness, miniNext, type RouteHandler } from '../helpers.js';
 
@@ -425,5 +427,51 @@ describe('routesFromNextBuild', () => {
 
   it('fails loudly when there is no build', () => {
     expect(() => routesFromNextBuild(fakeBuild(null, null))).toThrow(/Run `next build`/);
+  });
+});
+
+describe('a freshly signed-up Member (sign-up sites, ADR 0023)', () => {
+  /** A member whose account the sign-up route made a moment ago: no role, only the emailed code so far. */
+  function withFreshMember(extraRoutes: Record<string, RouteHandler> = {}) {
+    const app = buildApp(extraRoutes);
+    return { app, fresh: app.issuer.mintAccessToken({ sub: 'fresh-1', groups: [...FRESH_SIGN_UP_MEMBER.groups!] }) };
+  }
+
+  it('is required on a sign-up site', () => {
+    const app = buildApp();
+    expect(() => authMatrixCases(options(app, { signUpSite: true }))).toThrow(/persona "newMember" is required on a sign-up site/);
+  });
+
+  it("runs against every route, held to a member's expectations (another member's on item routes)", async () => {
+    const { app, fresh } = withFreshMember();
+    const opts = options(app, { signUpSite: true, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } });
+    const cases = authMatrixCases(opts).filter((c) => c.persona === NEW_MEMBER);
+    // Every route, twice (with and without the proxy).
+    expect(cases).toHaveLength(ROUTES.length * 2);
+    expect(cases.find((c) => c.path === '/api/reports/r-member')?.expected).toEqual([404]);
+    expect(cases.find((c) => c.method === 'POST')?.expected).toEqual([403]);
+    await assertAuthMatrix(opts);
+  });
+
+  it('catches a route that trusts "signed in" more than it should', async () => {
+    const { app, fresh } = withFreshMember({
+      // A route that lets anyone without a role through (it meant "anyone who's been invited").
+      'GET /api/reports': async () => Promise.resolve(Response.json(['every report'])),
+    });
+    const routes: MatrixRoute[] = ROUTES.map((r) => (r.path === '/api/reports' ? { ...r, expect: { anonymous: 401, member: 403, otherMember: 403, admin: 200 } } : r));
+    const message = await failure(assertAuthMatrix(options(app, { signUpSite: true, routes, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } })));
+    expect(message).toContain('as newMember');
+  });
+
+  it('refuses a row that lets it do more than a member', () => {
+    const { app, fresh } = withFreshMember();
+    const routes: MatrixRoute[] = ROUTES.map((r) => (r.method === 'POST' ? { ...r, expect: { ...r.expect, [NEW_MEMBER]: 200 } } : r));
+    expect(() => authMatrixCases(options(app, { signUpSite: true, routes, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } }))).toThrow(
+      /expects "newMember" to succeed where "member" can't/,
+    );
+  });
+
+  it('describes the persona to the scripted Cognito: no groups, only the emailed code', () => {
+    expect(FRESH_SIGN_UP_MEMBER).toEqual({ groups: [], factors: { configured: ['EMAIL_OTP'], mfa: [] } });
   });
 });

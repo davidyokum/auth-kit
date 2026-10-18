@@ -34,6 +34,16 @@ export interface MatrixPersonaSpec {
   sub?: string;
 }
 
+/**
+ * A freshly signed-up Member (ADR 0023): no groups, and only the emailed code as a way in (no passkey
+ * or password yet), as an account is the moment its first code signs it in. Use it as the
+ * `newMember` persona on sign-up sites (`assertAuthMatrix({ signUpSite: true })`).
+ */
+export const FRESH_SIGN_UP_MEMBER: Readonly<MatrixPersonaSpec> = Object.freeze({
+  groups: Object.freeze([]),
+  factors: Object.freeze({ configured: Object.freeze(['EMAIL_OTP']), mfa: Object.freeze([]) }),
+});
+
 /** One persona's session, ready to send. */
 export interface MatrixPersona {
   readonly username: string;
