@@ -4,7 +4,7 @@ Guidance for AI agents (and people) working on auth-kit.
 
 ## What this is
 
-A public TypeScript package (ESM, Node 22+) that implements David Yokum's login standard for his AWS Amplify Gen 2 + Next.js 16 sites. The standard's rule text lives in his private `passwords-flow` repo (`03-gold-standard-and-plan.md` §2 and `00-login-security-primer.md`); the README maps each rule to code. Pre-release: `0.1.3-alpha`, not in production. The starter site is [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template).
+A public TypeScript package (ESM, Node 22+) that implements David Yokum's login standard for his AWS Amplify Gen 2 + Next.js 16 sites. The standard's rule text lives in his private `passwords-flow` repo (`03-gold-standard-and-plan.md` §2 and `00-login-security-primer.md`); the README maps each rule to code. Pre-release: `0.1.4-alpha`, not in production. The starter site is [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template).
 
 ## Rules
 
@@ -40,4 +40,4 @@ npm run test:e2e   # after build: the fixture app on real Next.js (test/e2e; CI 
 
 ## Git
 
-New, non-live repo: commit straight to `main`, small and often. Releases are tags (`v0.1.3-alpha`): bump `package.json` (and `package-lock.json`) and add a `CHANGELOG.md` section for the version, then push the tag. CI's `release` job builds, packs, attests, and attaches the tarball to a GitHub Release; it refuses a tag that doesn't match `package.json` or has no `CHANGELOG.md` section ([ADR 0012](docs/decisions/0012-release-tarballs.md)). There's no install-time build: run `npm run build` locally when you need `dist/`.
+New, non-live repo: commit straight to `main`, small and often. Releases are tags (`v0.1.4-alpha`): bump `package.json` (and `package-lock.json`) and add a `CHANGELOG.md` section for the version, then push the tag. CI's `release` job builds, packs, attests, and attaches the tarball to a GitHub Release; it refuses a tag that doesn't match `package.json` or has no `CHANGELOG.md` section ([ADR 0012](docs/decisions/0012-release-tarballs.md)). There's no install-time build: run `npm run build` locally when you need `dist/`.

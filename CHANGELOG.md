@@ -2,6 +2,27 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.4-alpha] - 2026-10-18
+
+The invite-expiry sweep keeps the site's last owner. Pre-release.
+
+### Security
+
+- **The invite-expiry sweep never disables the site's last owner** (David's decision). `people.expireStaleInvites()` and `InviteExpirySweep` disabled every invite unused after 7 days, owners included, so a site whose only owner hadn't signed in yet lost its owner. Now an expired owner invite is disabled only while another enabled owner remains (read live with `ListUsersInGroup`, not counting anyone the run tried to disable): with two owners, the unused one is still disabled. The last owner keeps their account and role; the run writes a refused audit row ("skipped: last owner") and warns them ("Your owner invite to {Site} hasn't been used"), plus a separate copy to an optional fallback address, on the first run after the invite expired and then once a day. Non-owner invites expire as before. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner), amended.
+- **Fail closed toward keeping the owner.** An owner count the sweep can't read skips the owner (a refused row, `owner_count_unknown`) and fails the run. A due invite whose groups can't be read is skipped and reported too; before, it was disabled as if it had no groups, keeping its roles.
+
+### Added
+
+- `InviteExpirySweep` `ownerWarnings` (`siteName`, `from`, `sesIdentity`, `signInUrl`, `fallbackEmail`, `configurationSet`): the warning's settings, and `ses:SendEmail` from that identity only. Without it, a run that skips a last owner fails (and alarms) instead of emailing.
+- `OwnerInviteWarningNotifier` and `renderOwnerInviteWarningEmail`; `createSesInviteMailer` implements `ownerInviteUnused` (one message per recipient), and `createPeopleActions` uses it for `expireStaleInvites`.
+- `SweepResult.skipped` (`SweepSkip`: who was warned, and any problem), `OwnerWarningOptions`, `LAST_OWNER_SKIP_MESSAGE`; `createInviteExpirySweep` takes `ownerWarnings` and `runEveryMinutes`.
+- `inviteExpirySweepPolicy` takes `sesResourceArns`.
+
+### Changed
+
+- The sweep's role may also call `ListUsersInGroup` (`INVITE_EXPIRY_COGNITO_ACTIONS`). Redeploy the construct for the new permission.
+- The scheduled function fails a run whose last-owner skip couldn't warn anyone or be logged, and its log line redacts any address an AWS error message quotes.
+
 ## [0.1.3-alpha] - 2026-10-17
 
 Fixes for what the first live deploy (a demo site made from [site-auth-kit-template](https://github.com/davidyokum/site-auth-kit-template)) revealed. Pre-release.
