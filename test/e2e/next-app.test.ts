@@ -44,6 +44,8 @@ const PERSONAS = {
   demotedAdmin: { groups: ['admin-content-people'], liveGroups: [] },
   disabledAdmin: { groups: ['admin-content-people'], enabled: false },
   revokedSession: { groups: ['admin-content'], sessionRevoked: true },
+  // An invitee who closed the tab before choosing a passkey or a password (M2, N3).
+  codeOnlyMember: { factors: { configured: ['EMAIL_OTP'], mfa: [] } },
 };
 type Name = keyof typeof PERSONAS | 'anonymous';
 type Expect = Record<Name, number>;
@@ -108,18 +110,22 @@ describe.runIf(enabled)('auth-kit on real Next.js', () => {
   });
 
   it('#9: every route answers every persona as the standard requires, with and without the proxy', async () => {
+    // An account with only emailed codes is sent to the chooser (307) by every page guard and refused (403) by every API.
     const SIGNED_IN_PAGE: Expect = {
       anonymous: 307, member: 200, otherMember: 200, admin: 200,
-      noAuthenticator: 307, demotedAdmin: 200, disabledAdmin: 307, revokedSession: 307,
+      noAuthenticator: 307, demotedAdmin: 200, disabledAdmin: 307, revokedSession: 307, codeOnlyMember: 307,
     };
-    const PUBLIC: Expect = { ...SIGNED_IN_PAGE, anonymous: 200, noAuthenticator: 200, disabledAdmin: 200, revokedSession: 200 };
+    const PUBLIC: Expect = { ...SIGNED_IN_PAGE, anonymous: 200, noAuthenticator: 200, disabledAdmin: 200, revokedSession: 200, codeOnlyMember: 200 };
     const RECORD_PAGE: Expect = { ...SIGNED_IN_PAGE, otherMember: 404 };
     const ADMIN_PAGE: Expect = { ...SIGNED_IN_PAGE, member: 404, otherMember: 404, demotedAdmin: 404 };
-    const API: Expect = { anonymous: 401, member: 200, otherMember: 200, admin: 200, noAuthenticator: 403, demotedAdmin: 200, disabledAdmin: 401, revokedSession: 401 };
+    const API: Expect = { anonymous: 401, member: 200, otherMember: 200, admin: 200, noAuthenticator: 403, demotedAdmin: 200, disabledAdmin: 401, revokedSession: 401, codeOnlyMember: 403 };
+    // The chooser: the emailed-code-only account may reach it; a password user without an authenticator goes to its own setup.
+    const CHOOSER: Expect = { ...SIGNED_IN_PAGE, codeOnlyMember: 200 };
     const routes: MatrixRoute[] = [
       { path: '/', expect: PUBLIC },
       { path: '/sign-in', expect: PUBLIC },
       { path: '/unavailable', expect: PUBLIC },
+      { path: '/account/sign-in-method', expect: CHOOSER },
       { path: '/records', expect: SIGNED_IN_PAGE },
       { path: '/records/:id', expect: RECORD_PAGE },
       { path: '/admin', expect: ADMIN_PAGE },

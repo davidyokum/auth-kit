@@ -26,6 +26,7 @@ export {
 } from './matrix.js';
 export {
   routesFromNextBuild,
+  DEFAULT_FIRST_CREDENTIAL_PATH,
   compileAppRoute,
   resolveAppRoute,
   type AppRoute,

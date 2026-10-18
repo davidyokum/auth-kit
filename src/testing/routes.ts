@@ -133,7 +133,17 @@ const NEXT_INTERNAL_ROUTES = new Set(['/_not-found', '/_global-error', '/_app', 
 export interface RoutesFromNextBuildOptions {
   /** Paths to leave out, each with a reason in code review (e.g. a metadata route like `/favicon.ico`). */
   exclude?: readonly (string | RegExp)[];
+  /**
+   * The page the server's page guards send an account with only emailed codes to (`firstCredentialPath`
+   * in `auth-kit/server`, default `/account/sign-in-method`). The build must have it, or every new
+   * invitee lands on a 404 after their first code. `false` only when the server turns the rule off
+   * (`requireFirstCredential: false`).
+   */
+  firstCredentialPath?: string | false;
 }
+
+/** Where the page guards send an account with only emailed codes, unless the site says otherwise. */
+export const DEFAULT_FIRST_CREDENTIAL_PATH = '/account/sign-in-method';
 
 /**
  * Every route in a Next build (`next build` must have run): the App Router's pages and route
@@ -160,6 +170,14 @@ export function routesFromNextBuild(distDir = '.next', options: RoutesFromNextBu
     for (const path of Object.keys(entries)) {
       if (!found.has(path)) found.set(path, { path, kind: path.startsWith('/api/') ? 'route' : 'page' });
     }
+  }
+  const chooser = options.firstCredentialPath === undefined ? DEFAULT_FIRST_CREDENTIAL_PATH : options.firstCredentialPath;
+  if (chooser !== false && found.get(chooser)?.kind !== 'page') {
+    throw new Error(
+      `auth-matrix: the build has no page at ${chooser}, where the server's page guards send an account with only emailed codes (403 first_credential_required) ` +
+        '— every new invitee would land on a 404 after their first code. Add the page (pages.requireUser({ allowFirstCredentialEnrollment: true }) and ChooseFirstCredential), ' +
+        'pass firstCredentialPath if it lives elsewhere, or firstCredentialPath: false only if the server turns the rule off (requireFirstCredential: false).',
+    );
   }
   const excluded = (path: string) =>
     NEXT_INTERNAL_ROUTES.has(path) ||

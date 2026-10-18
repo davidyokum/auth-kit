@@ -63,7 +63,8 @@ export const NEW_MEMBER = 'newMember';
  * sign in next time"). The server refuses it on every route that needs a signed-in person (403
  * `first_credential_required`, register A1), so unless a row says otherwise (the chooser page), it's
  * expected to get what an anonymous visitor gets where that's a success or a redirect, and 403
- * everywhere else. Required on sign-up sites; any site can add it (invitees start this way too).
+ * everywhere else. Required on every site whose server enforces the first credential (the default,
+ * `requireFirstCredential`): invitees start this way on invite-only sites too.
  */
 export const CODE_ONLY_MEMBER = 'codeOnlyMember';
 
@@ -138,6 +139,12 @@ export interface AuthMatrixOptions {
    * unless the row says otherwise; a row that lets it succeed where a member can't is refused.
    */
   signUpSite?: boolean;
+  /**
+   * The server enforces the first credential (`createServerAuth`'s `requireFirstCredential`, on by
+   * default): the `codeOnlyMember` persona is required and runs against every route. Pass `false`
+   * only when the server turns the rule off.
+   */
+  requireFirstCredential?: boolean;
 }
 
 /** What an emailed-code-only account gets on a route by default: an anonymous visitor's success or redirect, else 403. */
@@ -193,14 +200,21 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
   const newMember = options.signUpSite === true || options.personas[NEW_MEMBER] !== undefined;
-  const codeOnly = options.signUpSite === true || options.personas[CODE_ONLY_MEMBER] !== undefined;
-  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : []), ...(options.signUpSite === true ? [NEW_MEMBER, CODE_ONLY_MEMBER] : [])]) {
+  const firstCredentialEnforced = options.requireFirstCredential !== false;
+  const codeOnly = options.signUpSite === true || firstCredentialEnforced || options.personas[CODE_ONLY_MEMBER] !== undefined;
+  const required = [
+    ...REQUIRED_PERSONAS,
+    ...(needsSecond ? [SECOND_MEMBER] : []),
+    ...(options.signUpSite === true ? [NEW_MEMBER] : []),
+    ...(options.signUpSite === true || firstCredentialEnforced ? [CODE_ONLY_MEMBER] : []),
+  ];
+  for (const p of required) {
     if (!options.personas[p]) {
       problems.push(
         p === NEW_MEMBER
           ? `persona "${NEW_MEMBER}" is required on a sign-up site: a freshly signed-up Member (FRESH_SIGN_UP_MEMBER) must run against every route.`
           : p === CODE_ONLY_MEMBER
-            ? `persona "${CODE_ONLY_MEMBER}" is required on a sign-up site: an account with only emailed codes (EMAILED_CODE_ONLY_MEMBER) must be refused everywhere but the chooser.`
+            ? `persona "${CODE_ONLY_MEMBER}" is required: the server refuses an account with only emailed codes everywhere but the chooser (requireFirstCredential), and invitees start that way, so EMAILED_CODE_ONLY_MEMBER must run against every route (pass requireFirstCredential: false only if the server turns the rule off).`
             : `persona "${p}" is required but not defined.`,
       );
     }
@@ -259,7 +273,8 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
       if (route.expect[CODE_ONLY_MEMBER] === undefined) {
         const fallback = route.exists === false ? 404 : codeOnlyDefault(route.expect);
         if (fallback !== undefined) expect = { ...expect, [CODE_ONLY_MEMBER]: fallback };
-      } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s < 400) && !asList(route.expect.member).some((s) => s < 400)) {
+      } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s >= 200 && s < 300) && !asList(route.expect.member).some((s) => s < 400)) {
+        // A redirect (to the chooser) isn't getting in; a 2xx where a member gets nothing is.
         problems.push(`${label}: expects "${CODE_ONLY_MEMBER}" to succeed where "member" can't. An account with only emailed codes gets no more than a member.`);
       }
     }
