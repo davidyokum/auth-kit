@@ -98,9 +98,9 @@ export function createRng(seed: number): Rng {
         hasSpare = false;
         return spare;
       }
-      let u = 0;
-      let v = 0;
-      let s = 0;
+      let u: number;
+      let v: number;
+      let s: number;
       do {
         u = next() * 2 - 1;
         v = next() * 2 - 1;

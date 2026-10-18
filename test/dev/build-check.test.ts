@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertProductionBuild, checkProductionBuild, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/index.js';
+import { assertProductionBuild, BACKDROP_PICKER_MARKER, checkProductionBuild, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/index.js';
 
 let root: string;
 let build: string;
@@ -101,6 +101,15 @@ describe('checkProductionBuild', () => {
       findings: [{ kind: 'not-a-build', detail: expect.stringMatching(/next build/) }],
     });
     expect((await checkProductionBuild({ buildDir: join(root, 'missing') })).findings[0]?.kind).toBe('not-a-build');
+  });
+
+  it('fails when the backdrop picker was bundled, and says where it belongs', async () => {
+    await fixture({ 'static/chunks/app/dev/backdrops/page-9a1b.js': `e.picker="${BACKDROP_PICKER_MARKER}";` });
+    const result = await checkProductionBuild({ buildDir: build });
+    expect(result.ok).toBe(false);
+    expect(result.findings).toEqual([
+      { kind: 'marker', file: join('static', 'chunks', 'app', 'dev', 'backdrops', 'page-9a1b.js'), detail: expect.stringMatching(/backdrop picker marker.*page\.dev\.tsx/) },
+    ]);
   });
 
   it('takes a custom route and extra markers', async () => {

@@ -18,7 +18,7 @@ import { buildSetup, type BackdropArtOptions, layerFactory, NO_POINTER, type Res
 import { type BackdropHost, browserHost, type PointerLike } from './host.js';
 import { defaultCardRect, drawScrim, paintScrim, SCRIM } from './scrim.js';
 import type { Ctx2D, Layer, StyleInstance } from './styles/define.js';
-import type { BackdropPointer, BackdropRect } from './types.js';
+import type { BackdropRect } from './types.js';
 
 export interface BackdropOptions extends BackdropArtOptions {
   /** Respond to the pointer (and taps) where the style does. Default true. */
@@ -93,7 +93,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let options: BackdropOptions = { ...initial };
   let art: ResolvedArt = resolveArt(options);
   const svg = !isCanvas(target);
-  const canvas = svg ? null : (target as HTMLCanvasElement);
+  const canvas = isCanvas(target) ? target : null;
   let svgImage: SVGImageElement | null = null;
 
   let ctx: Ctx2D | null = null;
@@ -203,7 +203,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     surface = canvas ?? host.createCanvas(bw, bh);
     if (surface.width !== bw) surface.width = bw;
     if (surface.height !== bh) surface.height = bh;
-    ctx = surface.getContext('2d', { alpha: false }) as Ctx2D | null;
+    ctx = surface.getContext('2d', { alpha: false });
     if (!ctx) unsupported = true;
     return !!ctx;
   }
@@ -213,7 +213,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     const start = host.now();
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const motion = !reduced && !svg;
-    instance.draw(ctx, { t: motion ? animTime : art.version.stillTime, dt, pointer: motion ? (pointer as BackdropPointer) : NO_POINTER });
+    instance.draw(ctx, { t: motion ? animTime : art.version.stillTime, dt, pointer: motion ? pointer : NO_POINTER });
     drawScrim(ctx, scrimLayer);
     const end = host.now();
     const cost = end - start;

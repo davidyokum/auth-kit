@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { builtinModules, createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/marker.js';
+import { BACKDROP_PICKER_MARKER, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/marker.js';
 import { AWS_BLOCKED_ENV } from '../../src/testing/aws-env.js';
 
 const DIST = join(import.meta.dirname, '..', '..', 'dist');
@@ -36,10 +36,10 @@ describe.runIf(enabled)('the built package', () => {
   });
 
   it('no subpath that ships loads a file with either dev marker (sign-in, matrix server mode)', () => {
-    for (const entry of ['server/index.js', 'proxy/index.js', 'client/index.js', 'admin/index.js', 'admin/ui.js', 'admin/cdk.js', 'amplify/index.js', 'amplify/pre-sign-up.js', 'ribbon/index.js']) {
+    for (const entry of ['server/index.js', 'proxy/index.js', 'client/index.js', 'admin/index.js', 'admin/ui.js', 'admin/cdk.js', 'amplify/index.js', 'amplify/pre-sign-up.js', 'ribbon/index.js', 'backdrops/index.js', 'backdrops/react.js']) {
       for (const file of graph(join(DIST, entry))) {
         const code = readFileSync(file, 'utf8');
-        expect(code.includes(DEV_SIGNIN_MARKER) || code.includes(MATRIX_SERVER_MARKER), `${entry} → ${file}`).toBe(false);
+        expect(code.includes(DEV_SIGNIN_MARKER) || code.includes(MATRIX_SERVER_MARKER) || code.includes(BACKDROP_PICKER_MARKER), `${entry} → ${file}`).toBe(false);
       }
     }
   });
@@ -54,6 +54,15 @@ describe.runIf(enabled)('the built package', () => {
       const files = [...graph(join(DIST, entry))];
       expect(files.some((f) => readFileSync(f, 'utf8').includes(DEV_SIGNIN_MARKER)), entry).toBe(true);
     }
+  });
+
+  it('auth-kit/backdrops/picker carries its marker, so check-prod-build finds a leak', () => {
+    const files = [...graph(join(DIST, 'backdrops', 'picker.js'))];
+    expect(files.some((f) => readFileSync(f, 'utf8').includes(BACKDROP_PICKER_MARKER))).toBe(true);
+  });
+
+  it("auth-kit/backdrops/react and the picker keep 'use client' first", () => {
+    for (const entry of ['backdrops/react.js', 'backdrops/picker.js']) expect(readFileSync(join(DIST, entry), 'utf8'), entry).toMatch(/^['"]use client['"];/);
   });
 
   it("the persona menu is a client component ('use client' first)", () => {

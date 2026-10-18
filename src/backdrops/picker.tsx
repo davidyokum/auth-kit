@@ -203,10 +203,14 @@ export function BackdropPicker(props: BackdropPickerProps) {
     const dialog = dialogRef.current;
     if (!dialog) return;
     if (viewing && !dialog.open) {
-      dialog.showModal();
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open', '');
       setViewingKey((k) => k + 1);
     }
-    if (!viewing && dialog.open) dialog.close();
+    if (!viewing && dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
   }, [viewing]);
 
   useEffect(() => {

@@ -19,7 +19,7 @@ const SHARES = [0.34, 0.2, 0.18, 0.08, 0.12, 0.08];
 
 export const flowLinesV1 = defineVersion({
   version: 1,
-  fps: 24,
+  fps: 20,
   maxPixelRatio: 2,
   stillTime: 18,
   colors: (p) => ({

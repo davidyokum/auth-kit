@@ -13,34 +13,34 @@ export interface PointerLike {
 }
 
 export interface PointerHandlers {
-  move(event: PointerLike): void;
-  down(event: PointerLike): void;
-  up(event: PointerLike): void;
-  leave(): void;
+  readonly move: (event: PointerLike) => void;
+  readonly down: (event: PointerLike) => void;
+  readonly up: (event: PointerLike) => void;
+  readonly leave: () => void;
 }
 
 export type Drawable = CanvasImageSource & { readonly width: number; readonly height: number };
 
 export interface BackdropHost {
-  now(): number;
-  requestFrame(callback: (now: number) => void): number;
-  cancelFrame(handle: number): void;
-  setTimer(callback: () => void, ms: number): number;
-  clearTimer(handle: number): void;
-  devicePixelRatio(): number;
-  reducedMotion(): boolean;
-  onReducedMotionChange(callback: (reduced: boolean) => void): () => void;
-  documentHidden(): boolean;
-  onVisibilityChange(callback: () => void): () => void;
+  readonly now: () => number;
+  readonly requestFrame: (callback: (now: number) => void) => number;
+  readonly cancelFrame: (handle: number) => void;
+  readonly setTimer: (callback: () => void, ms: number) => number;
+  readonly clearTimer: (handle: number) => void;
+  readonly devicePixelRatio: () => number;
+  readonly reducedMotion: () => boolean;
+  readonly onReducedMotionChange: (callback: (reduced: boolean) => void) => () => void;
+  readonly documentHidden: () => boolean;
+  readonly onVisibilityChange: (callback: () => void) => () => void;
   /** Calls back with false while the element is entirely off-screen. */
-  observeVisible(element: Element, callback: (visible: boolean) => void): () => void;
-  observeSize(element: Element, callback: () => void): () => void;
+  readonly observeVisible: (element: Element, callback: (visible: boolean) => void) => () => void;
+  readonly observeSize: (element: Element, callback: () => void) => () => void;
   /** Window-level, passive pointer listeners: the backdrop never sits in the way of a click. */
-  onPointer(handlers: PointerHandlers): () => void;
+  readonly onPointer: (handlers: PointerHandlers) => () => void;
   /** Scrolls and window resizes (the card can move relative to the backdrop). */
-  onViewportChange(callback: () => void): () => void;
-  createCanvas: CanvasFactory;
-  loadImage(src: string): Promise<Drawable>;
+  readonly onViewportChange: (callback: () => void) => () => void;
+  readonly createCanvas: CanvasFactory;
+  readonly loadImage: (src: string) => Promise<Drawable>;
 }
 
 const noop = () => undefined;

@@ -22,7 +22,7 @@ function grown(buffer: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
 
 export const contoursV1 = defineVersion({
   version: 1,
-  fps: 8,
+  fps: 6,
   maxPixelRatio: 2,
   stillTime: 40,
   colors: (p) => ({

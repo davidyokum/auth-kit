@@ -52,7 +52,7 @@ function check(id: ContrastCheck['id'], label: string, foreground: string, backg
 
 export function cardContrast(family: BackdropFamily | { palette: BackdropPalette; card: BackdropCardTheme }): CardContrastReport {
   const colors = typeof family === 'string' ? BACKDROP_FAMILIES[family] : family;
-  if (!colors) throw new Error(`auth-kit/backdrops: family "${String(family)}" isn't osbm, unc, or personal.`);
+  if (!colors) throw new Error(`auth-kit/backdrops: family ${JSON.stringify(family)} isn't osbm, unc, or personal.`);
   const { palette, card } = colors;
   const checks = [
     check('heading', 'Heading on the card', card.heading, card.surface, 4.5),

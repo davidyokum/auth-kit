@@ -10,13 +10,13 @@ import type { Rng } from './prng.js';
 
 export interface Noise {
   /** Simplex noise in [-1, 1]. */
-  noise2(x: number, y: number): number;
+  readonly noise2: (x: number, y: number) => number;
   /** Simplex noise in [-1, 1]. */
-  noise3(x: number, y: number, z: number): number;
+  readonly noise3: (x: number, y: number, z: number) => number;
   /** Fractal sum of `octaves` layers (lacunarity 2, gain 0.5), normalized to about [-1, 1]. */
-  fbm2(x: number, y: number, octaves: number): number;
+  readonly fbm2: (x: number, y: number, octaves: number) => number;
   /** Fractal sum of `octaves` layers (lacunarity 2, gain 0.5), normalized to about [-1, 1]. */
-  fbm3(x: number, y: number, z: number, octaves: number): number;
+  readonly fbm3: (x: number, y: number, z: number, octaves: number) => number;
 }
 
 const GRAD3 = new Float64Array([1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0, 1, 0, 1, -1, 0, 1, 1, 0, -1, -1, 0, -1, 0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1]);

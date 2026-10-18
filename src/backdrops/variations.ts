@@ -110,7 +110,7 @@ export function backdropLockProblems(value: unknown): string[] {
   else if (isBackdropStyleId(v.style)) {
     const versions = backdropStyle(v.style)?.versions.length ?? 0;
     if (!Number.isInteger(v.styleVersion) || (v.styleVersion as number) < 1 || (v.styleVersion as number) > versions) {
-      problems.push(`styleVersion ${String(v.styleVersion)} doesn't exist for "${v.style}" in this auth-kit (it has 1-${versions})`);
+      problems.push(`styleVersion ${JSON.stringify(v.styleVersion)} doesn't exist for "${v.style}" in this auth-kit (it has 1-${versions})`);
     }
   }
   if (v.locked !== true) problems.push('locked isn’t true');

@@ -58,12 +58,12 @@ export interface FrameInput {
 /** A created style: draws frames. Everything it needs per frame is allocated in `create`. */
 export interface StyleInstance {
   /** Paints the whole canvas (the canvas is opaque: paint the page first). In CSS pixels. */
-  draw(ctx: Ctx2D, frame: FrameInput): void;
+  readonly draw: (ctx: Ctx2D, frame: FrameInput) => void;
   /** A tap or click on the backdrop (outside the card and any control), in CSS pixels. */
-  tap?(x: number, y: number, t: number): void;
+  readonly tap?: (x: number, y: number, t: number) => void;
   /** Helpers `draw` calls every frame, listed so the allocation check (tests) reads them too. */
   readonly hot?: readonly unknown[];
-  destroy?(): void;
+  readonly destroy?: () => void;
 }
 
 /** One released version of a style, type-erased for the registry (see `defineVersion`). */

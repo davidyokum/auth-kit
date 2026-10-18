@@ -67,7 +67,7 @@ export function layerFactory(createCanvas: CanvasFactory, defaultScale: number):
     const canvas = createCanvas(bw, bh);
     if (canvas.width !== bw) canvas.width = bw;
     if (canvas.height !== bh) canvas.height = bh;
-    const ctx = canvas.getContext('2d') as Ctx2D | null;
+    const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('auth-kit/backdrops: this environment has no 2D canvas.');
     ctx.setTransform(bw / w, 0, 0, bh / h, 0, 0);
     return { canvas, ctx, width: w, height: h, scale };
