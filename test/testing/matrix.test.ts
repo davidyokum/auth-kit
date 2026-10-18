@@ -16,6 +16,8 @@ import {
   type AuthMatrixOptions,
   type MatrixRoute,
   NEW_MEMBER,
+  CODE_ONLY_MEMBER,
+  EMAILED_CODE_ONLY_MEMBER,
   FRESH_SIGN_UP_MEMBER,
 } from '../../src/testing/index.js';
 import { CLIENT_ID, harness, miniNext, type RouteHandler } from '../helpers.js';
@@ -65,7 +67,7 @@ function buildApp(extraRoutes: Record<string, RouteHandler> = {}) {
   const otherMember = issuer.mintAccessToken({ sub: 'member-2', groups: [] });
   const admin = issuer.mintAccessToken({ sub: 'admin-1', groups: ['admin-content-people'] });
   cognito.setLiveState('admin-1', { enabled: true, groups: ['admin-content-people'] });
-  return { ...next, member, otherMember, admin, issuer };
+  return { ...next, member, otherMember, admin, issuer, cognito, auth };
 }
 
 const APP_ROUTES = ['/api/reports', '/api/reports/[id]', 'POST /api/admin/invite', '/api/public/status'];
@@ -431,20 +433,28 @@ describe('routesFromNextBuild', () => {
 });
 
 describe('a freshly signed-up Member (sign-up sites, ADR 0023)', () => {
-  /** A member whose account the sign-up route made a moment ago: no role, only the emailed code so far. */
+  /**
+   * A member whose account the sign-up route made a moment ago and who chose a passkey (no role), and
+   * an account with only emailed codes (closed before choosing).
+   */
   function withFreshMember(extraRoutes: Record<string, RouteHandler> = {}) {
     const app = buildApp(extraRoutes);
-    return { app, fresh: app.issuer.mintAccessToken({ sub: 'fresh-1', groups: [...FRESH_SIGN_UP_MEMBER.groups!] }) };
+    app.cognito.setFactors('fresh-1', { configured: [...FRESH_SIGN_UP_MEMBER.factors!.configured], mfa: [] });
+    app.cognito.setFactors('code-only-1', { configured: [...EMAILED_CODE_ONLY_MEMBER.factors!.configured], mfa: [] });
+    const codeOnly = app.issuer.mintAccessToken({ sub: 'code-only-1', groups: [] });
+    return { app, fresh: app.issuer.mintAccessToken({ sub: 'fresh-1', groups: [...FRESH_SIGN_UP_MEMBER.groups!] }), codeOnly };
   }
+  const signUpPersonas = (app: ReturnType<typeof buildApp>, fresh: string, codeOnly: string) => ({ ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh), [CODE_ONLY_MEMBER]: bearerPersona(codeOnly) });
 
-  it('is required on a sign-up site', () => {
+  it('is required on a sign-up site, with the emailed-code-only account', () => {
     const app = buildApp();
     expect(() => authMatrixCases(options(app, { signUpSite: true }))).toThrow(/persona "newMember" is required on a sign-up site/);
+    expect(() => authMatrixCases(options(app, { signUpSite: true }))).toThrow(/persona "codeOnlyMember" is required on a sign-up site/);
   });
 
   it("runs against every route, held to a member's expectations (another member's on item routes)", async () => {
-    const { app, fresh } = withFreshMember();
-    const opts = options(app, { signUpSite: true, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } });
+    const { app, fresh, codeOnly } = withFreshMember();
+    const opts = options(app, { signUpSite: true, personas: signUpPersonas(app, fresh, codeOnly) });
     const cases = authMatrixCases(opts).filter((c) => c.persona === NEW_MEMBER);
     // Every route, twice (with and without the proxy).
     expect(cases).toHaveLength(ROUTES.length * 2);
@@ -454,24 +464,80 @@ describe('a freshly signed-up Member (sign-up sites, ADR 0023)', () => {
   });
 
   it('catches a route that trusts "signed in" more than it should', async () => {
-    const { app, fresh } = withFreshMember({
+    const { app, fresh, codeOnly } = withFreshMember({
       // A route that lets anyone without a role through (it meant "anyone who's been invited").
       'GET /api/reports': async () => Promise.resolve(Response.json(['every report'])),
     });
     const routes: MatrixRoute[] = ROUTES.map((r) => (r.path === '/api/reports' ? { ...r, expect: { anonymous: 401, member: 403, otherMember: 403, admin: 200 } } : r));
-    const message = await failure(assertAuthMatrix(options(app, { signUpSite: true, routes, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } })));
+    const message = await failure(assertAuthMatrix(options(app, { signUpSite: true, routes, personas: signUpPersonas(app, fresh, codeOnly) })));
     expect(message).toContain('as newMember');
   });
 
   it('refuses a row that lets it do more than a member', () => {
-    const { app, fresh } = withFreshMember();
+    const { app, fresh, codeOnly } = withFreshMember();
     const routes: MatrixRoute[] = ROUTES.map((r) => (r.method === 'POST' ? { ...r, expect: { ...r.expect, [NEW_MEMBER]: 200 } } : r));
-    expect(() => authMatrixCases(options(app, { signUpSite: true, routes, personas: { ...options(app).personas, [NEW_MEMBER]: bearerPersona(fresh) } }))).toThrow(
+    expect(() => authMatrixCases(options(app, { signUpSite: true, routes, personas: signUpPersonas(app, fresh, codeOnly) }))).toThrow(
       /expects "newMember" to succeed where "member" can't/,
     );
   });
 
-  it('describes the persona to the scripted Cognito: no groups, only the emailed code', () => {
-    expect(FRESH_SIGN_UP_MEMBER).toEqual({ groups: [], factors: { configured: ['EMAIL_OTP'], mfa: [] } });
+  it('describes the personas to the scripted Cognito: the finished sign-up has a passkey; the other only emailed codes', () => {
+    expect(FRESH_SIGN_UP_MEMBER).toEqual({ groups: [], factors: { configured: ['EMAIL_OTP', 'WEB_AUTHN'], mfa: [] } });
+    expect(EMAILED_CODE_ONLY_MEMBER).toEqual({ groups: [], factors: { configured: ['EMAIL_OTP'], mfa: [] } });
+  });
+});
+
+describe('an account with only emailed codes (M2: the first credential is enforced on the server)', () => {
+  function withCodeOnly(extraRoutes: Record<string, RouteHandler> = {}) {
+    const app = buildApp(extraRoutes);
+    app.cognito.setFactors('code-only-1', { configured: ['EMAIL_OTP'], mfa: [] });
+    return { app, codeOnly: app.issuer.mintAccessToken({ sub: 'code-only-1', groups: [] }) };
+  }
+
+  it('is expected to get 403 wherever a signed-in person is needed, and what anyone gets on public routes', async () => {
+    const { app, codeOnly } = withCodeOnly();
+    const opts = options(app, { personas: { ...options(app).personas, [CODE_ONLY_MEMBER]: bearerPersona(codeOnly) } });
+    const cases = authMatrixCases(opts).filter((c) => c.persona === CODE_ONLY_MEMBER && c.pass === 'with-proxy');
+    expect(Object.fromEntries(cases.map((c) => [`${c.method} ${c.path}`, c.expected]))).toEqual({
+      'GET /api/reports': [403],
+      'GET /api/reports/r-member': [403],
+      'POST /api/admin/invite': [403],
+      'GET /api/public/status': [200],
+    });
+    // And the app really does refuse it (requireUser: 403 first_credential_required).
+    await assertAuthMatrix(opts);
+  });
+
+  it('may reach the chooser when its row says so, and the matrix catches a route that lets it in elsewhere', async () => {
+    const chooser: RouteHandler = withAuthErrors(async (req) => {
+      const { app } = holder;
+      await app.auth.requireUser({ request: req, allowFirstCredentialEnrollment: true });
+      return Response.json({ choose: true });
+    });
+    const holder = {} as { app: ReturnType<typeof buildApp> };
+    const leaky: RouteHandler = withAuthErrors(async (req) => {
+      // Meant only for the chooser, copied to a real page.
+      await holder.app.auth.requireUser({ request: req, allowFirstCredentialEnrollment: true });
+      return Response.json(['every report']);
+    });
+    const { app, codeOnly } = withCodeOnly({ 'GET /api/account/sign-in-method': chooser, 'GET /api/reports': leaky });
+    holder.app = app;
+    const routes: MatrixRoute[] = [
+      ...ROUTES,
+      { method: 'GET', path: '/api/account/sign-in-method', expect: { anonymous: 401, member: 200, admin: 200, [CODE_ONLY_MEMBER]: 200 } },
+    ];
+    const opts = options(app, { routes, appRoutes: [...APP_ROUTES, '/api/account/sign-in-method'], personas: { ...options(app).personas, [CODE_ONLY_MEMBER]: bearerPersona(codeOnly) } });
+    const message = await failure(assertAuthMatrix(opts));
+    expect(message).toContain('as codeOnlyMember');
+    expect(message).toContain('/api/reports');
+    expect(message).not.toContain('/api/account/sign-in-method as codeOnlyMember');
+  });
+
+  it('refuses a row that lets it do more than a member', () => {
+    const { app, codeOnly } = withCodeOnly();
+    const routes: MatrixRoute[] = ROUTES.map((r) => (r.method === 'POST' ? { ...r, expect: { ...r.expect, [CODE_ONLY_MEMBER]: 200 } } : r));
+    expect(() => authMatrixCases(options(app, { routes, personas: { ...options(app).personas, [CODE_ONLY_MEMBER]: bearerPersona(codeOnly) } }))).toThrow(
+      /expects "codeOnlyMember" to succeed where "member" can't/,
+    );
   });
 });

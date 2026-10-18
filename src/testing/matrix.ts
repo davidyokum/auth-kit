@@ -58,6 +58,14 @@ export const SECOND_MEMBER = 'otherMember';
  * than `member`: no check may treat "signed in" as "trusted".
  */
 export const NEW_MEMBER = 'newMember';
+/**
+ * An account with only emailed codes (no passkey or password yet: closed before "Choose how you'll
+ * sign in next time"). The server refuses it on every route that needs a signed-in person (403
+ * `first_credential_required`, register A1), so unless a row says otherwise (the chooser page), it's
+ * expected to get what an anonymous visitor gets where that's a success or a redirect, and 403
+ * everywhere else. Required on sign-up sites; any site can add it (invitees start this way too).
+ */
+export const CODE_ONLY_MEMBER = 'codeOnlyMember';
 
 export type MatrixPass = 'with-proxy' | 'without-proxy';
 export const MATRIX_PASSES: readonly MatrixPass[] = ['with-proxy', 'without-proxy'];
@@ -132,6 +140,13 @@ export interface AuthMatrixOptions {
   signUpSite?: boolean;
 }
 
+/** What an emailed-code-only account gets on a route by default: an anonymous visitor's success or redirect, else 403. */
+function codeOnlyDefault(expect: Expectations): number | readonly number[] | undefined {
+  const anonymous = expect.anonymous;
+  if (anonymous === undefined) return undefined;
+  return asList(anonymous).some((s) => s < 400) ? anonymous : 403;
+}
+
 export interface MatrixCase {
   /** Position of the route in `routes`. */
   routeIndex: number;
@@ -178,12 +193,15 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
   const newMember = options.signUpSite === true || options.personas[NEW_MEMBER] !== undefined;
-  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : []), ...(options.signUpSite === true ? [NEW_MEMBER] : [])]) {
+  const codeOnly = options.signUpSite === true || options.personas[CODE_ONLY_MEMBER] !== undefined;
+  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : []), ...(options.signUpSite === true ? [NEW_MEMBER, CODE_ONLY_MEMBER] : [])]) {
     if (!options.personas[p]) {
       problems.push(
         p === NEW_MEMBER
           ? `persona "${NEW_MEMBER}" is required on a sign-up site: a freshly signed-up Member (FRESH_SIGN_UP_MEMBER) must run against every route.`
-          : `persona "${p}" is required but not defined.`,
+          : p === CODE_ONLY_MEMBER
+            ? `persona "${CODE_ONLY_MEMBER}" is required on a sign-up site: an account with only emailed codes (EMAILED_CODE_ONLY_MEMBER) must be refused everywhere but the chooser.`
+            : `persona "${p}" is required but not defined.`,
       );
     }
   }
@@ -228,12 +246,21 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
     // A freshly signed-up Member is held to a member's expectations, row by row, and never beyond them.
     // On a route that takes an item's ID it's someone else's item, so it's held to the second member's.
     const peer = isRecordRoute(route) && route.expect[SECOND_MEMBER] !== undefined ? SECOND_MEMBER : 'member';
-    const expect: Expectations = newMember && route.expect[NEW_MEMBER] === undefined && route.expect[peer] !== undefined ? { ...route.expect, [NEW_MEMBER]: route.expect[peer] } : route.expect;
+    let expect: Expectations = newMember && route.expect[NEW_MEMBER] === undefined && route.expect[peer] !== undefined ? { ...route.expect, [NEW_MEMBER]: route.expect[peer] } : route.expect;
     if (newMember && route.expect[NEW_MEMBER] !== undefined) {
       const memberSucceeds = asList(route.expect[peer]).some((s) => s < 400);
       const newMemberSucceeds = asList(route.expect[NEW_MEMBER]).some((s) => s < 400);
       if (newMemberSucceeds && !memberSucceeds) {
         problems.push(`${label}: expects "${NEW_MEMBER}" to succeed where "${peer}" can't. A freshly signed-up account gets no more than a member: nothing may treat "signed in" as trusted.`);
+      }
+    }
+    // An account with only emailed codes is refused wherever a signed-in person is needed (M2).
+    if (codeOnly) {
+      if (route.expect[CODE_ONLY_MEMBER] === undefined) {
+        const fallback = route.exists === false ? 404 : codeOnlyDefault(route.expect);
+        if (fallback !== undefined) expect = { ...expect, [CODE_ONLY_MEMBER]: fallback };
+      } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s < 400) && !asList(route.expect.member).some((s) => s < 400)) {
+        problems.push(`${label}: expects "${CODE_ONLY_MEMBER}" to succeed where "member" can't. An account with only emailed codes gets no more than a member.`);
       }
     }
     const statuses = Object.values(expect).flatMap((v) => [...asList(v)]);

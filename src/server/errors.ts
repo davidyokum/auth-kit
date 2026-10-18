@@ -7,6 +7,7 @@
  * | 401 | We know you, but this action needs a fresh sign-in (step-up) | `StepUpRequiredError` |
  * | 403 | We know you, and the answer is no (missing capability or group) | `ForbiddenError` |
  * | 403 | You must set up an authenticator code before going further | `MfaEnrollmentRequiredError` |
+ * | 403 | You must choose how you'll sign in (a passkey, or a password and authenticator) first | `FirstCredentialRequiredError` |
  * | 404 | The record isn't yours, or doesn't exist; we don't say which | `NotFoundError` |
  * | 503 | We couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed | `AuthUnavailableError` |
  *
@@ -23,6 +24,7 @@ export type AuthErrorCode =
   | 'step_up_required'
   | 'forbidden'
   | 'mfa_enrollment_required'
+  | 'first_credential_required'
   | 'not_found'
   | 'origin_mismatch'
   | 'auth_unavailable';
@@ -80,6 +82,18 @@ export class MfaEnrollmentRequiredError extends AuthError {
   constructor(message = 'Set up an authenticator code to continue.') {
     super('mfa_enrollment_required', 403, message);
     this.name = 'MfaEnrollmentRequiredError';
+  }
+}
+
+/**
+ * 403: the account has no passkey and no password yet, only emailed codes (an invite or a sign-up
+ * whose first code signed it in, closed before "Choose how you'll sign in next time"). Emailed codes
+ * are the backstop, never the everyday way in (register A1, ADR 0024): send them to the chooser.
+ */
+export class FirstCredentialRequiredError extends AuthError {
+  constructor(message = 'Choose how you’ll sign in next time to continue: a passkey, or a password and an authenticator app.') {
+    super('first_credential_required', 403, message);
+    this.name = 'FirstCredentialRequiredError';
   }
 }
 

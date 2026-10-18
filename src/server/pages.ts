@@ -12,6 +12,12 @@ export interface PageGuardOptions {
   /** Where password users without an authenticator go. Default `/account/authenticator`. */
   mfaSetupPath?: string;
   /**
+   * Where an account with only emailed codes goes to choose a passkey or a password (a page that
+   * renders `ChooseFirstCredential` behind `requireUser({ allowFirstCredentialEnrollment: true })`).
+   * Default `/account/sign-in-method`.
+   */
+  firstCredentialPath?: string;
+  /**
    * Forbidden pages render Next's not-found page by default (works everywhere, and doesn't confirm
    * the page exists). `forbidden` calls Next's `forbidden()`, which needs `experimental.authInterrupts`.
    */
@@ -63,6 +69,9 @@ export async function handlePageAuthError(error: unknown, options: PageGuardOpti
     }
     case 'mfa_enrollment_required':
       nav.redirect(safeRedirect(options.mfaSetupPath ?? '/account/authenticator', '/account/authenticator'));
+      break;
+    case 'first_credential_required':
+      nav.redirect(safeRedirect(options.firstCredentialPath ?? '/account/sign-in-method', '/account/sign-in-method'));
       break;
     case 'forbidden':
     case 'origin_mismatch':

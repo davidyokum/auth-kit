@@ -6,6 +6,7 @@
 import { nextHeadersContext } from '../server/context.js';
 import {
   AuthUnavailableError,
+  FirstCredentialRequiredError,
   ForbiddenError,
   MfaEnrollmentRequiredError,
   NotFoundError,
@@ -76,7 +77,7 @@ export function authFailure(error: unknown): Fail | null {
   if (error instanceof StepUpRequiredError) {
     return fail('step_up_required', 'Please sign in again to confirm this action.', { maxAgeSeconds: error.maxAgeSeconds });
   }
-  if (error instanceof MfaEnrollmentRequiredError) return fail('forbidden', error.message);
+  if (error instanceof MfaEnrollmentRequiredError || error instanceof FirstCredentialRequiredError) return fail('forbidden', error.message);
   if (error instanceof UnauthenticatedError) return fail('unauthenticated', error.message);
   if (error instanceof ForbiddenError) return fail('forbidden', error.message);
   if (error instanceof NotFoundError) return fail('not_found', error.message);

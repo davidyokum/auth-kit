@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthUnavailableError,
   ForbiddenError,
+  FirstCredentialRequiredError,
   MfaEnrollmentRequiredError,
   NotFoundError,
   StepUpRequiredError,
@@ -187,6 +188,7 @@ describe('error responses (401 / 403 / 404 / 503 conventions)', () => {
     [new UnauthenticatedError('token_expired'), 401, 'token_expired', 'Bearer error="invalid_token", error_description="The access token expired"'],
     [new ForbiddenError(), 403, 'forbidden', null],
     [new MfaEnrollmentRequiredError(), 403, 'mfa_enrollment_required', null],
+    [new FirstCredentialRequiredError(), 403, 'first_credential_required', null],
     [new NotFoundError(), 404, 'not_found', null],
     [new AuthUnavailableError(), 503, 'auth_unavailable', null],
   ])('%s', async (error, status, code, wwwAuthenticate) => {

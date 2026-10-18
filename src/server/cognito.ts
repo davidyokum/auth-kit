@@ -109,6 +109,14 @@ export function createCognitoGateway(options: CognitoGatewayOptions): CognitoGat
 }
 
 /**
+ * True when the account has neither a passkey nor a password: only emailed codes, the backstop
+ * (register A1). The standard requires a first credential before the site lets them in.
+ */
+export function needsFirstCredential(factors: UserAuthFactors): boolean {
+  return !factors.configured.includes('PASSWORD') && !factors.configured.includes('WEB_AUTHN');
+}
+
+/**
  * True when the person signs in with a password but has no authenticator (TOTP) yet. The standard
  * requires every password user to have one; Cognito can't require it per method, so the app does.
  */

@@ -35,11 +35,21 @@ export interface MatrixPersonaSpec {
 }
 
 /**
- * A freshly signed-up Member (ADR 0023): no groups, and only the emailed code as a way in (no passkey
- * or password yet), as an account is the moment its first code signs it in. Use it as the
- * `newMember` persona on sign-up sites (`assertAuthMatrix({ signUpSite: true })`).
+ * A freshly signed-up Member (ADR 0023) who has finished signing up: no groups, and the passkey they
+ * chose at "Choose how you'll sign in next time" (the first credential is required, register A1).
+ * Use it as the `newMember` persona on sign-up sites (`assertAuthMatrix({ signUpSite: true })`).
  */
 export const FRESH_SIGN_UP_MEMBER: Readonly<MatrixPersonaSpec> = Object.freeze({
+  groups: Object.freeze([]),
+  factors: Object.freeze({ configured: Object.freeze(['EMAIL_OTP', 'WEB_AUTHN']), mfa: Object.freeze([]) }),
+});
+
+/**
+ * An account with only emailed codes: an invitee or a sign-up whose first code signed it in, closed
+ * before choosing a passkey or a password. The server refuses it everywhere but the chooser (403
+ * `first_credential_required`, M2). Use it as the `codeOnlyMember` persona (required on sign-up sites).
+ */
+export const EMAILED_CODE_ONLY_MEMBER: Readonly<MatrixPersonaSpec> = Object.freeze({
   groups: Object.freeze([]),
   factors: Object.freeze({ configured: Object.freeze(['EMAIL_OTP']), mfa: Object.freeze([]) }),
 });

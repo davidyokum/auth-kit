@@ -58,6 +58,7 @@ export {
 export {
   createCognitoGateway,
   needsTotpEnrollment,
+  needsFirstCredential,
   type CognitoGateway,
   type CognitoGatewayOptions,
   type UserAuthFactors,
@@ -100,6 +101,7 @@ export {
   StepUpRequiredError,
   ForbiddenError,
   MfaEnrollmentRequiredError,
+  FirstCredentialRequiredError,
   NotFoundError,
   AuthUnavailableError,
   AUTH_UNAVAILABLE_DIGEST,

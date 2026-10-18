@@ -3,11 +3,13 @@ import type { ResourceAccessStore, ResourceMembership } from '../resources/types
 import { type ResourceRole, SESSION_POLICY } from '../shared/policy.js';
 import { TtlCache } from './cache.js';
 import type { Capabilities } from './capabilities.js';
-import { type CognitoGateway, type LiveUserState, createCognitoGateway, needsTotpEnrollment } from './cognito.js';
+import { type CognitoGateway, type LiveUserState, createCognitoGateway, needsFirstCredential, needsTotpEnrollment } from './cognito.js';
 import { type PoolConfig, type ResolvedPoolConfig, resolvePoolConfig } from './config.js';
 import { type RequestInput, nextHeadersContext, toRequestContext } from './context.js';
 import {
+  type AuthError,
   AuthUnavailableError,
+  FirstCredentialRequiredError,
   ForbiddenError,
   MfaEnrollmentRequiredError,
   NotFoundError,
@@ -28,6 +30,12 @@ export interface ServerAuthOptions<G extends string = string, C extends string =
    * Default `true`. The TOTP setup page itself passes `allowMfaEnrollment: true`.
    */
   requireTotpForPasswordUsers?: boolean;
+  /**
+   * Refuse accounts with no passkey and no password, only emailed codes
+   * (`FirstCredentialRequiredError`, register A1, ADR 0024). Default `true`. The page that shows
+   * "Choose how you'll sign in next time" passes `allowFirstCredentialEnrollment: true`.
+   */
+  requireFirstCredential?: boolean;
   /** How the TOTP check reads factors: the person's own token (default) or the server's IAM role. */
   factorLookup?: 'access-token' | 'iam';
   /** How long a "has an authenticator" answer is reused. Default 300 seconds. */
@@ -98,11 +106,14 @@ export interface GuardOptions {
 export interface RequireUserOptions extends GuardOptions {
   /** Let a password user without an authenticator through (only the TOTP setup page should). */
   allowMfaEnrollment?: boolean;
+  /** Let an account with only emailed codes through (only the "Choose how you'll sign in" page should). */
+  allowFirstCredentialEnrollment?: boolean;
 }
 
 /**
- * `getUser` applies the same authenticator rule as `requireUser`: a password user without TOTP comes
- * back as `null` (not signed in for the app's purposes) unless `allowMfaEnrollment` is true.
+ * `getUser` applies the same enrollment rules as `requireUser`: an account with no passkey and no
+ * password, or a password user without TOTP, comes back as `null` (not signed in for the app's
+ * purposes) unless the matching `allow…` option is true.
  */
 export type GetUserOptions = RequireUserOptions;
 
@@ -215,6 +226,9 @@ export interface ServerAuth<G extends string = string, C extends string = string
 
 const ENROLLMENT_RECHECK_MS = 30_000;
 
+/** What a signed-in person still has to set up before the site lets them in. */
+type Enrollment = 'first-credential' | 'totp' | 'none';
+
 // Every person's raw access token, across server auth instances, for auth-kit's own server actions
 // that must call a Cognito API as that person (VerifyUserAttribute). Never on the user object, so it
 // can't leak into props or logs; not exported from `auth-kit/server`.
@@ -231,6 +245,7 @@ const OPTION_KEYS = new Set<string>([
   'capabilities',
   'tokenSource',
   'requireTotpForPasswordUsers',
+  'requireFirstCredential',
   'factorLookup',
   'factorCheckTtlSeconds',
   'liveCheckTtlSeconds',
@@ -262,6 +277,7 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
   if (options.factorLookup !== undefined && options.factorLookup !== 'access-token' && options.factorLookup !== 'iam') {
     problems.push(`factorLookup must be 'access-token' or 'iam'`);
   }
+  if (options.requireFirstCredential !== undefined && typeof options.requireFirstCredential !== 'boolean') problems.push('requireFirstCredential must be true or false');
   if (options.requireTotpForPasswordUsers !== undefined && typeof options.requireTotpForPasswordUsers !== 'boolean') {
     problems.push('requireTotpForPasswordUsers must be true or false');
   }
@@ -306,6 +322,7 @@ export function createServerAuth<G extends string, C extends string>(
     });
   const tokenSource = options.tokenSource ?? defaultTokenSource(pool.clientId);
   const requireTotp = options.requireTotpForPasswordUsers ?? true;
+  const requireFirst = options.requireFirstCredential ?? true;
   const factorTtlMs = (options.factorCheckTtlSeconds ?? 300) * 1000;
   const liveTtlMs = (options.liveCheckTtlSeconds ?? SESSION_POLICY.liveCheckTtlSeconds) * 1000;
   const stepUpMax = options.stepUpMaxAgeSeconds ?? SESSION_POLICY.stepUpMaxAgeSeconds;
@@ -319,7 +336,7 @@ export function createServerAuth<G extends string, C extends string>(
       ...(options.factorLookup !== undefined && { factorLookup: options.factorLookup }),
     }));
 
-  const factorCache = new TtlCache<string, boolean>(5000, now);
+  const factorCache = new TtlCache<string, Enrollment>(5000, now);
   const liveCache = new TtlCache<string, LiveUserState>(1000, now);
   // The raw token never sits on the user object, so it can't leak into props or logs.
   const rawTokens = new WeakMap<object, string>();
@@ -394,26 +411,37 @@ export function createServerAuth<G extends string, C extends string>(
   // them means two people can never share an answer even if a token ID repeated.
   const factorKey = (user: Pick<AuthUser<C>, 'sub' | 'tokenId'>) => `${user.sub}\n${user.tokenId}`;
 
-  /** True when this password user still has to set up an authenticator (cached per token). */
-  async function needsEnrollment(user: AuthUser<C>): Promise<boolean> {
-    if (!requireTotp) return false;
+  /**
+   * What this person still has to set up before entering, cached per token: a first credential (only
+   * emailed codes so far), an authenticator (a password without one), or nothing. A factor read that
+   * fails throws (503, or 401 for a revoked session): never read as "nothing to set up".
+   */
+  async function enrollmentNeeded(user: AuthUser<C>): Promise<Enrollment> {
+    if (!requireTotp && !requireFirst) return 'none';
     const key = factorKey(user);
     const cached = factorCache.get(key);
     if (cached !== undefined) return cached;
     const accessToken = rawTokens.get(user);
     if (!accessToken) throw new UnauthenticatedError();
-    const needs = needsTotpEnrollment(await cognito().getUserAuthFactors({ accessToken, username: user.username }));
+    const factors = await cognito().getUserAuthFactors({ accessToken, username: user.username });
+    const needs: Enrollment = requireFirst && needsFirstCredential(factors) ? 'first-credential' : requireTotp && needsTotpEnrollment(factors) ? 'totp' : 'none';
     const untilExpiry = user.expiresAt * 1000 - now();
-    factorCache.set(key, needs, Math.min(needs ? ENROLLMENT_RECHECK_MS : factorTtlMs, untilExpiry));
+    factorCache.set(key, needs, Math.min(needs !== 'none' ? ENROLLMENT_RECHECK_MS : factorTtlMs, untilExpiry));
     return needs;
+  }
+
+  /** The refusal for what's still needed, unless this guard lets that one through. */
+  function enrollmentRefusal(needs: Enrollment, opts: RequireUserOptions): AuthError | null {
+    if (needs === 'first-credential' && opts.allowFirstCredentialEnrollment !== true) return new FirstCredentialRequiredError();
+    if (needs === 'totp' && opts.allowMfaEnrollment !== true) return new MfaEnrollmentRequiredError();
+    return null;
   }
 
   async function getUser(opts: GetUserOptions = {}): Promise<AuthUser<C> | null> {
     const user = await resolveUser(opts);
     if (user instanceof UnauthenticatedError) return null;
-    if (opts.allowMfaEnrollment === true) return user;
     try {
-      return (await needsEnrollment(user)) ? null : user;
+      return enrollmentRefusal(await enrollmentNeeded(user), opts) ? null : user;
     } catch (error) {
       // Cognito says the session was revoked or the account is gone: not signed in.
       if (error instanceof UnauthenticatedError) return null;
@@ -424,7 +452,8 @@ export function createServerAuth<G extends string, C extends string>(
   async function requireUser(opts: RequireUserOptions = {}): Promise<AuthUser<C>> {
     const user = await resolveUser(opts);
     if (user instanceof UnauthenticatedError) throw user;
-    if (opts.allowMfaEnrollment !== true && (await needsEnrollment(user))) throw new MfaEnrollmentRequiredError();
+    const refusal = enrollmentRefusal(await enrollmentNeeded(user), opts);
+    if (refusal) throw refusal;
     return user;
   }
 

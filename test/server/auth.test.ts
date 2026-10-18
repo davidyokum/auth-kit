@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthUnavailableError,
   ForbiddenError,
+  FirstCredentialRequiredError,
   MfaEnrollmentRequiredError,
   NotFoundError,
   StepUpRequiredError,
@@ -134,19 +135,50 @@ describe('requireUser and the authenticator rule', () => {
     expect(user.sub).toBe('pw-only');
   });
 
-  it('lets passkey-only and emailed-code-only (new invitee) people through', async () => {
+  it('lets a passkey-only person through', async () => {
     const { auth, issuer, cognito } = harness();
     cognito.setFactors('passkey', { configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] });
-    cognito.setFactors('invitee', { configured: ['EMAIL_OTP'], mfa: [] });
     await expect(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'passkey' })) })).resolves.toBeTruthy();
-    await expect(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })) })).resolves.toBeTruthy();
   });
 
-  it('can be switched off', async () => {
-    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false });
+  it('refuses an account with only emailed codes, the backstop (403 first_credential_required, M2)', async () => {
+    const { auth, issuer, cognito } = harness();
+    // An invitee or a sign-up whose first code signed it in, closed before choosing a passkey or a password.
+    cognito.setFactors('invitee', { configured: ['EMAIL_OTP'], mfa: [] });
+    const error = await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })) }));
+    expect(error).toBeInstanceOf(FirstCredentialRequiredError);
+    expect((error as FirstCredentialRequiredError).status).toBe(403);
+    expect((error as FirstCredentialRequiredError).code).toBe('first_credential_required');
+    // allowMfaEnrollment (the TOTP page) doesn't let it through: that's a different setup.
+    expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })), allowMfaEnrollment: true }))).toBeInstanceOf(FirstCredentialRequiredError);
+    // No factors at all is the same.
+    cognito.setFactors('nothing', { configured: [], mfa: [] });
+    expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'nothing' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
+  });
+
+  it('lets that account reach the chooser with allowFirstCredentialEnrollment, and only that page', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('invitee', { configured: ['EMAIL_OTP'], mfa: [] });
+    const user = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })), allowFirstCredentialEnrollment: true });
+    expect(user.sub).toBe('invitee');
+    // A password user without TOTP isn't let through by the chooser's option.
     cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
-    await expect(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
-    expect(cognito.calls).toHaveLength(0);
+    expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })), allowFirstCredentialEnrollment: true }))).toBeInstanceOf(MfaEnrollmentRequiredError);
+  });
+
+  it('can be switched off, each rule on its own', async () => {
+    const both = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false });
+    both.cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    both.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
+    await expect(both.auth.requireUser({ request: bearer(both.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
+    await expect(both.auth.requireUser({ request: bearer(both.issuer.mintAccessToken({ sub: 'code-only' })) })).resolves.toBeTruthy();
+    expect(both.cognito.calls).toHaveLength(0);
+
+    const totpOff = harness({ requireTotpForPasswordUsers: false });
+    totpOff.cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+    totpOff.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
+    await expect(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
+    expect(await rejection(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'code-only' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
   });
 
   it('caches a passing check per token and re-checks a failing one after 30 seconds', async () => {
@@ -220,8 +252,15 @@ describe('getUser and the authenticator rule (L6)', () => {
     expect(await rejection(auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'down' })) }))).toBeInstanceOf(AuthUnavailableError);
   });
 
-  it('skips the Cognito call when the rule is switched off', async () => {
-    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false });
+  it('returns null for an account with only emailed codes, unless the chooser asks (M2)', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('invitee', { configured: ['EMAIL_OTP'], mfa: [] });
+    expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })) })).toBeNull();
+    expect((await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'invitee' })), allowFirstCredentialEnrollment: true }))?.sub).toBe('invitee');
+  });
+
+  it('skips the Cognito call when both rules are switched off', async () => {
+    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false });
     cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
     expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) })).not.toBeNull();
     expect(cognito.calls).toHaveLength(0);
