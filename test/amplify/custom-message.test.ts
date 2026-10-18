@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { ADMIN_API_CLIENT_ID, type CustomMessageTriggerEvent, SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED, customMessageHandler, customMessageKind } from '../../src/amplify/custom-message.js';
+import {
+  ADMIN_API_CLIENT_ID,
+  CUSTOM_MESSAGE_GATE_ENV,
+  type CustomMessageTriggerEvent,
+  SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED,
+  customMessageHandler,
+  customMessageKind,
+  refusePublicAttributeChange,
+  withAuthKitCustomMessage,
+} from '../../src/amplify/custom-message.js';
 
 const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'help@example.org', codeLifetimeMinutes: 10 });
 
@@ -88,5 +97,35 @@ describe('the custom message trigger refuses email changes through Cognito’s p
     expect(() => customMessageHandler({ siteName: '', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: 'help@example.org' })).toThrow(/siteName/);
     expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: '/sign-in', helpEmail: 'help@example.org' })).toThrow(/absolute URL/);
     expect(() => customMessageHandler({ siteName: 'X', theme: 'osbm', signInUrl: 'https://x.example.org', helpEmail: 'help@example.org', codeLifetimeMinutes: 30 })).toThrow(/3 to 15/);
+  });
+});
+
+describe('withAuthKitCustomMessage: a site’s own wording keeps the refusal (N2)', () => {
+  it('refuses an email change through Cognito’s public API before the site’s handler runs', async () => {
+    const seen: string[] = [];
+    const handler = withAuthKitCustomMessage((e: CustomMessageTriggerEvent) => {
+      seen.push(e.triggerSource);
+      e.response.emailSubject = 'Site wording';
+      return Promise.resolve(e);
+    });
+    await expect(handler(event('CustomMessage_UpdateUserAttribute'))).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    await expect(handler(event('CustomMessage_VerifyUserAttribute'))).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    expect(seen).toEqual([]);
+  });
+
+  it('passes every other event, the server route’s change included, to the site’s handler unchanged', async () => {
+    const handler = withAuthKitCustomMessage((e: CustomMessageTriggerEvent): CustomMessageTriggerEvent => ({ ...e, response: { ...e.response, emailSubject: `Site: ${e.triggerSource}` } }));
+    expect((await handler(event('CustomMessage_Authentication'))).response.emailSubject).toBe('Site: CustomMessage_Authentication');
+    expect((await handler(event('CustomMessage_UpdateUserAttribute', undefined, ADMIN_API_CLIENT_ID))).response.emailSubject).toBe('Site: CustomMessage_UpdateUserAttribute');
+  });
+
+  it('needs a handler, and exposes the refusal on its own for fully custom code', () => {
+    expect(() => withAuthKitCustomMessage(undefined as never)).toThrow(/needs your handler/);
+    expect(() => refusePublicAttributeChange(event('CustomMessage_UpdateUserAttribute'))).toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    expect(() => refusePublicAttributeChange(event('CustomMessage_ForgotPassword'))).not.toThrow();
+  });
+
+  it('pins the marker the preset looks for at synthesis', () => {
+    expect(CUSTOM_MESSAGE_GATE_ENV).toEqual({ AUTH_KIT_CUSTOM_MESSAGE_GATE: 'v1' });
   });
 });

@@ -90,3 +90,5 @@ export {
   type StandardGroup,
   type AmplifyDeploymentType,
 } from '../shared/policy.js';
+// The marker the custom message function carries (checked at synthesis), for amplify/auth/custom-message/resource.ts.
+export { CUSTOM_MESSAGE_GATE_ENV } from './custom-message.js';

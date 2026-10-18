@@ -8,6 +8,7 @@ import {
   PASSWORD_POLICY,
   SESSION_POLICY,
 } from '../shared/policy.js';
+import { CUSTOM_MESSAGE_GATE_ENV } from './custom-message.js';
 import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions, webAclArnRegion } from './options.js';
 import { associateAuthWebAcl, createAuthWebAcl } from './waf.js';
 
@@ -94,6 +95,60 @@ function renderedPool(stack: Stack, pool: CfnUserPool): RenderedPool {
   };
 }
 
+const GATE_KEY = Object.keys(CUSTOM_MESSAGE_GATE_ENV)[0]!;
+const GATE_VALUE = Object.values(CUSTOM_MESSAGE_GATE_ENV)[0]!;
+
+/** A Lambda function construct (an L2 `Function`, or Amplify's `defineFunction` one) anywhere in the app. */
+interface FunctionLike {
+  functionArn: string;
+  node: { defaultChild?: unknown; path: string };
+}
+
+function isFunctionLike(c: unknown): c is FunctionLike {
+  const candidate = c as Partial<FunctionLike> | null;
+  const child = candidate?.node?.defaultChild as { cfnResourceType?: unknown } | undefined;
+  return typeof candidate?.functionArn === 'string' && child?.cfnResourceType === 'AWS::Lambda::Function';
+}
+
+/** The function's environment variables as they'll deploy. */
+function environmentOf(fn: FunctionLike): Record<string, unknown> {
+  const cfn = fn.node.defaultChild as { _toCloudFormation?: () => unknown; environment?: unknown };
+  const stack = Stack.of(cfn as never);
+  const render = cfn._toCloudFormation;
+  if (typeof render === 'function') {
+    const rendered = stack.resolve(render.call(cfn)) as { Resources?: Record<string, { Properties?: { Environment?: { Variables?: Record<string, unknown> } } }> };
+    return Object.values(rendered.Resources ?? {})[0]?.Properties?.Environment?.Variables ?? {};
+  }
+  const env = stack.resolve(cfn.environment) as { variables?: Record<string, unknown>; Variables?: Record<string, unknown> } | undefined;
+  return env?.variables ?? env?.Variables ?? {};
+}
+
+/**
+ * Why the custom message trigger can't be trusted to refuse public-API email changes, or `[]`: its
+ * function is found in the app (the one whose ARN, resolved in the pool's stack, is the trigger's)
+ * and must carry `CUSTOM_MESSAGE_GATE_ENV`, the sign it's `customMessageHandler` or
+ * `withAuthKitCustomMessage`.
+ */
+function customMessageGateProblems(stack: Stack, pool: CfnUserPool): string[] {
+  const target = renderedPool(stack, pool).LambdaConfig?.CustomMessage;
+  if (!target) return []; // Reported by the missing-trigger check.
+  const wanted = JSON.stringify(target);
+  const fn = stack.node.root.node.findAll().find((c): c is FunctionLike & typeof c => isFunctionLike(c) && JSON.stringify(stack.resolve(c.functionArn)) === wanted);
+  if (!fn) {
+    return [
+      "auth-kit: can't find the function the custom message trigger runs in this app, so can't check it refuses public-API email changes (ADR 0023). " +
+        'Wire a function defined in this app, built with customMessageHandler or withAuthKitCustomMessage from auth-kit/amplify/custom-message.',
+    ];
+  }
+  return environmentOf(fn)[GATE_KEY] === GATE_VALUE
+    ? []
+    : [
+        `auth-kit: the custom message trigger's function (${fn.node.path}) doesn't carry ${GATE_KEY}=${GATE_VALUE}. It's a security control (it refuses email changes made through ` +
+          "Cognito's public API, ADR 0023): build it with customMessageHandler, or wrap your own wording with withAuthKitCustomMessage, and give the function " +
+          'CUSTOM_MESSAGE_GATE_ENV as its environment.',
+      ];
+}
+
 /** True when the pool's synthesized properties, overrides included, keep Cognito's own SignUp off. */
 function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
   return renderedPool(stack, pool).AdminCreateUserConfig?.AllowAdminCreateUserOnly === true;
@@ -177,7 +232,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   // The custom message trigger is a security control on every pool, not only wording: it refuses an
   // email change made through Cognito's public API (ADR 0023, H1). Synthesis fails without it.
   cfnUserPool.node.addValidation({
-    validate: () => (renderedPool(stack, cfnUserPool).LambdaConfig?.CustomMessage ? [] : [NO_CUSTOM_MESSAGE_TRIGGER]),
+    validate: () => (renderedPool(stack, cfnUserPool).LambdaConfig?.CustomMessage ? customMessageGateProblems(stack, cfnUserPool) : [NO_CUSTOM_MESSAGE_TRIGGER]),
   });
   if (o.accountCreation.mode === 'domains') {
     cfnUserPool.node.addValidation({

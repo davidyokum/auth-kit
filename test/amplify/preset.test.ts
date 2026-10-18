@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type AuthStandardOptions,
   AuthStandardConfigError,
+  CUSTOM_MESSAGE_GATE_ENV,
   applyAuthStandard,
   createSharedAuthWebAcl,
   formatSender,
@@ -27,9 +28,9 @@ const BASE: AuthStandardOptions = {
 /** `none` = plain CDK, no Amplify context. */
 type DeploymentType = 'branch' | 'sandbox' | 'standalone' | 'none';
 
-/** Every pool needs the custom message trigger (ADR 0023): a stand-in function wired as the site would. */
-function addCustomMessageTrigger(auth: AmplifyAuth, stack: Stack) {
-  const fn = new LambdaFunction(stack, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;') });
+/** Every pool needs the custom message trigger (ADR 0023): a stand-in function wired as the site would, with the gate's marker. */
+function addCustomMessageTrigger(auth: AmplifyAuth, stack: Stack, environment: Record<string, string> = { ...CUSTOM_MESSAGE_GATE_ENV }) {
+  const fn = new LambdaFunction(stack, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;'), environment });
   (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, fn);
 }
 
@@ -426,6 +427,30 @@ describe('account creation (ADR 0023)', () => {
       expect(() => template()).toThrow(/no custom message trigger/);
     }
     expect(() => synth(BASE).template()).not.toThrow();
+  });
+
+  it('fails synthesis when the trigger’s function isn’t auth-kit’s handler or wrapper (no gate marker, N2)', () => {
+    const plain = synth(BASE, { customMessage: false, beforeApply: (auth, stack) => addCustomMessageTrigger(auth, stack, { SOMETHING: 'else' }) });
+    expect(() => plain.template()).toThrow(/doesn't carry AUTH_KIT_CUSTOM_MESSAGE_GATE=v1.*withAuthKitCustomMessage/s);
+    const wrongValue = synth(BASE, { customMessage: false, beforeApply: (auth, stack) => addCustomMessageTrigger(auth, stack, { AUTH_KIT_CUSTOM_MESSAGE_GATE: 'yes' }) });
+    expect(() => wrongValue.template()).toThrow(/doesn't carry/);
+  });
+
+  it('finds the trigger’s function in another stack (Amplify puts functions in their own), and refuses one it can’t see', () => {
+    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main', 'amplify-backend-namespace': 'dexampleapp' } });
+    const functions = new Stack(app, 'Functions');
+    const fn = new LambdaFunction(functions, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;'), environment: { ...CUSTOM_MESSAGE_GATE_ENV } });
+    const authStack = new Stack(app, 'Auth');
+    const auth = new AmplifyAuth(authStack, 'auth', standardAuthProps(BASE) as unknown as AuthProps);
+    (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, fn);
+    applyAuthStandard(auth, BASE);
+    expect(() => app.synth()).not.toThrow();
+
+    const imported = synth(BASE, {
+      customMessage: false,
+      beforeApply: (a, stack) => (a.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, LambdaFunction.fromFunctionArn(stack, 'Elsewhere', `arn:aws:lambda:us-east-1:${'1'.repeat(12)}:function:someone-elses`)),
+    });
+    expect(() => imported.template()).toThrow(/can't find the function the custom message trigger runs/);
   });
 
   it('reads the trigger from the rendered pool: an override that removes it still fails synthesis', () => {

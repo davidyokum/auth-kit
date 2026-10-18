@@ -18,6 +18,11 @@
  * is `CLIENT_ID_NOT_APPLICABLE` for Admin* calls): an email change happens only through auth-kit's
  * server route (`createSelfServiceActions`) or an admin (ADR 0023).
  *
+ * Use the handler as is, or wrap your own wording with `withAuthKitCustomMessage(handler)`, which runs
+ * the same refusal first. Either way, give the function `CUSTOM_MESSAGE_GATE_ENV` as its environment:
+ * the preset finds the trigger's function at synthesis and fails unless it carries that marker, so a
+ * site can't wire some other function and lose the refusal unnoticed.
+ *
  * Each says how long the code works from the same `codeLifetimeMinutes` the preset gives the pool.
  * Cognito's temporary-password invite (the admin pool) keeps the pool's own template. No AWS SDK
  * imports, so it bundles small.
@@ -73,6 +78,37 @@ export function isAdminApiCall(event: Pick<CustomMessageTriggerEvent, 'callerCon
   return event.callerContext?.clientId === ADMIN_API_CLIENT_ID;
 }
 
+/**
+ * The environment the custom message function must carry (`defineFunction({ environment })`): the
+ * preset checks for it at synthesis, as the sign that the function is `customMessageHandler` or
+ * `withAuthKitCustomMessage`. Set it only on a function built with one of them.
+ */
+export const CUSTOM_MESSAGE_GATE_ENV: Readonly<{ AUTH_KIT_CUSTOM_MESSAGE_GATE: 'v1' }> = Object.freeze({ AUTH_KIT_CUSTOM_MESSAGE_GATE: 'v1' });
+
+/**
+ * The refusal on its own: throws (so Cognito fails the call and sends no code) for an attribute
+ * change made through Cognito's public API; returns for everything else.
+ */
+export function refusePublicAttributeChange(event: Pick<CustomMessageTriggerEvent, 'triggerSource' | 'callerContext'>): void {
+  if (ATTRIBUTE_CHANGE_SOURCES.includes(event.triggerSource) && !isAdminApiCall(event)) throw new Error(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+}
+
+/**
+ * A site's own custom message handler with auth-kit's refusal in front: an email change through
+ * Cognito's public API is refused before your code runs; every other event reaches it unchanged.
+ *
+ * ```ts
+ * export const handler = withAuthKitCustomMessage(async (event) => { …your wording…; return event; });
+ * ```
+ */
+export function withAuthKitCustomMessage<E extends CustomMessageTriggerEvent>(handler: (event: E) => E | Promise<E>): (event: E) => Promise<E> {
+  if (typeof handler !== 'function') throw new Error('auth-kit: withAuthKitCustomMessage needs your handler function.');
+  return async (event: E) => {
+    refusePublicAttributeChange(event);
+    return handler(event);
+  };
+}
+
 /** Which email a trigger source gets, given the account's attributes. */
 export type CustomMessageKind = 'sign-in-code' | 'sign-up-code' | 'password-reset' | 'confirm-new-email' | null;
 
@@ -111,8 +147,10 @@ export function customMessageHandler(options: CustomMessageOptions) {
   return <E extends CustomMessageTriggerEvent>(event: E): Promise<E> => {
     // An email change through Cognito's public API: refuse it, so Cognito fails the call and sends no
     // code (ADR 0023). The site's server route uses AdminUpdateUserAttributes, which passes.
-    if (ATTRIBUTE_CHANGE_SOURCES.includes(event.triggerSource) && !isAdminApiCall(event)) {
-      return Promise.reject(new Error(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED));
+    try {
+      refusePublicAttributeChange(event);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED));
     }
     const kind = customMessageKind(event);
     if (kind === null) return Promise.resolve(event);
