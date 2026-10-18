@@ -117,6 +117,12 @@ export function resourceSetup(options: ResourceSetupOptions = {}) {
   };
   const changes: AuditEvent[] = [];
   const errors: string[] = [];
+  /** Items' names, as the app's store would answer `resourceName` (tests add to it). */
+  const itemNames = new Map<string, string>([
+    ['project:p-1', 'Roads 2027'],
+    ['project:p-2', 'Bridges'],
+    ['plan:q-1', 'Q3 plan'],
+  ]);
 
   /** Signs in as one of PEOPLE (or any sub with the given groups). */
   const signIn = (who: PersonKey | { sub: string; groups: string[] }, extra: { authTimeAgoSeconds?: number; enabled?: boolean } = {}) => {
@@ -145,6 +151,7 @@ export function resourceSetup(options: ResourceSetupOptions = {}) {
     requestContext: () => Promise.resolve({ ip: '203.0.113.24', userAgent: 'Test Browser', requestId: 'req-test' }),
     onChange: (e) => void changes.push(e),
     onError: (_e, where) => void errors.push(where),
+    resourceName: ({ type, id }) => Promise.resolve(itemNames.get(`${type}:${id}`)),
     ...options.config,
   });
 
@@ -182,5 +189,5 @@ export function resourceSetup(options: ResourceSetupOptions = {}) {
 
   const roleOf = async (type: string, id: string, sub: string) => (await store.getMembership({ type, id }, sub))?.role ?? null;
 
-  return { h, pool, store, auditLog, actions, timeline, invites, alerts, failures, changes, errors, clock, signIn, signOut, seed, roleOf };
+  return { h, pool, store, auditLog, actions, timeline, invites, alerts, failures, changes, errors, clock, signIn, signOut, seed, roleOf, itemNames };
 }

@@ -2,6 +2,22 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.7-alpha.1] - 2026-10-18
+
+Screens name items by the app's noun and the item's name, never by ID (register rule C5; [ADR 0022, amendment](docs/decisions/0022-resource-roles.md#amendment-2026-10-18-items-by-noun-and-name-never-by-id)). A revision of 0.1.7-alpha: 0.1.8 is the next feature release.
+
+### Fixed
+
+- **Activity lines** named items by key (`project:abc`) and said "item": they now say "the project “Roads 2027”" (or "a project"), from the app's current names (`describeActivity(entry, names, { items })`, `<ActivityLog items>`), else the noun and name recorded on the row, else the type. People without an email on file read "an account with no email on file", never a `sub`.
+- **Results and messages** use the item's name where the app can say it (`resourceName`), else "this project": access changes, refusals, the conflict message ("Who has access to this project changed…"), creating ("Created the project “Roads 2027”."), and `requireResourceRole`'s and `listMyResources`'s 503 messages ("Access to this project couldn't be checked").
+- **The admins' invite alert** no longer shows an item's ID when its name is unknown.
+- **Audit call labels** say the noun ("TransactWriteItems project access", "App: create the project").
+
+### Added
+
+- Access rows record `item: { noun, name }` as of the change. `removeResourceMemberships` returns `message` (what was removed, and which items have no Manager now, by name), and the People page's disable result shows it; its partial-failure error names the items too (`describeAwsError` shows an error's `userMessage`). `itemPhrase`, `ActivityItem`, and `DescribeActivityOptions` from `auth-kit/admin`.
+- `src/admin/invite-core.ts` (internal, shared by every invite flow): documented, with `INVITE_CALLS` (the audit labels) and `removeInvitedAccount` (the undo) beside `createInvitedAccount` and `sendInviteEmail`.
+
 ## [0.1.7-alpha] - 2026-10-18
 
 Resource roles: Manager, Contributor, Reader on one item, combined with the site-wide roles (David's decision; [ADR 0022](docs/decisions/0022-resource-roles.md)). Pre-release. Two renames keep their old names, deprecated, for one release; see Migration.

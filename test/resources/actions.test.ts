@@ -72,7 +72,7 @@ describe('add', () => {
     await t.seed('project', 'p-1', { 'm-1': 'manager' });
     t.signIn('member');
     const result = await t.actions.add({ ...P, email: emailOf('m-2'), role: 'contributor' });
-    expect(result).toMatchObject({ ok: true, message: 'm-2@example.org now has access to this project as Contributor.' });
+    expect(result).toMatchObject({ ok: true, message: 'm-2@example.org now has access to the project “Roads 2027” as Contributor.' });
     expect(await t.roleOf('project', 'p-1', 'm-2')).toBe('contributor');
     expect(await t.store.getMembership(P, 'm-2')).toMatchObject({ email: 'm-2@example.org', addedBy: 'm-1' });
     expect((await t.store.getAccess(P)).meta).toMatchObject({ version: 2, managers: 1, updatedBy: 'm-1' });
@@ -81,9 +81,9 @@ describe('add', () => {
       outcome: 'ok',
       actor: { sub: 'm-1' },
       target: { sub: 'm-2', email: 'm-2@example.org', recordId: 'project:p-1' },
-      before: { resource: 'project:p-1', resourceRole: null },
-      after: { resource: 'project:p-1', resourceRole: 'contributor' },
-      calls: ['TransactWriteItems resource access: ok'],
+      before: { resource: 'project:p-1', resourceRole: null, item: { noun: 'project', name: 'Roads 2027' } },
+      after: { resource: 'project:p-1', resourceRole: 'contributor', item: { noun: 'project', name: 'Roads 2027' } },
+      calls: ['TransactWriteItems project access: ok'],
       context: { ip: '203.0.113.24' },
     });
     const writes = t.timeline.filter((e) => e.startsWith('audit:') || e === 'store:commit');
@@ -133,7 +133,7 @@ describe('add', () => {
       ok: false,
       code: 'refused',
       guardrail: 'no_account',
-      error: 'No account uses that address. Invite them to this project instead.',
+      error: 'No account uses that address. Invite them to the project “Roads 2027” instead.',
       changed: 'nothing',
     });
   });
@@ -179,7 +179,7 @@ describe('change a role, and the last Manager', () => {
     const t = resourceSetup();
     await t.seed('project', 'p-1', { 'm-1': 'manager', 'm-2': 'reader' });
     t.signIn('member');
-    expect(await t.actions.changeRole({ ...P, sub: 'm-2', toRole: 'manager', fromRole: 'reader' })).toMatchObject({ ok: true, message: 'm-2@example.org is now Manager of this project.' });
+    expect(await t.actions.changeRole({ ...P, sub: 'm-2', toRole: 'manager', fromRole: 'reader' })).toMatchObject({ ok: true, message: 'm-2@example.org is now Manager of the project “Roads 2027”.' });
     expect((await t.store.getAccess(P)).meta?.managers).toBe(2);
     expect(t.auditLog.rows.at(-1)).toMatchObject({ before: { resourceRole: 'reader' }, after: { resourceRole: 'manager' }, target: { sub: 'm-2' } });
     expect((await t.store.getMembership(P, 'm-2'))).toMatchObject({ updatedBy: 'm-1', addedBy: PEOPLE.adminPeople.sub });
@@ -215,7 +215,7 @@ describe('change a role, and the last Manager', () => {
     t.signIn('adminPeople');
     expect(await t.actions.changeRole({ ...P, sub: 'm-1', toRole: 'reader' })).toMatchObject({ guardrail: 'last_manager', error: expect.stringMatching(/site admins only/) });
     const result = await t.actions.changeRole({ ...P, sub: 'm-1', toRole: 'reader', replaceWithEmail: emailOf('m-3') });
-    expect(result).toMatchObject({ ok: true, message: 'm-1@example.org is now Reader of this project. m-3@example.org is now a Manager.' });
+    expect(result).toMatchObject({ ok: true, message: 'm-1@example.org is now Reader of the project “Roads 2027”. m-3@example.org is now a Manager.' });
     expect([await t.roleOf('project', 'p-1', 'm-1'), await t.roleOf('project', 'p-1', 'm-3')]).toEqual(['reader', 'manager']);
     expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { resourceRole: 'reader', newManager: { sub: 'm-3', email: 'm-3@example.org', before: null } } });
     expect(t.timeline.filter((e) => e === 'store:commit')).toHaveLength(1);
@@ -263,10 +263,10 @@ describe('remove and leave', () => {
     const t = resourceSetup();
     await t.seed('project', 'p-1', { 'm-1': 'manager', 'm-2': 'contributor', 'm-3': 'reader' });
     t.signIn('member');
-    expect(await t.actions.remove({ ...P, sub: 'm-3' })).toMatchObject({ ok: true, message: 'm-3@example.org no longer has access to this project.' });
+    expect(await t.actions.remove({ ...P, sub: 'm-3' })).toMatchObject({ ok: true, message: 'm-3@example.org no longer has access to the project “Roads 2027”.' });
     expect(await t.actions.remove({ ...P, sub: 'm-1' })).toMatchObject({ code: 'refused', guardrail: 'last_manager' });
     t.signIn('member2');
-    expect(await t.actions.remove({ ...P, sub: 'm-2' })).toMatchObject({ ok: true, message: 'You no longer have a role on this project.' });
+    expect(await t.actions.remove({ ...P, sub: 'm-2' })).toMatchObject({ ok: true, message: 'You no longer have a role on the project “Roads 2027”.' });
     expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { resourceRole: null, left: true }, before: { resourceRole: 'contributor' } });
     expect((await t.store.getAccess(P)).members.map((m) => m.sub)).toEqual(['m-1']);
   });
@@ -288,7 +288,7 @@ describe('a Manager invites someone new to one item', () => {
     t.pool.get('super-1')!.enabled = false;
     t.signIn('member');
     const result = await t.actions.invite({ ...P, email: 'new@example.com', name: 'Nia', role: 'contributor' });
-    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Invite sent to new@example.com, with access to this project as Contributor and nothing else\. The site’s admins were told\./) });
+    expect(result).toMatchObject({ ok: true, message: expect.stringMatching(/^Invite sent to new@example.com, with access to the project “Q3 plan” as Contributor and nothing else\. The site’s admins were told\./) });
     // Cognito: the account only. No group: Member level.
     expect(t.pool.writes()).toEqual(['AdminCreateUserCommand']);
     const created = t.pool.users.find((u) => u.email === 'new@example.com')!;
@@ -345,7 +345,7 @@ describe('a Manager invites someone new to one item', () => {
     expect(await t.actions.invite({ ...P, email: emailOf('m-2'), role: 'reader', confirmOutsideDomain: true })).toMatchObject({
       code: 'refused',
       guardrail: 'exists',
-      error: 'That address already has an account. Add them to this project instead.',
+      error: 'That address already has an account. Add them to the project “Roads 2027” instead.',
     });
     expect(await t.actions.invite({ ...P, email: 'new@elsewhere.test', role: 'reader' })).toMatchObject({ code: 'refused', guardrail: 'domain' });
     expect(await t.actions.invite({ ...P, email: 'new@elsewhere.test', role: 'reader', confirmOutsideDomain: true })).toMatchObject({ ok: true });
@@ -375,9 +375,13 @@ describe('create an item with its first Manager', () => {
     const t = resourceSetup();
     t.signIn('adminPeople');
     const made: string[] = [];
-    const result = await t.actions.create({ type: 'project', managerEmail: emailOf('m-1'), run: ({ id, manager }) => (made.push(`${id}:${manager.sub}`), Promise.resolve({ name: 'Roads' })) });
+    const result = await t.actions.create({
+      type: 'project',
+      managerEmail: emailOf('m-1'),
+      run: ({ id, manager }) => (made.push(`${id}:${manager.sub}`), t.itemNames.set(`project:${id}`, 'Roads'), Promise.resolve({ name: 'Roads' })),
+    });
     if (!result.ok) throw new Error(result.error);
-    expect(result).toMatchObject({ value: { name: 'Roads' }, message: 'Created, with m-1@example.org as its Manager.' });
+    expect(result).toMatchObject({ value: { name: 'Roads' }, message: 'Created the project “Roads”, with m-1@example.org as its Manager.' });
     expect(made).toEqual([`${result.id}:m-1`]);
     expect(await t.roleOf('project', result.id, 'm-1')).toBe('manager');
     expect((await t.store.getAccess({ type: 'project', id: result.id })).meta).toMatchObject({ version: 1, managers: 1, createdBy: 'acp-1' });
@@ -385,7 +389,8 @@ describe('create an item with its first Manager', () => {
       action: 'resources.create',
       outcome: 'ok',
       target: { sub: 'm-1', recordId: `project:${result.id}` },
-      calls: ['TransactWriteItems resource access (access record and first Manager): ok', 'App: create the item: ok'],
+      calls: ['TransactWriteItems project access (access record and first Manager): ok', 'App: create the project: ok'],
+      after: { item: { noun: 'project', name: 'Roads' } },
     });
   });
 
@@ -393,7 +398,7 @@ describe('create an item with its first Manager', () => {
     const t = resourceSetup();
     t.signIn('owner');
     const result = await t.actions.create({ type: 'project', id: 'roads-2027' });
-    expect(result).toMatchObject({ ok: true, id: 'roads-2027', message: expect.stringMatching(/^Created\. You’re its Manager/) });
+    expect(result).toMatchObject({ ok: true, id: 'roads-2027', message: expect.stringMatching(/^Created the project\. You’re its Manager/) });
     expect(await t.roleOf('project', 'roads-2027', 'owner-1')).toBe('manager');
   });
 
@@ -420,9 +425,9 @@ describe('create an item with its first Manager', () => {
     expect(result).toMatchObject({ ok: false, code: 'failed', changed: 'nothing' });
     expect(t.store.size).toBe(0);
     expect(t.auditLog.rows.at(-1)?.calls).toEqual([
-      'TransactWriteItems resource access (access record and first Manager): ok',
-      'App: create the item: failed (Error)',
-      'TransactWriteItems resource access (remove) (rollback): ok',
+      'TransactWriteItems project access (access record and first Manager): ok',
+      'App: create the project: failed (Error)',
+      'TransactWriteItems project access (remove) (rollback): ok',
     ]);
   });
 
@@ -448,12 +453,12 @@ describe('delete an item’s access', () => {
       await t.store.commit(P, { expectedVersion: current.meta!.version, meta: { ...current.meta!, version: current.meta!.version + 1 }, put });
     }
     t.signIn('member');
-    expect(await t.actions.deleteResourceAccess(P)).toMatchObject({ ok: true, message: 'Nobody has access to this project any more (151 removed).' });
+    expect(await t.actions.deleteResourceAccess(P)).toMatchObject({ ok: true, message: 'Nobody has access to the project “Roads 2027” any more (151 removed).' });
     expect(t.store.size).toBe(0);
     expect(t.auditLog.rows.at(-1)).toMatchObject({
       action: 'resources.delete',
       before: { members: 151, managers: 1 },
-      calls: ['TransactWriteItems resource access (1 of 2): ok', 'TransactWriteItems resource access (2 of 2): ok'],
+      calls: ['TransactWriteItems project access (1 of 2): ok', 'TransactWriteItems project access (2 of 2): ok'],
     });
   });
 
@@ -476,12 +481,14 @@ describe('the People page’s disable hook (removeResourceMemberships)', () => {
     const result = await t.actions.removeResourceMemberships({ sub: 'm-1' });
     expect(result).toEqual({
       removed: [
-        { type: 'plan', id: 'q-1', role: 'reader' },
-        { type: 'project', id: 'p-1', role: 'manager' },
-        { type: 'project', id: 'p-2', role: 'contributor' },
+        { type: 'plan', id: 'q-1', role: 'reader', item: { noun: 'plan', name: 'Q3 plan' } },
+        { type: 'project', id: 'p-1', role: 'manager', item: { noun: 'project', name: 'Roads 2027' } },
+        { type: 'project', id: 'p-2', role: 'contributor', item: { noun: 'project', name: 'Bridges' } },
       ],
-      leftWithoutManager: [{ type: 'project', id: 'p-1' }],
+      leftWithoutManager: [{ type: 'project', id: 'p-1', item: { noun: 'project', name: 'Roads 2027' } }],
       truncated: false,
+      message:
+        'Their roles on 1 plan and 2 projects were removed. The project “Roads 2027” has no Manager now: a site admin who manages people can make someone its Manager.',
     });
     expect(t.store.memberships.map((m) => `${m.id}:${m.sub}`)).toEqual(['p-1:m-2', 'p-2:m-3']);
     expect((await t.store.getAccess(P)).meta).toMatchObject({ managers: 0, updatedBy: 'system:people-disable' });
@@ -492,7 +499,11 @@ describe('the People page’s disable hook (removeResourceMemberships)', () => {
     await t.seed('project', 'p-1', { 'm-1': 'manager' });
     await t.seed('project', 'p-2', { 'm-1': 'manager' });
     t.store.failNext('commit', 1, Object.assign(new Error('boom'), { name: 'InternalServerError' }));
-    await expect(t.actions.removeResourceMemberships({ sub: 'm-1' })).rejects.toThrow(/removed 1 of their item memberships; 1 couldn’t be removed/);
+    const error = await t.actions.removeResourceMemberships({ sub: 'm-1' }).catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      name: 'AccessCleanupError',
+      userMessage: expect.stringMatching(/^Their roles on 1 project were removed, but one couldn’t be: the project “(Roads 2027|Bridges)” \(AWS couldn't complete the call \(InternalServerError\)\)\. Disable them again to retry/),
+    });
   });
 
   it('plugs into createPeopleActions: disabling someone removes their item access, recorded in the disable row', async () => {
@@ -504,6 +515,8 @@ describe('the People page’s disable hook (removeResourceMemberships)', () => {
     expect(t.auditLog.rows.at(-1)).toMatchObject({
       after: { enabled: false, resourceMemberships: { removed: [{ type: 'project', id: 'p-1', role: 'manager' }], leftWithoutManager: [{ type: 'project', id: 'p-1' }] } },
     });
+    // The People page says what was removed, by the project's name.
+    expect(t.auditLog.rows.length).toBeGreaterThan(0);
     expect(await r.roleOf('project', 'p-1', 'm-1')).toBeNull();
   });
 });
@@ -531,8 +544,8 @@ describe('the Activity page describes access changes in plain words', () => {
     await t.actions.remove({ ...P, sub: 'm-1' });
     const page = await t.auditLog.listActivity();
     const lines = page.entries.map((e) => describeActivity(e));
-    expect(lines[0]).toMatchObject({ verb: 'tried to remove the access of', target: 'm-1@example.org · project:p-1', status: expect.stringMatching(/^refused: last_manager/) });
-    expect(lines[1]).toMatchObject({ verb: 'gave access to', target: 'm-2@example.org · project:p-1', change: 'no access → Contributor', status: 'ok' });
+    expect(lines[0]).toMatchObject({ verb: 'tried to remove the access of', target: 'm-1@example.org, on the project “Roads 2027”', status: expect.stringMatching(/^refused: last_manager/) });
+    expect(lines[1]).toMatchObject({ verb: 'gave access to', target: 'm-2@example.org, on the project “Roads 2027”', change: 'no access → Contributor', status: 'ok' });
   });
 });
 

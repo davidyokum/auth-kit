@@ -128,7 +128,8 @@ describe('the admins’ alert for a Manager’s invite', () => {
     expect(email.html).toContain('Q3 &lt;plan&gt;');
     expect(email.html).not.toContain('<plan>');
     const unnamed = renderResourceInviteAlertEmail({ ...ALERT, item: { type: 'project', id: 'p-9', noun: 'project' } });
-    expect(unnamed.text).toContain('as Contributor of a project (p-9)');
+    expect(unnamed.text).toContain('as Contributor of a project whose name couldn’t be read');
+    expect(unnamed.text + unnamed.html + unnamed.subject).not.toContain('p-9');
   });
 
   it('the SES mailer sends one message to every recipient, once each, or throws with none', async () => {

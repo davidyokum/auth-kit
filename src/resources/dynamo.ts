@@ -176,7 +176,8 @@ export function createDynamoResourceStore(options: DynamoResourceStoreOptions): 
         },
         RESOURCE_POLICY.maxMembersPerResource + 1,
       );
-      if (truncated) throw new Error(`auth-kit: ${ref.type}:${ref.id} has more access items than auth-kit reads (${RESOURCE_POLICY.maxMembersPerResource + 1}).`);
+      // No ID in the message: it can reach a screen through the action that read it.
+      if (truncated) throw new Error(`auth-kit: this item has more access rows than auth-kit reads (${RESOURCE_POLICY.maxMembersPerResource + 1}).`);
       let meta: ResourceMeta | null = null;
       const members: ResourceMembership[] = [];
       for (const item of items) {

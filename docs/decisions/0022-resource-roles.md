@@ -1,6 +1,6 @@
 # 0022. Resource roles: Manager, Contributor, Reader, combined with site roles
 
-- **Status:** Accepted, 2026-10-18 (David's decision). The second layer of [0020](0020-site-wide-roles.md).
+- **Status:** Accepted, 2026-10-18 (David's decision); amended the same day (screens name items by noun and name, below). The second layer of [0020](0020-site-wide-roles.md).
 - **Standard:** 03 §2 Enforcement ("record-ID routes check the record"), Roles and lifecycle; passwords-flow `06-roles-and-resource-access.md`
 
 ## Context
@@ -80,3 +80,14 @@ Not built. The same model maps onto Cedar without changing apps: principals are 
 - Every site has the same words for item access, and one table, one check, one panel, and one audit trail behind them.
 - One more table per site, with point-in-time recovery: near zero cost at these sizes.
 - The site floor is coarse on purpose: an admin who edits content edits every item. A site that needs an item admins can't see needs a type whose actions withhold the floor (`customActionFloor: 'none'` for its own actions) or a different design; the standard actions always keep it.
+
+## Amendment, 2026-10-18: items by noun and name, never by ID
+
+Register rule C5: code and docs say "resource"; screens use the app's noun and a name a person recognizes. The first release still showed "item" and keys like `project:abc` in Activity lines, in a few messages, and in the admins' alert when an item's name was unknown.
+
+- **Every user-facing string goes through the type's noun** (`defineResourceTypes`: `noun`, `nounPlural`) **and the app's name resolver** (`createResourceActions({ resourceName })`). With a name: "the project “Roads 2027”". Without one (no resolver, or it failed): "this project" where the screen is about that item (results, refusals), "a project" where it isn't (Activity lines, emails, the disable summary). An item's ID is never shown; nor is a person's `sub` (people without an email on file read "an account with no email on file").
+- **Access rows carry the item's noun and name as of the change** (`after.item`, and `before.item` where there is a before), so the Activity page needs no lookup and stays readable after an item is renamed or deleted. `describeActivity(entry, names, { items })` and `<ActivityLog items>` take the app's current names by `target.recordId` and prefer them; rows without either show the type as a noun ("a grant application"), and anything else "an item". The audit row keeps `target.recordId` (`type:id`) and `resource` as data.
+- **Messages:** results say "… now has access to the project “Roads 2027” as Contributor."; a conflict says "Who has access to this project changed since the page loaded."; "couldn't check" says "Access to this project couldn't be checked" / "Your projects couldn't be listed"; the audit trail's call labels say "TransactWriteItems project access" and "App: create the project".
+- **The disable hook says what it removed.** `removeResourceMemberships` returns `message` ("Their roles on 2 projects were removed. The project “Roads 2027” has no Manager now: …"), which the People page appends to "is disabled"; a partial failure's message (`AccessCleanupError.userMessage`, which `describeAwsError` shows) names the items the same way.
+- `test/resources/wording.test.ts` walks every result, refusal, failure, email, and Activity line and fails on an ID, a `type:` key, or the words "resource" and "record".
+

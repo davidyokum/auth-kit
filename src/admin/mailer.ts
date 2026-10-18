@@ -252,7 +252,8 @@ export interface ResourceInviteNotifier {
 export function renderResourceInviteAlertEmail(alert: ResourceInviteAlert): RenderedEmail {
   const who = alert.invitedBy.email ?? alert.invitedBy.sub;
   const whom = alert.invited.name ? `${alert.invited.name} (${alert.invited.email})` : alert.invited.email;
-  const what = alert.item.name ? `the ${alert.item.noun} “${alert.item.name}”` : `a ${alert.item.noun} (${alert.item.id})`;
+  // Named by its name, never its ID; without a name, by its noun (the Activity page shows which one).
+  const what = alert.item.name ? `the ${alert.item.noun} “${alert.item.name}”` : `a ${alert.item.noun} whose name couldn’t be read`;
   return rendered(`${alert.siteName}: ${who} invited ${alert.invited.email}`, [
     `${who} invited ${whom} to ${alert.siteName}, as ${RESOURCE_ROLE_LABEL[alert.role]} of ${what}.`,
     '',

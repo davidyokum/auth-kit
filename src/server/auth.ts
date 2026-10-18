@@ -482,7 +482,7 @@ export function createServerAuth<G extends string, C extends string>(
       try {
         membership = await store.getMembership({ type, id }, user.sub);
       } catch (error) {
-        throw new AuthUnavailableError('Access to this item couldn’t be checked right now. Please try again.', { cause: error });
+        throw new AuthUnavailableError(`Access to this ${config.noun} couldn’t be checked right now. Please try again.`, { cause: error });
       }
       if (membership && membership.sub !== user.sub) membership = null;
     }
@@ -521,7 +521,7 @@ export function createServerAuth<G extends string, C extends string>(
     try {
       mine = await store.listForPerson(user.sub, type);
     } catch (error) {
-      throw new AuthUnavailableError('Your items couldn’t be listed right now. Please try again.', { cause: error });
+      throw new AuthUnavailableError(`Your ${config.nounPlural} couldn’t be listed right now. Please try again.`, { cause: error });
     }
     const memberships = mine.memberships.filter((m) => m.sub === user.sub && m.type === type);
     const floor = decideResourceAccess({ ...config, sharedDirectory: false }, { capabilities: user.capabilities, role: null });
