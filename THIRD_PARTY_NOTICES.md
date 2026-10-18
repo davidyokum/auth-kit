@@ -5,8 +5,9 @@ third-party material in its source and build.
 
 ## Lucide icons
 
-`src/client/icons.tsx` draws the fingerprint, mail, chevron, back, info, alert, check, copy, help, and
-refresh icons from [Lucide](https://lucide.dev), under the ISC License:
+`src/client/icons.tsx` draws icons from [Lucide](https://lucide.dev), as published in lucide-react
+0.475.0: fingerprint, mail, chevron-right, arrow-left, info, and check as drawn there; circle-alert,
+circle-help, copy, and refresh-cw adapted (simplified paths). Under the ISC License:
 
 ```
 ISC License

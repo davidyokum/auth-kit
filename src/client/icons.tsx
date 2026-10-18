@@ -1,6 +1,8 @@
 /*!
- * Icons for the sign-in screens. `fingerprint`, `mail`, `chevron`, `back`, `info`, `alert`, `check`,
- * `copy`, `help`, and `refresh` are from Lucide (https://lucide.dev), under the ISC License:
+ * Icons for the sign-in screens, from Lucide (https://lucide.dev) as published in lucide-react 0.475.0:
+ * `fingerprint`, `mail`, `chevron` (chevron-right), `back` (arrow-left), `info`, and `check` as drawn
+ * there; `alert` (circle-alert), `help` (circle-help), `copy`, and `refresh` (refresh-cw) adapted
+ * (simplified paths). Under the ISC License:
  *
  * ISC License
  * Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All
