@@ -484,7 +484,7 @@ describe('the People page’s disable hook (removeResourceMemberships)', () => {
       truncated: false,
     });
     expect(t.store.memberships.map((m) => `${m.id}:${m.sub}`)).toEqual(['p-1:m-2', 'p-2:m-3']);
-    expect((await t.store.getAccess(P)).meta?.managers).toBe(0);
+    expect((await t.store.getAccess(P)).meta).toMatchObject({ managers: 0, updatedBy: 'system:people-disable' });
   });
 
   it('throws, after trying every one, when some can’t be removed (the disable is then "partly done")', async () => {

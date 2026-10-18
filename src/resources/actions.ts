@@ -253,6 +253,9 @@ interface Acting<C extends string> {
 
 const ACCESS_CALL = 'TransactWriteItems resource access';
 
+/** Who the access record says made the change when the People page's disable removes memberships. */
+const DISABLE_ACTOR = 'system:people-disable';
+
 /** Steps that just run: for a commit made inside another step (an undo) or outside any audited change. */
 const directSteps = (): ChangeSteps => ({ call: (_label, fn) => fn(), rollback: () => Promise.resolve(true), changed: [] });
 
@@ -487,7 +490,7 @@ export function createResourceActions<G extends string, C extends string>(config
       case 'failed': {
         const missing = run.result === undefined;
         if (missing) report(run.resultError, 'audit: result write failed');
-        if (run.error instanceof StaleAccessError) return fail('stale', run.error.message, { auditId: run.intent.id });
+        if (run.error instanceof StaleAccessError && !run.changed) return fail('stale', run.error.message, { auditId: run.intent.id });
         const why =
           run.error instanceof InviteUndoneError || run.error instanceof InviteMisconfiguredError
             ? run.error.message
@@ -1160,7 +1163,7 @@ export function createResourceActions<G extends string, C extends string>(config
             done = true;
             break;
           }
-          const after = await commitChange(steps, ref, current, { delete: [person.sub] }, person.sub);
+          const after = await commitChange(steps, ref, current, { delete: [person.sub] }, DISABLE_ACTOR);
           removed.push({ type: m.type, id: m.id, role: mine.role });
           if (mine.role === 'manager' && countManagers(after.members) === 0) leftWithoutManager.push(ref);
           done = true;
