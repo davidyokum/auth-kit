@@ -19,7 +19,7 @@ export interface EnvironmentRibbonInput {
   poolIsSandbox: boolean | null;
   /** Why the check couldn't run, shown when `poolIsSandbox` is `null`. */
   poolCheckError?: string | null;
-  /** The signed-in persona's label ("Editor"); shown as "Editor (test)". */
+  /** The signed-in persona's label ("Admin Content"); shown as "Admin Content (test)". */
   persona?: string | null;
   /** Someone signed in who isn't a persona (shown as given, without "(test)"). */
   signedInAs?: string | null;
@@ -138,7 +138,7 @@ export function environmentMetadata(
   return { title: withPrefix(ribbon.titlePrefix, base), icons: { icon: [{ url: environmentFavicon(ribbon.tone), type: 'image/svg+xml' }] } };
 }
 
-/** The tab title and favicon while an admin uses View as: "Viewing as Editor · Reports". */
+/** The tab title and favicon while an admin uses View as: "Viewing as Admin Content · Reports". */
 export function viewAsMetadata(viewingAs: string, base?: string | { template?: string; default?: string }): TitleMetadata {
   return { title: withPrefix(`Viewing as ${viewingAs} · `, base), icons: { icon: [{ url: environmentFavicon('viewAs'), type: 'image/svg+xml' }] } };
 }

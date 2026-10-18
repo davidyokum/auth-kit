@@ -204,7 +204,7 @@ const MAX_LOG = 256 * 1024;
  * ```ts
  * // vitest globalSetup, or a beforeAll
  * const server = await startMatrixServer({
- *   personas: { member: {}, otherMember: {}, admin: { groups: ['admin'] }, noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } } },
+ *   personas: { member: {}, otherMember: {}, admin: { groups: ['admin-content-people'] }, noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } } },
  *   env: { APP_DEV_ORIGIN: '…' },
  * });
  * await assertAuthMatrix({ baseUrl: server.baseUrl, personas: server.cookiePersonas, … });

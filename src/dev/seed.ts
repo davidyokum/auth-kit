@@ -58,7 +58,7 @@ export interface SeedPersonasOptions {
 export interface SeededPersona {
   key: string;
   email: string;
-  /** What changed, e.g. `created`, `password set`, `added to editor`, `authenticator enrolled`, `verified`. */
+  /** What changed, e.g. `created`, `password set`, `added to admin-content`, `authenticator enrolled`, `verified`. */
   actions: string[];
 }
 

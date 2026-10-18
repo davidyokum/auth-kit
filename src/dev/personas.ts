@@ -31,7 +31,7 @@ export interface Persona {
   groups: string[];
   /** The menu and ribbon label, shown with "(test)". Default: from the key ("Member 2"). */
   label?: string;
-  /** Extra user attributes, for pools that require them (e.g. `{ "name": "Editor Test" }`). */
+  /** Extra user attributes, for pools that require them (e.g. `{ "name": "Content Admin Test" }`). */
   attributes?: Record<string, string>;
 }
 
