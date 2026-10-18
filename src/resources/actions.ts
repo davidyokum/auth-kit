@@ -861,6 +861,16 @@ export function createResourceActions<G extends string, C extends string>(config
     } catch (error) {
       report(error, 'resources: resourceName');
     }
+    // The invite email and the alert say who invited them: from the token's profile, else Cognito.
+    let inviterEmail = who.actor.email;
+    if (inviterEmail === undefined) {
+      try {
+        inviterEmail = (await cognito().findBySub(who.actor.sub))?.email || undefined;
+      } catch (error) {
+        report(error, 'cognito: inviter email');
+      }
+    }
+    const invitedBy = { sub: who.actor.sub, ...(inviterEmail !== undefined && { email: inviterEmail }) };
     const plannedExpiry = inviteExpiresAt(new Date(now()));
     const run = await runAudited(
       auditLog,
@@ -906,7 +916,7 @@ export function createResourceActions<G extends string, C extends string>(config
             siteName: config.siteName,
             recipients,
             invited: person,
-            invitedBy: who.actor,
+            invitedBy,
             item: { type: ref.type, id: ref.id, noun: who.config.noun, ...(itemName !== undefined && { name: itemName }) },
             role,
             at: new Date(now()),
@@ -926,7 +936,7 @@ export function createResourceActions<G extends string, C extends string>(config
                 siteName: config.siteName,
                 signInUrl: signInUrl.toString(),
                 expiresAt,
-                item: { noun: who.config.noun, ...(itemName !== undefined && { name: itemName }), role, ...(who.actor.email !== undefined && { invitedBy: who.actor.email }) },
+                item: { noun: who.config.noun, ...(itemName !== undefined && { name: itemName }), role, ...(inviterEmail !== undefined && { invitedBy: inviterEmail }) },
               });
             } catch (error) {
               throw new InviteUndoneError('email', error, await undo());
