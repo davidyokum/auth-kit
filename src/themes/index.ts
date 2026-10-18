@@ -71,8 +71,10 @@ export interface ThemeHelp {
   named: boolean;
   /** How the team confirms it's you before resetting anything: "on Teams or by phone". */
   verify: string;
-  /** Who helps with the email account, device, or app itself: "your agency’s IT help desk". */
+  /** Who helps with the email account or the authenticator app itself: "your agency’s IT help desk". */
   itDesk: string;
+  /** Who helps when the device or browser itself isn't working (the passkey help): "the device maker’s support" on personal sites. */
+  devDesk: string;
   /** Offer "Not sure an email is really from us? Ask {owner} on Teams." (OSBM). */
   teamsCheck: boolean;
 }
@@ -149,7 +151,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'NC OSBM',
     footer: 'This site is managed by the NC Office of State Budget and Management',
     emailHint: 'name@osbm.nc.gov',
-    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', teamsCheck: true }),
+    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', devDesk: 'your agency’s IT help desk', teamsCheck: true }),
     authorizedUseLine: 'This is a State of North Carolina system for authorized use.',
   }),
   unc: Object.freeze({
@@ -159,7 +161,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'UNC',
     footer: 'This site is managed by UNC-Chapel Hill',
     emailHint: 'name@unc.edu',
-    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', teamsCheck: false }),
+    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', devDesk: 'the UNC IT help desk', teamsCheck: false }),
     authorizedUseLine: null,
   }),
   personal: Object.freeze({
@@ -174,6 +176,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
       named: false,
       verify: 'by email',
       itDesk: 'your email provider, or your IT help desk if your organization runs your email',
+      devDesk: 'the device maker’s support',
       teamsCheck: false,
     }),
     authorizedUseLine: null,
