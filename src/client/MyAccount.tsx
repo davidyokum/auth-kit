@@ -11,11 +11,28 @@ import {
   setFirstPassword,
   signOutEverywhere,
 } from './api.js';
+import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { SELF_SERVICE } from './copy.js';
+import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import { type PasswordCheckOptions, PasswordForm } from './PasswordForm.js';
-import { Actions, Button, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
+import { Actions, Button, Field, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
+
+/** What a self-service server action answers (`ActionResult` from `auth-kit/admin` fits). */
+export type SelfServiceResult = { ok: true; message: string } | { ok: false; code: string; error: string };
+type ActionResult = SelfServiceResult;
+
+/**
+ * A member's own account actions on sign-up sites (register D4): the server actions from
+ * `createSelfServiceActions` in `auth-kit/accounts`, passed through the site's own `'use server'` file.
+ */
+export interface MyAccountSelfService {
+  requestEmailChange(input: { newEmail: string }): Promise<ActionResult>;
+  confirmEmailChange(input: { code: string }): Promise<ActionResult>;
+  deleteMyAccount(input: { confirmEmail: string }): Promise<ActionResult>;
+}
 
 export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   passkeysEnabled: boolean;
@@ -30,6 +47,19 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   /** Heading level for the page heading; sections use the next level. Default 1. */
   headingLevel?: HeadingLevel;
   renderQrCode?: (otpauthUri: string) => ReactNode;
+  /**
+   * Sign-up sites (register D4): members change their own email address and delete their own
+   * account. Without it, the email is read-only ("ask the site's admin") and there's no delete.
+   */
+  selfService?: MyAccountSelfService;
+  /** The site's name, for "Delete your {Site} account?". */
+  siteName?: string;
+  /** What happens to a deleted person's items on this site, in one sentence (REPORT §3.1e). */
+  itemsNote?: string;
+  /** Where "Sign in again to confirm" goes when an action needs a recent sign-in: `signInUrl('/account', { reauth: true })`. */
+  stepUpHref?: string;
+  /** Where a deleted account goes afterwards. Default `/`. */
+  deletedPath?: string;
 }
 
 /** A value that loads, with the failure kept and explained instead of shown as "none". */
@@ -215,6 +245,7 @@ export function MyAccount(props: MyAccountProps) {
     passkeySection = (
       <section aria-labelledby={`${errorId}-passkeys`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-passkeys`}>
+          <Icon name="fingerprint" />
           Passkeys
         </Heading>
         <Text classNames={classNames}>Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.</Text>
@@ -346,7 +377,11 @@ export function MyAccount(props: MyAccountProps) {
         ) : (
           <Text classNames={classNames}>{email.value ?? 'No email address on this account.'}</Text>
         )}
-        <Text classNames={classNames}>To change it, ask the site&apos;s admin.</Text>
+        {props.selfService ? (
+          <EmailChange selfService={props.selfService} level={nextLevel(sub)} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} onChanged={reloadEmail} />
+        ) : (
+          <Text classNames={classNames}>{SELF_SERVICE.askAdmin}</Text>
+        )}
       </section>
       {passkeySection}
       <section aria-labelledby={`${errorId}-authenticator`} {...slot(classNames, 'section')}>
@@ -357,6 +392,7 @@ export function MyAccount(props: MyAccountProps) {
       </section>
       <section aria-labelledby={`${errorId}-password`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-password`}>
+          <Icon name="password" />
           Password
         </Heading>
         {passwordBody}
@@ -372,6 +408,215 @@ export function MyAccount(props: MyAccountProps) {
           </Button>
         </Actions>
       </section>
+      {props.selfService ? (
+        <DeleteAccount
+          selfService={props.selfService}
+          email={emailValue}
+          siteName={props.siteName ?? 'this site'}
+          level={sub}
+          classNames={classNames}
+          {...(props.itemsNote !== undefined && { itemsNote: props.itemsNote })}
+          {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })}
+          onDeleted={() => (props.navigate ?? ((path: string) => window.location.assign(path)))(props.deletedPath ?? '/')}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** An action's result, said plainly; "Sign in again to confirm" when it needs a recent sign-in. */
+function ResultLine(props: { result: ActionResult | null; stepUpHref?: string; classNames: StyleProps['classNames'] }) {
+  if (!props.result) return null;
+  if (props.result.ok) {
+    return (
+      <p role="status" {...slot(props.classNames, 'status')}>
+        {props.result.message}
+      </p>
+    );
+  }
+  return (
+    <div role="alert" {...slot(props.classNames, 'error')}>
+      <p>{props.result.error}</p>
+      {props.result.code === 'step_up_required' && props.stepUpHref ? (
+        <p>
+          <a href={props.stepUpHref} {...slot(props.classNames, 'link')}>
+            {SELF_SERVICE.signInAgain}
+          </a>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Change your email address": a code to the new address, then the change (D4; verified before it takes effect). */
+function EmailChange(props: { selfService: MyAccountSelfService; level: HeadingLevel; stepUpHref?: string; onChanged: () => void; classNames: StyleProps['classNames'] }) {
+  const { classNames } = props;
+  const [stage, setStage] = useState<'closed' | 'address' | 'code'>('closed');
+  const [newEmail, setNewEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+
+  async function run(task: () => Promise<ActionResult>, onOk: () => void) {
+    setBusy(true);
+    let r: ActionResult;
+    try {
+      r = await task();
+    } catch {
+      r = { ok: false, code: 'unavailable', error: 'We couldn’t reach the site just now. Try again in a moment.' };
+    }
+    setBusy(false);
+    setResult(r);
+    if (r.ok) onOk();
+  }
+
+  if (stage === 'closed') {
+    return (
+      <>
+        <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+        <Actions classNames={classNames}>
+          <Button variant="secondary" classNames={classNames} onClick={() => (setResult(null), setStage('address'))}>
+            {SELF_SERVICE.changeEmail}
+          </Button>
+        </Actions>
+      </>
+    );
+  }
+  return (
+    <div data-auth-kit="change-email" {...slot(classNames, 'section')}>
+      <Heading level={props.level} classNames={classNames}>
+        {SELF_SERVICE.changeEmailHeading}
+      </Heading>
+      <Text classNames={classNames}>{SELF_SERVICE.changeEmailSub}</Text>
+      <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+      {stage === 'address' ? (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) void run(() => props.selfService.requestEmailChange({ newEmail: newEmail.trim() }), () => setStage('code'));
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Field label={SELF_SERVICE.newEmailLabel} type="email" name="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} classNames={classNames} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy} classNames={classNames}>
+              {SELF_SERVICE.sendCode}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setResult(null), setStage('closed'))}>
+              {SELF_SERVICE.cancel}
+            </Button>
+          </Actions>
+        </form>
+      ) : (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy)
+              void run(
+                () => props.selfService.confirmEmailChange({ code: code.trim() }),
+                () => {
+                  setStage('closed');
+                  setCode('');
+                  setNewEmail('');
+                  // New tokens carry the new address.
+                  void refreshSession().catch(() => undefined).then(props.onChanged);
+                },
+              );
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Field label={SELF_SERVICE.codeLabel} name="one-time-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} classNames={classNames} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy} classNames={classNames}>
+              {SELF_SERVICE.confirm}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setResult(null), setStage('closed'))}>
+              {SELF_SERVICE.cancel}
+            </Button>
+          </Actions>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/** "Delete your {Site} account?" (REPORT §3.1e): a recent sign-in and the address typed out; never the owner (the server refuses). */
+function DeleteAccount(props: {
+  selfService: MyAccountSelfService;
+  email: string | undefined;
+  siteName: string;
+  itemsNote?: string;
+  level: HeadingLevel;
+  stepUpHref?: string;
+  onDeleted: () => void;
+  classNames: StyleProps['classNames'];
+}) {
+  const { classNames } = props;
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  return (
+    <section data-auth-kit="delete-account" {...slot(classNames, 'section')}>
+      <Heading level={props.level} classNames={classNames}>
+        {open ? SELF_SERVICE.deleteConfirmHeading({ siteName: props.siteName }) : SELF_SERVICE.deleteHeading}
+      </Heading>
+      {open ? (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (busy) return;
+            setBusy(true);
+            void props.selfService
+              .deleteMyAccount({ confirmEmail: typed.trim() })
+              .catch((): ActionResult => ({ ok: false, code: 'unavailable', error: 'We couldn’t reach the site just now. Try again in a moment.' }))
+              .then((r) => {
+                setBusy(false);
+                setResult(r);
+                if (r.ok) props.onDeleted();
+              });
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Text classNames={classNames}>
+            {SELF_SERVICE.deleteConfirmSub}
+            {props.itemsNote ? ` ${props.itemsNote}` : ''}
+          </Text>
+          <Field
+            label={SELF_SERVICE.deleteConfirmLabel}
+            type="email"
+            name="confirm-email"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            {...(props.email !== undefined && { placeholder: props.email })}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            classNames={classNames}
+          />
+          <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy || typed.trim() === ''} classNames={classNames} data-danger="">
+              {SELF_SERVICE.deleteButton}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setOpen(false), setResult(null), setTyped(''))}>
+              {SELF_SERVICE.keep}
+            </Button>
+          </Actions>
+        </form>
+      ) : (
+        <>
+          <Text classNames={classNames}>{SELF_SERVICE.deleteIntro}</Text>
+          <Actions classNames={classNames}>
+            <Button variant="secondary" classNames={classNames} onClick={() => setOpen(true)}>
+              {SELF_SERVICE.deleteButton}
+            </Button>
+          </Actions>
+        </>
+      )}
+    </section>
   );
 }

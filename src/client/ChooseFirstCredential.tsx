@@ -1,8 +1,30 @@
-import { type ReactNode, useId, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { registerPasskey, setFirstPassword } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
-import { type PasswordCheckOptions, PasswordForm } from './PasswordForm.js';
-import { Actions, Button, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback, useFocusOnViewChange } from './ui.js';
+import { ERRORS, FIRST_VISIT } from './copy.js';
+import { Icon } from './icons.js';
+import { SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
+import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
+import {
+  Actions,
+  AltLinks,
+  Button,
+  ErrorSummary,
+  Heading,
+  type HeadingLevel,
+  HiddenUsername,
+  PasswordField,
+  StatusRegion,
+  type StyleProps,
+  Text,
+  Wait,
+  slot,
+  useFeedback,
+  useFocusOnViewChange,
+} from './ui.js';
+
+/** How the person chose to sign in next time. */
+export type FirstCredential = 'passkey' | 'password';
 
 export interface ChooseFirstCredentialProps extends StyleProps, PasswordCheckOptions {
   passkeysEnabled: boolean;
@@ -10,103 +32,184 @@ export interface ChooseFirstCredentialProps extends StyleProps, PasswordCheckOpt
   issuer: string;
   /** The account's email (for password managers and the authenticator label). */
   accountName?: string;
-  /** Called when a passkey is saved, or a password and authenticator are both set. */
-  onDone: () => void;
-  /** Shows "Not now". The person keeps signing in with emailed codes until they choose. */
-  onSkip?: () => void;
+  /** Called once a passkey is saved, or a password and an authenticator are both set. */
+  onDone: (how: FirstCredential) => void;
   headingLevel?: HeadingLevel;
   renderQrCode?: (otpauthUri: string) => ReactNode;
 }
 
-type Stage = 'choose' | 'password' | 'authenticator';
+type Stage = 'choose' | 'create-passkey' | 'create-password' | 'add-totp';
 
 /**
- * First sign-in after an invite (the emailed code already proved the address): "Save a passkey" in
- * one click, or "Set a password" followed by the authenticator, which isn't optional.
+ * "Choose how you'll sign in next time" (REPORT §3.1 step 4, Card Studio v4; register A1): after the
+ * first emailed code from an invite or a sign-up, the person must choose. There's no "Not now": an
+ * account left on emailed codes alone would make the backstop the everyday way in.
+ *
+ * - **Passkey (recommended)**: "Create a passkey", and the browser's own window is the step.
+ * - **Password and authenticator app**: "Create a password", then "Add an authenticator app" (the
+ *   authenticator isn't optional for a password, ADR 0002).
+ *
+ * Before passkeys are on (no final domain yet), it goes straight to the password.
  */
 export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
   const { classNames, passkeysEnabled } = props;
-  const errorId = useId();
+  const uid = useId();
   const fb = useFeedback();
-  const [stage, setStage] = useState<Stage>(passkeysEnabled ? 'choose' : 'password');
+  const [stage, setStage] = useState<Stage>(passkeysEnabled ? 'choose' : 'create-password');
+  const [passkeyFailed, setPasskeyFailed] = useState(false);
+  const [password, setPassword] = useState('');
   const level = props.headingLevel ?? 2;
   const rootRef = useRef<HTMLDivElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const started = useRef(0);
   useFocusOnViewChange(rootRef, stage);
+  const { set } = fb;
 
-  async function savePasskey() {
-    const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: 'Waiting for your passkey…' });
+  // The passkey screen opens the browser's window as soon as it shows (the window is the step).
+  const [passkeyAttempt, setPasskeyAttempt] = useState(0);
+  useEffect(() => {
+    if (stage !== 'create-passkey' || started.current === passkeyAttempt + 1) return;
+    started.current = passkeyAttempt + 1;
+    setPasskeyFailed(false);
+    void fb.run(registerPasskey, { context: 'passkey-register' }).then((result) => {
+      if (result.ok) {
+        set({ status: 'Passkey saved.' });
+        props.onDone('passkey');
+      } else {
+        setPasskeyFailed(true);
+      }
+    });
+    // fb.run and set are stable; onDone is read when the prompt finishes.
+  }, [stage, passkeyAttempt]);
+
+  function go(next: Stage) {
+    set({ error: null, field: null, status: null });
+    setStage(next);
+  }
+
+  async function savePassword(event: FormEvent) {
+    event.preventDefault();
+    if (fb.busy) return;
+    const problem = newPasswordProblem(password);
+    if (problem) {
+      set({ error: problem, field: 'password', status: null });
+      passwordRef.current?.focus();
+      return;
+    }
+    set({ busy: true, error: null, field: null, status: 'Checking the password…' });
+    const breached = await breachedPasswordProblem(password, props.checkBreachedPassword);
+    if (breached) {
+      set({ busy: false, error: breached, field: 'password', status: null });
+      passwordRef.current?.focus();
+      return;
+    }
+    set({ busy: false, status: null });
+    const result = await fb.run(() => setFirstPassword(password), { context: 'set-password', busyStatus: 'Saving…' });
     if (result.ok) {
-      fb.set({ status: 'Passkey saved.' });
-      props.onDone();
+      setPassword('');
+      go('add-totp');
+    } else {
+      set({ field: 'password' });
     }
   }
 
   let body: ReactNode;
-  if (stage === 'authenticator') {
+  if (stage === 'add-totp') {
     body = (
       <AuthenticatorSetup
         issuer={props.issuer}
         {...(props.accountName !== undefined && { accountName: props.accountName })}
-        intro="You'll sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute."
         headingLevel={level}
-        onDone={props.onDone}
+        onDone={() => props.onDone('password')}
         {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
         classNames={classNames}
       />
     );
-  } else if (stage === 'password') {
+  } else if (stage === 'create-password') {
+    const passwordId = `${uid}-new-password`;
     body = (
-      <>
-        <PasswordForm
-          heading="Set a password"
-          intro="Next you'll add an authenticator app, so sign-in takes your password and a 6-digit code."
-          headingLevel={level}
-          {...(props.accountName !== undefined && { email: props.accountName })}
-          submitLabel="Save password"
-          context="set-password"
-          onSubmit={({ newPassword }) => setFirstPassword(newPassword)}
-          onDone={() => setStage('authenticator')}
-          {...(passkeysEnabled && { onCancel: () => setStage('choose') })}
-          {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
+      <form noValidate onSubmit={(e) => void savePassword(e)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
+        <ErrorSummary error={fb.error} fieldId={fb.field === 'password' ? passwordId : undefined} classNames={classNames} />
+        <Heading level={level} classNames={classNames}>
+          {FIRST_VISIT.createPasswordHeading}
+        </Heading>
+        <Text classNames={classNames}>{FIRST_VISIT.createPasswordSub}</Text>
+        {props.accountName !== undefined ? <HiddenUsername email={props.accountName} /> : null}
+        <PasswordField
+          id={passwordId}
+          label={FIRST_VISIT.newPasswordLabel}
+          name="new-password"
+          autoComplete={SIGN_IN_AUTOCOMPLETE.newPassword}
+          minLength={15}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          invalid={fb.field === 'password'}
+          error={fb.field === 'password' ? fb.error : null}
+          inputRef={passwordRef}
           classNames={classNames}
         />
-        {props.onSkip && !passkeysEnabled ? (
-          <Actions classNames={classNames}>
-            <Button variant="link" classNames={classNames} onClick={props.onSkip}>
-              Not now
-            </Button>
-          </Actions>
-        ) : null}
-      </>
+        <Actions classNames={classNames}>
+          <Button type="submit" disabled={fb.busy} classNames={classNames}>
+            Continue
+          </Button>
+        </Actions>
+        {passkeysEnabled ? <AltLinks links={[{ icon: 'fingerprint', label: 'Use a passkey instead', onClick: () => go('create-passkey'), disabled: fb.busy }]} classNames={classNames} /> : null}
+        <StatusRegion status={fb.status} classNames={classNames} />
+      </form>
+    );
+  } else if (stage === 'create-passkey') {
+    body = (
+      <div {...slot(classNames, 'form')}>
+        <ErrorSummary error={passkeyFailed ? ERRORS.passkeyCreateFailed : null} classNames={classNames} />
+        <Heading level={level} classNames={classNames}>
+          {FIRST_VISIT.createPasskeyHeading}
+        </Heading>
+        <Text classNames={classNames}>{FIRST_VISIT.createPasskeySub}</Text>
+        {passkeyFailed ? null : <Wait label={FIRST_VISIT.waitingForDevice} classNames={classNames} />}
+        <Actions classNames={classNames}>
+          <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={() => setPasskeyAttempt((n) => n + 1)}>
+            Try again
+          </Button>
+        </Actions>
+        <Text classNames={classNames}>{FIRST_VISIT.passkeyOnPhone}</Text>
+        <AltLinks links={[{ icon: 'password', label: 'Use a password instead', onClick: () => go('create-password'), disabled: fb.busy }]} classNames={classNames} />
+        <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>
+      </div>
     );
   } else {
     body = (
-      <>
+      <div {...slot(classNames, 'form')}>
         <Heading level={level} classNames={classNames}>
-          Finish setting up your account
+          {FIRST_VISIT.chooseHeading}
         </Heading>
-        <Text classNames={classNames}>Choose how you&apos;ll sign in next time, so you don&apos;t need an emailed code.</Text>
-        <LiveRegions classNames={classNames} errorId={errorId} error={fb.error} status={fb.status} />
-        <Actions classNames={classNames}>
-          <Button classNames={classNames} disabled={fb.busy} onClick={() => void savePasskey()}>
-            Save a passkey
+        <Text classNames={classNames}>{FIRST_VISIT.chooseSub}</Text>
+        <section aria-labelledby={`${uid}-passkey`} data-recommended="" {...slot(classNames, 'choice')}>
+          <h2 id={`${uid}-passkey`}>
+            <Icon name="fingerprint" />
+            {FIRST_VISIT.passkeyOption} <span>{FIRST_VISIT.recommended}</span>
+          </h2>
+          <p>{FIRST_VISIT.passkeyOptionText}</p>
+          <Button classNames={classNames} onClick={() => go('create-passkey')}>
+            {FIRST_VISIT.createPasskey}
           </Button>
-          <Button variant="secondary" classNames={classNames} disabled={fb.busy} onClick={() => setStage('password')}>
-            Set a password instead
+        </section>
+        <section aria-labelledby={`${uid}-password`} {...slot(classNames, 'choice')}>
+          <h2 id={`${uid}-password`}>
+            <Icon name="password" />
+            {FIRST_VISIT.passwordOption}
+          </h2>
+          <p>{FIRST_VISIT.passwordOptionText}</p>
+          <Button variant="link" classNames={classNames} onClick={() => go('create-password')}>
+            Use a password instead
           </Button>
-          {props.onSkip ? (
-            <Button variant="link" classNames={classNames} disabled={fb.busy} onClick={props.onSkip}>
-              Not now
-            </Button>
-          ) : null}
-        </Actions>
-        <Text classNames={classNames}>A passkey signs you in with Face ID, Touch ID, your device PIN, or your password manager.</Text>
-      </>
+        </section>
+        <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>
+      </div>
     );
   }
 
   return (
-    <div ref={rootRef} data-auth-kit="choose-first-credential" {...slot(classNames, 'root', props.className)}>
+    <div ref={rootRef} data-auth-kit="choose-first-credential" data-auth-kit-view={stage} {...slot(classNames, 'content', props.className)}>
       {body}
     </div>
   );

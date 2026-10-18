@@ -67,12 +67,17 @@ describe('module boundaries', () => {
       .filter((name) => /\.tsx?$/.test(name))
       .map((name) => `src/client/${name}`);
     expect(files.length).toBeGreaterThan(5);
-    // Its own files, shared policy, React, Amplify, and safeRedirect (pure; shared with the server).
-    const allowed = /^(\.\/|\.\.\/shared\/|\.\.\/server\/redirect\.js$|react$|aws-amplify(\/|$))/;
+    // Its own files, shared policy, the themes, React, Amplify, and safeRedirect (pure; shared with the server).
+    const allowed = /^(\.\/|\.\.\/shared\/|\.\.\/themes\/index\.js$|\.\.\/server\/redirect\.js$|react$|aws-amplify(\/|$))/;
     for (const file of files) {
       for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(allowed);
     }
     expect(importsOf('src/server/redirect.ts')).toEqual([]);
+    // The themes are pure: the families' colors and the frozen color math, nothing else.
+    for (const spec of importsOf('src/themes/index.ts')) expect(spec).toMatch(/^\.\.\/backdrops\/(families|types|kernel\/v1\/color)\.js$/);
+    for (const file of ['src/shared/account-creation.ts', 'src/shared/emails.ts', 'src/shared/policy.ts']) {
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\/|\.\.\/themes\/index\.js$)/);
+    }
     expect(importsOf('src/shared/unavailable.ts')).toEqual([]);
     for (const spec of importsOf('src/shared/not-implemented.ts')) expect(spec).toBe('never');
   });

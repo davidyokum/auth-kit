@@ -96,22 +96,23 @@ export async function decoyPasskeyPrompt(): Promise<never> {
   throw named('PasskeyAuthenticationCanceled', 'Passkey authentication has been canceled.');
 }
 
-/** Cognito's sign-in session (and so an emailed code) lasts 3 minutes (`AuthSessionValidity`). */
+/** Cognito's default sign-in session (and so an emailed code's lifetime): 3 minutes (`AuthSessionValidity`). */
 export const SIGN_IN_SESSION_MS = 3 * 60 * 1000;
 
 /**
  * Answers a code typed on "Check your email" when no code was sent (the address has no account, or
  * can't use emailed codes): after a round trip's delay, the error Cognito gives a wrong code
- * (`CodeMismatchException`), or once the 3-minute session would have ended, the expired-session error.
- * Never contacts Cognito: there's no sign-in session to answer.
+ * (`CodeMismatchException`), or once the sign-in session would have ended (`lifetimeMs`, the site's
+ * code lifetime; default 3 minutes), the expired-session error. Never contacts Cognito: there's no
+ * sign-in session to answer.
  */
 export async function answerSimulatedCode(
   sentAt: number,
-  options: { now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
+  options: { now?: () => number; sleep?: (ms: number) => Promise<void>; lifetimeMs?: number } = {},
 ): Promise<never> {
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   await sleep(250 + Math.floor(Math.random() * 500));
-  if ((options.now ?? Date.now)() - sentAt > SIGN_IN_SESSION_MS) {
+  if ((options.now ?? Date.now)() - sentAt > (options.lifetimeMs ?? SIGN_IN_SESSION_MS)) {
     throw named('NotAuthorizedException', 'Invalid session for the user, session is expired.');
   }
   throw named('CodeMismatchException', 'Invalid code received for user');

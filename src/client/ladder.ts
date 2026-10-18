@@ -91,11 +91,9 @@ export function canRemovePasskey(input: { passkeyCount: number; factors: ClientA
 /** Checks a new password against the standard: length only, no composition rules. Returns a message or null. */
 export function newPasswordProblem(password: string): string | null {
   const length = [...password].length;
-  if (length === 0) return 'Enter a new password.';
-  if (length < NEW_PASSWORD_RULES.minLength) {
-    return `Use at least ${NEW_PASSWORD_RULES.minLength} characters. A password manager can make one for you.`;
-  }
-  if (length > NEW_PASSWORD_RULES.maxLength) return `Use at most ${NEW_PASSWORD_RULES.maxLength} characters.`;
+  if (length === 0) return 'Enter a new password';
+  if (length < NEW_PASSWORD_RULES.minLength) return `Choose a password with at least ${NEW_PASSWORD_RULES.minLength} characters`;
+  if (length > NEW_PASSWORD_RULES.maxLength) return `Choose a password with at most ${NEW_PASSWORD_RULES.maxLength} characters`;
   return null;
 }
 

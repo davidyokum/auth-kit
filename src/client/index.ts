@@ -30,7 +30,33 @@ export {
 export { toSignInStep, methodsFromChallenges, type SignInStep } from './steps.js';
 // The same screens for every address (ADR 0018), for sites building their own sign-in screens.
 export { isFirstFactorUnavailable, decoyPasskeyPrompt, answerSimulatedCode, SIGN_IN_SESSION_MS } from './parity.js';
-export { describeAuthError, type AuthErrorInfo, type AuthErrorKind, type AuthErrorContext } from './messages.js';
+export { describeAuthError, type AuthErrorInfo, type AuthErrorKind, type AuthErrorContext, type MessageWords } from './messages.js';
+// Every screen's words (REPORT §4, Card Studio v4), for sites building their own screens and for tests.
+export {
+  SIGN_IN,
+  ACCESS_LINE,
+  FIRST_VISIT,
+  TROUBLE,
+  ACCESS_HELP,
+  SIGN_UP,
+  REQUEST,
+  SIGNED_OUT,
+  SELF_SERVICE,
+  ERRORS,
+  helpScreen,
+  contactLines,
+  team,
+  Team,
+  plain,
+  type CopyContext,
+  type HelpTopic,
+  type HelpScreen,
+  type Rich,
+} from './copy.js';
+export { Icon, ICON_NAMES, type IconName } from './icons.js';
+export { wafAwareFetch, postAccountForm, type PostOutcome } from './account-creation-client.js';
+// The families as themes (auth-kit/themes), for the screens' `theme` prop.
+export { authTheme, FAMILY_THEMES, resolveTheme, type AuthTheme, type AuthThemeOverrides, type ThemeFamily } from '../themes/index.js';
 export { buildOtpauthUri, formatSetupKey } from './totp.js';
 export { isBreachedPassword, PWNED_PASSWORDS_RANGE_URL, type BreachedPasswordCheck } from './breached.js';
 export { CognitoRequestError } from './cognito.js';
@@ -61,15 +87,20 @@ export {
   deletePasskey,
   setFirstPassword,
   changePassword,
+  saveName,
   type AuthClientOptions,
   type AuthenticatorEnrollment,
   type PasskeyInfo,
 } from './api.js';
-export { SignIn, type SignInProps } from './SignIn.js';
-export { ChooseFirstCredential, type ChooseFirstCredentialProps } from './ChooseFirstCredential.js';
+export { SignIn, type SignInProps, type SignInHelp } from './SignIn.js';
+export { SignUp, type SignUpProps } from './SignUp.js';
+export { RequestAccess, type RequestAccessProps } from './RequestAccess.js';
+export { SignedOutEverywhere, type SignedOutEverywhereProps } from './SignedOutEverywhere.js';
+export { ChooseFirstCredential, type ChooseFirstCredentialProps, type FirstCredential } from './ChooseFirstCredential.js';
 export { AuthenticatorSetup, type AuthenticatorSetupProps } from './AuthenticatorSetup.js';
 export { TOTPEnrollmentGate, type TOTPEnrollmentGateProps } from './TOTPEnrollmentGate.js';
-export { MyAccount, type MyAccountProps } from './MyAccount.js';
+export { MyAccount, type MyAccountProps, type MyAccountSelfService, type SelfServiceResult } from './MyAccount.js';
+export { Card as AuthCard, type CardBottom as AuthCardBottom } from './ui.js';
 export { PasswordForm, breachedPasswordProblem, type PasswordFormProps, type PasswordCheckOptions } from './PasswordForm.js';
 export { authKitStyles } from './styles.js';
 export type { AuthKitClassNames, AuthKitSlot, StyleProps, HeadingLevel } from './ui.js';

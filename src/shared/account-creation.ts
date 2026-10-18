@@ -154,3 +154,17 @@ export function notOnListMessage(siteName: string, domains: readonly string[], r
 export const SIGN_UP_ORIGIN_ATTRIBUTE = 'custom:authkit_origin';
 /** Its value on accounts the sign-up route created. Admin invites don't carry the attribute. */
 export const SIGN_UP_ORIGIN_VALUE = 'signup';
+
+/** What the sign-up and request routes answer, as JSON (`auth-kit/accounts`). The same `{ ok: true }` for every address that gets that far. */
+export type AccountCreationBody =
+  | { ok: true }
+  | {
+      ok: false;
+      code: 'invalid' | 'not_on_list' | 'not_available' | 'rate_limited' | 'origin' | 'unavailable';
+      error: string;
+      /** The field the error is about. */
+      field?: 'email' | 'name' | 'reason';
+      /** `not_on_list`: the site takes requests from addresses not on the list (offer "Ask for access instead"). */
+      requestAccess?: boolean;
+      retryAfterSeconds?: number;
+    };

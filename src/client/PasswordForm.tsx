@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 import { type BreachedPasswordCheck, isBreachedPassword } from './breached.js';
 import { NEW_PASSWORD_RULES, SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
+import { ERRORS } from './copy.js';
 import type { AuthErrorContext } from './messages.js';
 import { Actions, Button, Field, Heading, type HeadingLevel, HiddenUsername, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
 
@@ -18,7 +19,7 @@ export async function breachedPasswordProblem(password: string, check: BreachedP
   if (check === false) return null;
   try {
     if (await (check ?? isBreachedPassword)(password)) {
-      return 'That password has appeared in a data breach. Choose a different one; a password manager can make one for you.';
+      return ERRORS.breached;
     }
   } catch {
     // Can't reach the breach list: let it through. A manager-generated password is the real protection.

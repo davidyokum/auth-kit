@@ -27,6 +27,7 @@ import { createInvitedAccount } from '../admin/invite-core.js';
 import type { EmailSender } from '../admin/mailer.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter, realSleep } from '../admin/quota.js';
 import {
+  type AccountCreationBody,
   type AccountCreationSettings,
   type NormalizedAccountCreation,
   SIGN_UP_ORIGIN_VALUE,
@@ -89,19 +90,7 @@ export interface AccountCreationRoutesConfig {
   onError?: (error: unknown, context: string) => void;
 }
 
-/** What the routes answer, as JSON. The same `{ ok: true }` for every address that gets that far. */
-export type AccountCreationBody =
-  | { ok: true }
-  | {
-      ok: false;
-      code: 'invalid' | 'not_on_list' | 'not_available' | 'rate_limited' | 'origin' | 'unavailable';
-      error: string;
-      /** The field the error is about. */
-      field?: 'email' | 'name' | 'reason';
-      /** `not_on_list`: the site takes requests from addresses not on the list (offer "Ask for access instead"). */
-      requestAccess?: boolean;
-      retryAfterSeconds?: number;
-    };
+export type { AccountCreationBody };
 
 export interface AccountCreationResult {
   status: 200 | 400 | 403 | 404 | 405 | 413 | 415 | 429 | 503;
