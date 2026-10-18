@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as CognitoModule from '../../src/client/cognito.js';
-import { type ClientAuthFactors, MyAccount, type MyAccountProps } from '../../src/client/index.js';
+import { type ClientAuthFactors, MyAccount, type MyAccountProps, type MyAccountSelfService } from '../../src/client/index.js';
 import { auth, awsError, resetAmplifyMocks } from './amplify-mock.js';
 
 vi.mock('aws-amplify', async () => (await import('./amplify-mock.js')).amplifyModule);
@@ -31,11 +31,20 @@ function setup(factors: ClientAuthFactors | Error, props: Partial<MyAccountProps
 
 const section = (name: string) => screen.getByRole('region', { name });
 
+// No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
+const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
+
 beforeEach(() => {
   resetAmplifyMocks();
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
+  vi.stubGlobal('fetch', noNetwork);
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  expect(noNetwork).not.toHaveBeenCalled();
+  noNetwork.mockClear();
+});
 
 describe('MyAccount', () => {
   it('shows the email, passkeys, authenticator, password, and sign out everywhere', async () => {
@@ -180,5 +189,145 @@ describe('MyAccount', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out everywhere' }));
     expect(auth.signOut).toHaveBeenCalledWith({ global: true });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/goodbye'));
+  });
+
+  it('marks the passkey and password headings with the fingerprint and password icons (decorative)', async () => {
+    setup({ configured: ['PASSWORD', 'WEB_AUTHN'], mfa: ['SOFTWARE_TOKEN_MFA'] });
+    await screen.findByText('You have a password.');
+    const passkeys = screen.getByRole('heading', { name: 'Passkeys' });
+    const password = screen.getByRole('heading', { name: 'Password' });
+    expect(passkeys.querySelector('svg[data-auth-kit-icon="fingerprint"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(password.querySelector('svg[data-auth-kit-icon="password"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByRole('heading', { name: 'Email' }).querySelector('svg')).toBeNull();
+  });
+});
+
+describe('MyAccount self-service (sign-up sites)', () => {
+  const FACTORS: ClientAuthFactors = { configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] };
+
+  function selfService(overrides: Partial<{ [K in keyof MyAccountSelfService]: MyAccountSelfService[K] }> = {}) {
+    return {
+      requestEmailChange: vi.fn<MyAccountSelfService['requestEmailChange']>().mockResolvedValue({ ok: true, message: 'We emailed a code to new@example.org.' }),
+      confirmEmailChange: vi.fn<MyAccountSelfService['confirmEmailChange']>().mockResolvedValue({ ok: true, message: 'Your email address is now new@example.org.' }),
+      deleteMyAccount: vi.fn<MyAccountSelfService['deleteMyAccount']>().mockResolvedValue({ ok: true, message: 'Your account was deleted.' }),
+      ...overrides,
+    };
+  }
+
+  it('without self-service, the email is read-only: "ask the site’s admin", and there’s no delete', async () => {
+    setup(FACTORS);
+    const email = section('Email');
+    expect(await within(email).findByText('ada@example.org')).toBeTruthy();
+    expect(within(email).getByText('To change it, ask the site’s admin.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Change email' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete my account' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Delete your account' })).toBeNull();
+  });
+
+  it('changes the email: a code to the new address, then the change, and the page reads the new address', async () => {
+    const actions = selfService();
+    auth.fetchUserAttributes.mockResolvedValueOnce({ email: 'ada@example.org' }).mockResolvedValueOnce({ email: 'new@example.org' });
+    const { user } = setup(FACTORS, { selfService: actions, siteName: 'Example Reports' });
+    const email = section('Email');
+    expect(await within(email).findByText('ada@example.org')).toBeTruthy();
+    expect(within(email).queryByText('To change it, ask the site’s admin.')).toBeNull();
+    await user.click(within(email).getByRole('button', { name: 'Change email' }));
+
+    expect(within(email).getByRole('heading', { name: 'Change your email address' })).toBeTruthy();
+    expect(within(email).getByText('We’ll email a code to the new address. The change happens once you enter it.')).toBeTruthy();
+    const address = within(email).getByLabelText('New email address');
+    expect(address.getAttribute('type')).toBe('email');
+    expect(address.getAttribute('autocomplete')).toBe('email');
+    await user.type(address, ' new@example.org ');
+    await user.click(within(email).getByRole('button', { name: 'Send a code' }));
+    expect(actions.requestEmailChange).toHaveBeenCalledWith({ newEmail: 'new@example.org' });
+    expect(await within(email).findByText('We emailed a code to new@example.org.')).toBeTruthy();
+
+    const code = within(email).getByLabelText('Code from the email');
+    expect(code.getAttribute('autocomplete')).toBe('one-time-code');
+    await user.type(code, '12345678');
+    await user.click(within(email).getByRole('button', { name: 'Change email address' }));
+    expect(actions.confirmEmailChange).toHaveBeenCalledWith({ code: '12345678' });
+    const done = await within(email).findByText('Your email address is now new@example.org.');
+    expect(done.getAttribute('role')).toBe('status');
+    // New tokens carry the new address, and the section reads it again.
+    expect(auth.fetchAuthSession).toHaveBeenCalledWith({ forceRefresh: true });
+    expect(await within(email).findByText('new@example.org')).toBeTruthy();
+    expect(within(email).getByRole('button', { name: 'Change email' })).toBeTruthy();
+  });
+
+  it('an action that needs a recent sign-in says so, with "Sign in again to confirm"', async () => {
+    const actions = selfService({
+      requestEmailChange: vi.fn<MyAccountSelfService['requestEmailChange']>().mockResolvedValue({ ok: false, code: 'step_up_required', error: 'For your security, sign in again first.' }),
+    });
+    const { user } = setup(FACTORS, { selfService: actions, stepUpHref: '/sign-in?reauth=1&next=%2Faccount' });
+    const email = section('Email');
+    await user.click(await within(email).findByRole('button', { name: 'Change email' }));
+    await user.type(within(email).getByLabelText('New email address'), 'new@example.org');
+    await user.click(within(email).getByRole('button', { name: 'Send a code' }));
+    const alert = await within(email).findByRole('alert');
+    expect(within(alert).getByText('For your security, sign in again first.')).toBeTruthy();
+    expect(within(alert).getByRole('link', { name: 'Sign in again to confirm' }).getAttribute('href')).toBe('/sign-in?reauth=1&next=%2Faccount');
+    // Still on the address: nothing moved on.
+    expect(within(email).getByLabelText('New email address')).toBeTruthy();
+    expect(within(email).queryByLabelText('Code from the email')).toBeNull();
+  });
+
+  it('a failed action without a step-up link says only what went wrong; a thrown one says the site couldn’t be reached', async () => {
+    const actions = selfService({
+      requestEmailChange: vi
+        .fn<MyAccountSelfService['requestEmailChange']>()
+        .mockResolvedValueOnce({ ok: false, code: 'step_up_required', error: 'For your security, sign in again first.' })
+        .mockRejectedValueOnce(new TypeError('Failed to fetch')),
+    });
+    const { user } = setup(FACTORS, { selfService: actions });
+    const email = section('Email');
+    await user.click(await within(email).findByRole('button', { name: 'Change email' }));
+    await user.type(within(email).getByLabelText('New email address'), 'new@example.org');
+    await user.click(within(email).getByRole('button', { name: 'Send a code' }));
+    const alert = await within(email).findByRole('alert');
+    expect(within(alert).queryByRole('link')).toBeNull();
+    await user.click(within(email).getByRole('button', { name: 'Send a code' }));
+    await waitFor(() => expect(within(email).getByRole('alert').textContent).toBe('We couldn’t reach the site just now. Try again in a moment.'));
+  });
+
+  it('deletes the account after the address is typed out, then leaves', async () => {
+    const actions = selfService();
+    const { user, navigate } = setup(FACTORS, { selfService: actions, siteName: 'Example Reports', itemsNote: 'Your reports stay with the team.', deletedPath: '/goodbye' });
+    await screen.findByText('ada@example.org');
+    expect(screen.getByRole('heading', { name: 'Delete your account' })).toBeTruthy();
+    expect(screen.getByText('Delete your account and the access that comes with it. You can’t undo this.')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Delete my account' }));
+
+    expect(screen.getByRole('heading', { name: 'Delete your Example Reports account?' })).toBeTruthy();
+    expect(screen.getByText('This deletes your account and signs you out everywhere. Your reports stay with the team.')).toBeTruthy();
+    const confirm = screen.getByLabelText('Type your email address to confirm');
+    expect(confirm.getAttribute('placeholder')).toBe('ada@example.org');
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Delete my account' });
+    expect(submit.getAttribute('type')).toBe('submit');
+    expect(submit.disabled).toBe(true);
+    await user.type(confirm, 'ada@example.org');
+    expect(submit.disabled).toBe(false);
+    await user.click(submit);
+    expect(actions.deleteMyAccount).toHaveBeenCalledWith({ confirmEmail: 'ada@example.org' });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/goodbye'));
+  });
+
+  it('a refused delete stays, with the reason and the step-up link; "Keep my account" closes it', async () => {
+    const actions = selfService({
+      deleteMyAccount: vi.fn<MyAccountSelfService['deleteMyAccount']>().mockResolvedValue({ ok: false, code: 'step_up_required', error: 'For your security, sign in again first.' }),
+    });
+    const { user, navigate } = setup(FACTORS, { selfService: actions, stepUpHref: '/sign-in?reauth=1' });
+    await screen.findByText('ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Delete my account' }));
+    // No siteName: the heading leaves the name out rather than saying "this site".
+    expect(screen.getByRole('heading', { name: 'Delete your account?' })).toBeTruthy();
+    await user.type(screen.getByLabelText('Type your email address to confirm'), 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Delete my account' }));
+    expect((await screen.findByRole('link', { name: 'Sign in again to confirm' })).getAttribute('href')).toBe('/sign-in?reauth=1');
+    expect(navigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Keep my account' }));
+    expect(screen.getByRole('heading', { name: 'Delete your account' })).toBeTruthy();
+    expect(screen.queryByLabelText('Type your email address to confirm')).toBeNull();
   });
 });

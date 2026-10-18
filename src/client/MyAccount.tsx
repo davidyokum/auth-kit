@@ -412,7 +412,7 @@ export function MyAccount(props: MyAccountProps) {
         <DeleteAccount
           selfService={props.selfService}
           email={emailValue}
-          siteName={props.siteName ?? 'this site'}
+          {...(props.siteName !== undefined && { siteName: props.siteName })}
           level={sub}
           classNames={classNames}
           {...(props.itemsNote !== undefined && { itemsNote: props.itemsNote })}
@@ -546,7 +546,7 @@ function EmailChange(props: { selfService: MyAccountSelfService; level: HeadingL
 function DeleteAccount(props: {
   selfService: MyAccountSelfService;
   email: string | undefined;
-  siteName: string;
+  siteName?: string;
   itemsNote?: string;
   level: HeadingLevel;
   stepUpHref?: string;
@@ -561,7 +561,7 @@ function DeleteAccount(props: {
   return (
     <section data-auth-kit="delete-account" {...slot(classNames, 'section')}>
       <Heading level={props.level} classNames={classNames}>
-        {open ? SELF_SERVICE.deleteConfirmHeading({ siteName: props.siteName }) : SELF_SERVICE.deleteHeading}
+        {open ? SELF_SERVICE.deleteConfirmHeading(props.siteName !== undefined ? { siteName: props.siteName } : {}) : SELF_SERVICE.deleteHeading}
       </Heading>
       {open ? (
         <form

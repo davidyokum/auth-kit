@@ -320,7 +320,8 @@ export const SELF_SERVICE = {
   deleteHeading: 'Delete your account',
   deleteIntro: 'Delete your account and the access that comes with it. You can’t undo this.',
   deleteButton: 'Delete my account',
-  deleteConfirmHeading: (c: Pick<CopyContext, 'siteName'>) => `Delete your ${c.siteName} account?`,
+  /** Without the site's name, "Delete your account?" (never "Delete your this site account?"). */
+  deleteConfirmHeading: (c: Partial<Pick<CopyContext, 'siteName'>>) => (c.siteName ? `Delete your ${c.siteName} account?` : 'Delete your account?'),
   deleteConfirmSub: 'This deletes your account and signs you out everywhere.',
   deleteConfirmLabel: 'Type your email address to confirm',
   keep: 'Keep my account',

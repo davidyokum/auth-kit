@@ -130,7 +130,8 @@ type View =
   | { name: 'done'; how: FirstCredential }
   | { name: 'offer-passkey' }
   | { name: 'trouble' }
-  | { name: 'help'; topic: HelpTopic }
+  /** `askEmail`: the address wasn't typed when the screen opened, so its action asks for it (and keeps asking while it's typed). */
+  | { name: 'help'; topic: HelpTopic; askEmail?: boolean }
   | { name: 'access-help' };
 
 const RESEND_COOLDOWN_MS = 30_000;
@@ -967,7 +968,7 @@ export function SignIn(props: SignInProps) {
           <ul {...slot(classNames, 'list')}>
             {TROUBLE.rows.map(([topic, label]) => (
               <li key={topic} {...slot(classNames, 'listItem')}>
-                <button type="button" onClick={() => go({ name: 'help', topic })} {...slot(classNames, 'secondaryButton')}>
+                <button type="button" onClick={() => go({ name: 'help', topic, askEmail: !looksLikeEmail(email) })} {...slot(classNames, 'secondaryButton')}>
                   <span>{label}</span>
                   <Icon name="chevron" />
                 </button>
@@ -987,8 +988,9 @@ export function SignIn(props: SignInProps) {
         if (action.action === 'reset-code') sendResetCode();
         else sendEmailCode();
       };
-      // The button needs the address: ask for it here when it wasn't typed yet.
-      const needsEmail = action !== undefined && !looksLikeEmail(email) && (action.action !== 'email-code' || emailCodeEnabled);
+      // The button needs the address: ask for it here when it wasn't typed yet. Decided when the screen
+      // opens, not from what's typed now, or the field would vanish as soon as the text looked like an address.
+      const needsEmail = action !== undefined && view.askEmail === true && (action.action !== 'email-code' || emailCodeEnabled);
       body = (
         <form noValidate onSubmit={onSubmit(runAction)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
