@@ -74,7 +74,7 @@ export const INVITE_EXPIRY_ACTOR: AuditActor = Object.freeze({ sub: 'system:invi
 
 /** What the refusal row says when the sweep leaves the last owner's invite open. */
 export const LAST_OWNER_SKIP_MESSAGE =
-  'skipped: last owner. Disabling this invite would leave the site with no enabled owner, so it stays open until they sign in or someone else is made an owner.';
+  'skipped: last owner. Disabling this invite would leave the site with no enabled owner, so it stays open until they sign in, or the owner role goes to someone else (the break-glass path: a site has exactly one owner).';
 
 const OWNER_COUNT_UNKNOWN_MESSAGE = "Couldn't confirm another owner exists, so this owner's invite wasn't disabled.";
 

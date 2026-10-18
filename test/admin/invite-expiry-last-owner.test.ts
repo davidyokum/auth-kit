@@ -68,7 +68,7 @@ describe('the sole owner, who never signed in', () => {
   it('is not disabled and keeps the owner role; the skip is logged and the owner and fallback are warned', async () => {
     const w = world({ fallbackEmail: 'ops@example.org' });
     w.pool.add({ ...unusedOwner('owner'), name: 'Olivia' }, OWNER_GROUP);
-    w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'editor');
+    w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'admin-content');
 
     const result = await w.sweep();
 
@@ -126,7 +126,7 @@ describe('the sole owner, who never signed in', () => {
   it('an app role or a lower admin role beside an owner doesn’t count as an owner', async () => {
     const w = world();
     w.pool.add(unusedOwner('owner'), OWNER_GROUP, 'reviewer');
-    w.pool.add(activeOwner('admin'), 'admin');
+    w.pool.add(activeOwner('admin-content-people'), 'admin-content-people');
     const result = await w.sweep();
     expect(result.skipped.map((s) => s.sub)).toEqual(['owner']);
     expect([...w.pool.get('owner')!.groups].sort()).toEqual(['reviewer', OWNER_GROUP].sort());
@@ -174,7 +174,7 @@ describe('failing closed', () => {
     const w = world();
     w.pool.add(activeOwner('olivia'), OWNER_GROUP);
     w.pool.add(unusedOwner('newbie'), OWNER_GROUP);
-    w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'viewer');
+    w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'admin-view');
     w.pool.failOn('ListUsersInGroupCommand', awsError('AccessDeniedException', 'not authorized to perform ListUsersInGroup'));
     const result = await w.sweep();
     expect(result.failed).toEqual([{ sub: 'newbie', error: expect.stringMatching(/^Couldn't confirm another owner exists, so this owner's invite wasn't disabled\./) }]);

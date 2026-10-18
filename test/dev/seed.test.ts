@@ -52,20 +52,20 @@ describe('seedPersonas', () => {
     const fake = createFakeCognito();
     const report = await seedPersonas(options(fake));
     expect(report.unchanged).toBe(false);
-    expect(report.personas.map((p) => p.key)).toEqual(['superadmin', 'admin', 'editor', 'viewer', 'member', 'reviewer']);
-    expect(report.personas.find((p) => p.key === 'editor')?.actions).toEqual(['created', 'password set', 'added to editor', 'authenticator enrolled']);
+    expect(report.personas.map((p) => p.key)).toEqual(['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'member', 'reviewer']);
+    expect(report.personas.find((p) => p.key === 'admin-content')?.actions).toEqual(['created', 'password set', 'added to admin-content', 'authenticator enrolled']);
     expect(report.personas.find((p) => p.key === 'member')?.actions).toEqual(['created', 'password set', 'authenticator enrolled']);
 
-    const editor = fake.userByEmail('editor@orchard.test')!;
+    const editor = fake.userByEmail('admin-content@orchard.test')!;
     expect(editor.status).toBe('CONFIRMED');
-    expect([...editor.groups]).toEqual(['editor']);
+    expect([...editor.groups]).toEqual(['admin-content']);
     expect(editor.attributes.get('email_verified')).toBe('true');
     expect(editor.totp?.enabled).toBe(true);
 
     const env = await envValues();
-    expect(env.get('PERSONA_PASSWORD_EDITOR')).toBe(editor.password);
-    expect(env.get('PERSONA_TOTP_EDITOR')).toBe(editor.totp?.secret);
-    expect(env.get('PERSONA_PASSWORD_EDITOR')!.length).toBeGreaterThanOrEqual(15);
+    expect(env.get('PERSONA_PASSWORD_ADMIN_CONTENT')).toBe(editor.password);
+    expect(env.get('PERSONA_TOTP_ADMIN_CONTENT')).toBe(editor.totp?.secret);
+    expect(env.get('PERSONA_PASSWORD_ADMIN_CONTENT')!.length).toBeGreaterThanOrEqual(15);
     expect((await stat(join(dir, '.env.local'))).mode & 0o777).toBe(0o600);
   });
 
@@ -89,7 +89,7 @@ describe('seedPersonas', () => {
     await seedPersonas(options(fake));
     const text = await readFile(join(dir, '.env.local'), 'utf8');
     expect(text.startsWith('# mine\nALLOW_DEV_SIGNIN=1\nAWS_PROFILE=personal\n\n# auth-kit personas')).toBe(true);
-    expect(text.match(/PERSONA_PASSWORD_EDITOR=/g)).toHaveLength(1);
+    expect(text.match(/PERSONA_PASSWORD_ADMIN_CONTENT=/g)).toHaveLength(1);
   });
 
   it('refuses a pool that is not a sandbox before writing anything', async () => {
@@ -120,46 +120,46 @@ describe('seedPersonas', () => {
 
   it('refuses an invalid personas.json before calling AWS', async () => {
     const fake = createFakeCognito();
-    await expect(seedPersonas(options(fake, { personas: [{ key: 'admin', email: 'me@example.com', groups: ['admin'] }] }))).rejects.toThrow(/personas.json is invalid/);
+    await expect(seedPersonas(options(fake, { personas: [{ key: 'admin-content-people', email: 'me@example.com', groups: ['admin-content-people'] }] }))).rejects.toThrow(/personas.json is invalid/);
     expect(fake.mock.calls()).toHaveLength(0);
   });
 
   it('converges groups: adds missing, removes extras', async () => {
     const fake = createFakeCognito();
     await seedPersonas(options(fake));
-    fake.userByEmail('viewer@orchard.test')!.groups.add('admin');
-    fake.userByEmail('editor@orchard.test')!.groups.delete('editor');
+    fake.userByEmail('admin-view@orchard.test')!.groups.add('admin-content-people');
+    fake.userByEmail('admin-content@orchard.test')!.groups.delete('admin-content');
     resetPersonaAuthState();
     const report = await seedPersonas(options(fake));
-    expect(report.personas.find((p) => p.key === 'viewer')?.actions).toEqual(['removed from admin', 'verified']);
-    expect(report.personas.find((p) => p.key === 'editor')?.actions).toEqual(['added to editor', 'verified']);
-    expect([...fake.userByEmail('viewer@orchard.test')!.groups]).toEqual(['viewer']);
+    expect(report.personas.find((p) => p.key === 'admin-view')?.actions).toEqual(['removed from admin-content-people', 'verified']);
+    expect(report.personas.find((p) => p.key === 'admin-content')?.actions).toEqual(['added to admin-content', 'verified']);
+    expect([...fake.userByEmail('admin-view@orchard.test')!.groups]).toEqual(['admin-view']);
   });
 
   it('repairs drift: a password changed elsewhere, a lost authenticator secret, a disabled persona', async () => {
     const fake = createFakeCognito();
     await seedPersonas(options(fake));
-    fake.userByEmail('admin@orchard.test')!.password = 'changed-in-the-console-123';
+    fake.userByEmail('admin-content-people@orchard.test')!.password = 'changed-in-the-console-123';
     fake.userByEmail('member@orchard.test')!.enabled = false;
     const env = await envValues();
-    const oldSecret = env.get('PERSONA_TOTP_EDITOR');
-    await writeFile(join(dir, '.env.local'), [...env].filter(([k]) => k !== 'PERSONA_TOTP_EDITOR').map(([k, v]) => `${k}=${v}`).join('\n'));
+    const oldSecret = env.get('PERSONA_TOTP_ADMIN_CONTENT');
+    await writeFile(join(dir, '.env.local'), [...env].filter(([k]) => k !== 'PERSONA_TOTP_ADMIN_CONTENT').map(([k, v]) => `${k}=${v}`).join('\n'));
     resetPersonaAuthState();
 
     const report = await seedPersonas(options(fake));
-    expect(report.personas.find((p) => p.key === 'admin')?.actions).toEqual(['password set', 'verified']);
+    expect(report.personas.find((p) => p.key === 'admin-content-people')?.actions).toEqual(['password set', 'verified']);
     expect(report.personas.find((p) => p.key === 'member')?.actions).toEqual(['enabled', 'verified']);
-    expect(report.personas.find((p) => p.key === 'editor')?.actions).toEqual(['authenticator enrolled']);
+    expect(report.personas.find((p) => p.key === 'admin-content')?.actions).toEqual(['authenticator enrolled']);
     const after = await envValues();
-    expect(after.get('PERSONA_TOTP_EDITOR')).toBeDefined();
-    expect(after.get('PERSONA_TOTP_EDITOR')).not.toBe(oldSecret);
-    expect(fake.userByEmail('admin@orchard.test')!.password).toBe(after.get('PERSONA_PASSWORD_ADMIN'));
+    expect(after.get('PERSONA_TOTP_ADMIN_CONTENT')).toBeDefined();
+    expect(after.get('PERSONA_TOTP_ADMIN_CONTENT')).not.toBe(oldSecret);
+    expect(fake.userByEmail('admin-content-people@orchard.test')!.password).toBe(after.get('PERSONA_PASSWORD_ADMIN_CONTENT_PEOPLE'));
   });
 
   it('enrolls through MFA_SETUP in a pool that requires MFA', async () => {
     const fake = createFakeCognito({ mfa: 'ON' });
     await seedPersonas(options(fake));
-    expect(fake.userByEmail('editor@orchard.test')!.totp?.enabled).toBe(true);
+    expect(fake.userByEmail('admin-content@orchard.test')!.totp?.enabled).toBe(true);
     resetPersonaAuthState();
     expect((await seedPersonas(options(fake))).unchanged).toBe(true);
   });
@@ -176,13 +176,13 @@ describe('seedPersonas', () => {
     const report = await seedPersonas(options(fake, { dryRun: true }));
     expect(report.dryRun).toBe(true);
     expect(report.unchanged).toBe(false);
-    expect(report.personas[0]?.actions).toEqual(['would create', 'would set password', 'would add to superadmin', 'would enroll authenticator']);
+    expect(report.personas[0]?.actions).toEqual(['would create', 'would set password', 'would add to owner', 'would enroll authenticator']);
     expect(fake.writeCalls()).toBe(0);
     await expect(stat(join(dir, '.env.local'))).rejects.toThrow();
   });
 
   it('explains a group the pool lacks', async () => {
-    const fake = createFakeCognito({ groups: ['superadmin', 'admin', 'editor', 'viewer'] });
+    const fake = createFakeCognito({ groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view'] });
     await expect(seedPersonas(options(fake))).rejects.toThrow(/no group "reviewer".*appRoles/);
   });
 
@@ -191,7 +191,7 @@ describe('seedPersonas', () => {
     await seedPersonas(options(fake));
     const env = await envValues();
     const secrets = [...env].filter(([k]) => k.startsWith('PERSONA_')).map(([, v]) => v);
-    expect(secrets.length).toBe(12);
+    expect(secrets.length).toBe(14); // 7 personas: 5 admin roles, a member, a reviewer
     for (const s of secrets) expect(lines.join('\n')).not.toContain(s);
   });
 
@@ -204,14 +204,14 @@ describe('seedPersonas', () => {
       client: fake.client,
       userPoolId: POOL_ID,
       clientId: CLIENT_ID,
-      email: 'editor@orchard.test',
-      password: env.get('PERSONA_PASSWORD_EDITOR')!,
-      totpSecret: env.get('PERSONA_TOTP_EDITOR')!,
+      email: 'admin-content@orchard.test',
+      password: env.get('PERSONA_PASSWORD_ADMIN_CONTENT')!,
+      totpSecret: env.get('PERSONA_TOTP_ADMIN_CONTENT')!,
       now: fake.now,
       sleep: fake.sleep,
     });
-    expect(tokens.username).toBe(fake.userByEmail('editor@orchard.test')!.sub);
-    expect(fake.mock.commandCalls(AdminSetUserPasswordCommand).length).toBe(6);
+    expect(tokens.username).toBe(fake.userByEmail('admin-content@orchard.test')!.sub);
+    expect(fake.mock.commandCalls(AdminSetUserPasswordCommand).length).toBe(7);
     expect(fake.mock.commandCalls(DescribeUserPoolCommand)).toHaveLength(1);
   });
 });

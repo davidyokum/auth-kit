@@ -6,7 +6,7 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 |---|---|
 | [0001](0001-passkey-first.md) | Passkey first, then password + authenticator, then emailed code |
 | [0002](0002-mfa-optional-app-enforced-totp.md) | MFA optional in the pool; the app requires TOTP of password users |
-| [0003](0003-capabilities-not-roles.md) | Code checks capabilities, mapped from groups in one file |
+| [0003](0003-capabilities-not-roles.md) | Code checks capabilities, mapped from groups in one file (role list superseded by 0020) |
 | [0004](0004-waf-rate-rule.md) | A WAF rate rule on every user pool |
 | [0005](0005-sandbox-only-admin-password-flow.md) | `ADMIN_USER_PASSWORD_AUTH` on sandbox clients only |
 | [0006](0006-preset-props-plus-l1-overrides.md) | The preset returns `defineAuth` props, then applies L1 overrides |
@@ -14,7 +14,7 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0008](0008-client-in-the-browser.md) | The client runs in the browser and fills Amplify v6's gaps with two direct Cognito calls |
 | [0009](0009-localhost-kit.md) | The localhost kit: TOTP personas, a checked loopback binding, a ribbon that ships and a menu that doesn't |
 | [0010](0010-audit-log-intent-then-result.md) | The audit log is append-only, written as an intent before the change and a result after |
-| [0011](0011-people-actions.md) | People actions: live checks, exact roles, owner grants, two invite modes, and where the primer was unclear |
+| [0011](0011-people-actions.md) | People actions: live checks, exact roles, owner grants (superseded by 0020), two invite modes, and where the primer was unclear |
 | [0012](0012-release-tarballs.md) | Releases are attested tarballs built once in CI |
 | [0013](0013-shared-web-acl.md) | One shared web ACL per account and Region |
 | [0014](0014-matrix-without-proxy.md) | The auth matrix checks each route's own guard |
@@ -23,3 +23,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0017](0017-per-rule-waf-modes.md) | Each WAF rule has its own mode; the sign-in rule counts first |
 | [0018](0018-same-screens-for-every-address.md) | The sign-in screens are the same for every address until a factor is proven |
 | [0019](0019-invite-expiry-sweep.md) | Invite expiry runs hourly, from a Lambda bundled in the package |
+| [0020](0020-site-wide-roles.md) | Site-wide roles: one owner, an explicit admin ladder, members per-item |

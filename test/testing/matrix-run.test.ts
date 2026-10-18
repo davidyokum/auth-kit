@@ -54,7 +54,7 @@ afterEach(async () => {
 async function start(options: Partial<Parameters<typeof startMatrixServer>[0]> = {}) {
   const server = await startMatrixServer({
     pool: POOL,
-    personas: { member: {}, admin: { groups: ['admin'] }, noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } } },
+    personas: { member: {}, admin: { groups: ['admin-content-people'] }, noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } } },
     command: (port) => fakeNext(port),
     readyTimeoutMs: 20_000,
     ...options,
@@ -76,7 +76,7 @@ describe('matrixFixture', () => {
   const issuer = createTestIssuer(POOL);
 
   it('mints each persona a session the app verifies, as Amplify cookies and as a bearer token', async () => {
-    const { personas, fixture } = matrixFixture({ issuer, personas: { member: {}, editor: { groups: ['editor'], email: 'ed@example.org' } } });
+    const { personas, fixture } = matrixFixture({ issuer, personas: { member: {}, editor: { groups: ['admin-content'], email: 'ed@example.org' } } });
     const auth = createServerAuth({ ...POOL, capabilities, jwks: fixture.jwks, jwksFetcher: () => Promise.resolve(fixture.jwks), cognito: { getUserAuthFactors: () => Promise.resolve({ configured: ['WEB_AUTHN'], mfa: [] }), getLiveUserState: () => Promise.reject(new Error('unused')) } });
     for (const persona of Object.values(personas)) {
       for (const definition of [persona.cookie, persona.bearer]) {
@@ -96,11 +96,11 @@ describe('matrixFixture', () => {
   it('describes each persona to the scripted Cognito, and nothing private travels in the fixture', () => {
     const { fixture, personas } = matrixFixture({
       issuer,
-      personas: { demoted: { groups: ['admin'], liveGroups: [] }, off: { enabled: false }, out: { sessionRevoked: true, sub: 'fixed-sub' } },
+      personas: { demoted: { groups: ['admin-content-people'], liveGroups: [] }, off: { enabled: false }, out: { sessionRevoked: true, sub: 'fixed-sub' } },
     });
     expect(parseMatrixFixture(JSON.stringify(fixture))).toEqual(fixture);
     expect(fixture.users).toEqual([
-      { username: personas.demoted.sub, sub: personas.demoted.sub, email: 'demoted@matrix.test', groups: ['admin'], liveGroups: [] },
+      { username: personas.demoted.sub, sub: personas.demoted.sub, email: 'demoted@matrix.test', groups: ['admin-content-people'], liveGroups: [] },
       { username: personas.off.sub, sub: personas.off.sub, email: 'off@matrix.test', groups: [], enabled: false },
       { username: 'fixed-sub', sub: 'fixed-sub', email: 'out@matrix.test', groups: [], sessionRevoked: true },
     ]);

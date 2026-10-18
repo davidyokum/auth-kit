@@ -84,7 +84,7 @@ describe('auth-kit seed-personas', () => {
     expect(clients).toEqual([{ region: 'us-east-1', profile: 'personal' }]);
     expect(out[0]).toBe(`Using profile "personal", us-east-1, pool ${POOL_ID}.`);
     expect(out.join('\n')).toMatch(/ALLOW_DEV_SIGNIN=1/);
-    expect(await readFile(join(dir, '.env.local'), 'utf8')).toMatch(/PERSONA_PASSWORD_EDITOR=/);
+    expect(await readFile(join(dir, '.env.local'), 'utf8')).toMatch(/PERSONA_PASSWORD_ADMIN_CONTENT=/);
 
     out = [];
     resetPersonaAuthState();

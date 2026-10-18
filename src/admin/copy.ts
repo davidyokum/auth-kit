@@ -3,9 +3,11 @@
  * §9's People page table), the Activity page's wording, and the lost-passkey guide. Pure data and
  * functions, shared by the server actions and `auth-kit/admin/ui`.
  */
-import type { InviteMode, PeopleAction } from './guardrails.js';
-import { ADMIN_ROLE_LABEL, INVITE_EXPIRY_DAYS, type StandardGroup } from '../shared/policy.js';
+import { type InviteMode, type PeopleAction, roleLabel } from './guardrails.js';
+import { INVITE_EXPIRY_DAYS } from '../shared/policy.js';
 import type { ActivityEntry, AuditEvent } from './types.js';
+
+export { roleLabel };
 
 /** What each button says on screen: what it does and when it takes effect. */
 export const PEOPLE_ACTION_COPY = {
@@ -13,6 +15,8 @@ export const PEOPLE_ACTION_COPY = {
     'They can sign in now with a code sent to their email, then save a passkey. The invite expires in 7 days if they don’t use it.',
   resend: 'Sends the invite email again. Nothing about their account changes.',
   changeRole: 'Takes effect at their next refresh, within 60 minutes. Admin pages check live, so admin access changes now.',
+  transferOwnership:
+    'They become the owner and you become Super admin. Both of you get an email. Admin pages check live, so it takes effect there at once.',
   disable:
     'Stops sign-in and refresh now. A page they have open keeps working for up to 60 minutes; admin pages stop at once.',
   enable: 'They sign in again as normal. Their old sessions stay ended.',
@@ -20,9 +24,32 @@ export const PEOPLE_ACTION_COPY = {
   delete: 'Permanent. If they’re invited again they get a new ID.',
 } as const satisfies Record<PeopleAction, string>;
 
-/** Shown wherever the owner role can be granted. */
-export const OWNER_GRANT_NOTE =
-  'Making someone an owner needs a sign-in in the last few minutes, and every owner gets an email about it. If that email can’t be sent, the grant is undone.';
+/** Shown wherever Super admin can be granted (only the owner grants it). */
+export const SUPERADMIN_GRANT_NOTE =
+  'Granting Super admin needs a sign-in in the last few minutes, and the owner gets an email about it. If that email can’t be sent, the grant is undone.';
+
+/** Shown with Transfer ownership. */
+export const TRANSFER_OWNERSHIP_NOTE =
+  'A site has exactly one owner. Transferring makes them the owner and you Super admin. It needs a sign-in in the last few minutes and their email address typed out, and both of you get an email; if it can’t be sent, the transfer is undone.';
+
+/** Where the owner is shown in a role picker: the role isn't one of the choices. */
+export const OWNER_ROLE_NOTE = 'Owner (only one): not a choice here. Ownership moves only by Transfer ownership, which the owner starts.';
+
+/**
+ * The note under every role picker: site roles aren't resource access (who can do what to one
+ * project, plan, or other item is decided on that item). Screens never say "resource" or "record".
+ */
+export const RESOURCE_ACCESS_NOTE =
+  'These roles are for running the site. Access to individual projects, plans, and other items is managed on each one.';
+
+/** Shown on the People page when the site doesn't have exactly one enabled owner. */
+export function ownerCountWarning(enabledOwners: number): string | null {
+  if (enabledOwners === 1) return null;
+  if (enabledOwners === 0) {
+    return 'This site has no owner. Nobody can grant Super admin or transfer ownership until one is set, and the owner role can’t be granted from this page: add one person to the “owner” group in the Cognito console (the break-glass path), then reload.';
+  }
+  return `This site has ${enabledOwners} owners; it should have exactly one. An owner can change the other owners’ roles to Super admin from this page.`;
+}
 
 export interface PeopleActionDetail {
   /** The button label. */
@@ -59,10 +86,23 @@ const DETAILS_EMAILED_CODE: Readonly<Record<PeopleAction, PeopleActionDetail>> =
     now: 'Cognito’s groups change, and admin pages, which re-read groups live, follow within a minute.',
     later: 'Their token keeps its old groups until their next refresh, within 60 minutes.',
   },
+  transferOwnership: {
+    label: 'Transfer ownership',
+    says: PEOPLE_ACTION_COPY.transferOwnership,
+    calls: [
+      'AdminAddUserToGroup owner (new owner)',
+      'AdminRemoveUserFromGroup (new owner’s old admin role)',
+      'AdminAddUserToGroup superadmin (you)',
+      'AdminRemoveUserFromGroup owner (you)',
+      'SES SendEmail (to both of you)',
+    ],
+    now: 'The new owner is added before you’re removed, so the site is never without one. Admin pages, which re-read groups live, follow within a minute.',
+    later: 'Each token keeps its old groups until its next refresh, within 60 minutes.',
+  },
   disable: {
     label: 'Disable',
     says: PEOPLE_ACTION_COPY.disable,
-    calls: ['AdminDisableUser', 'AdminRemoveUserFromGroup (each admin role)', 'App: remove per-record memberships'],
+    calls: ['AdminDisableUser', 'AdminRemoveUserFromGroup (each admin role)', 'App: remove their access to items (memberships)'],
     now: 'Sign-in and refresh fail (“User is disabled”), refresh tokens are revoked, and admin pages refuse them.',
     later: 'A page they already have open works until its token expires, within 60 minutes.',
   },
@@ -112,12 +152,6 @@ export function peopleActionDetails(mode: InviteMode = 'emailed-code'): Readonly
   return mode === 'temporary-password' ? DETAILS_TEMPORARY_PASSWORD : DETAILS_EMAILED_CODE;
 }
 
-/** The screen name for a role: `superadmin` is "Owner"; `member` means no admin role. */
-export function roleLabel(role: string | null | undefined): string {
-  if (!role || role === 'member') return 'Member';
-  return ADMIN_ROLE_LABEL[role as StandardGroup] ?? role;
-}
-
 // ---- Lost passkey -------------------------------------------------------------------------------
 
 export interface LostPasskeyGuide {
@@ -137,7 +171,7 @@ export function lostPasskeyGuidance(options: { emailCodes?: boolean } = {}): Los
   const emailCodes = options.emailCodes ?? true;
   const why = 'No admin call lists or deletes someone’s passkeys. The fix runs through their own account.';
   const signOut = 'Sign them out everywhere, so a stolen device’s session ends at its next refresh (within 60 minutes).';
-  const lastResort = 'Last resort: disable them, then (an owner, after the retention period) delete and invite again. They get a new ID.';
+  const lastResort = 'Last resort: disable them, then (the owner or a Super admin, after the retention period) delete and invite again. They get a new ID.';
   if (emailCodes) {
     return {
       why,
@@ -169,6 +203,7 @@ const DONE: Readonly<Record<string, string>> = {
   'people.invite': 'invited',
   'people.resend': 'resent the invite to',
   'people.changeRole': 'changed the role of',
+  'people.transferOwnership': 'transferred ownership to',
   'people.disable': 'disabled',
   'people.enable': 're-enabled',
   'people.signOutEverywhere': 'signed out everywhere',
@@ -180,6 +215,7 @@ const TRIED: Readonly<Record<string, string>> = {
   'people.invite': 'tried to invite',
   'people.resend': 'tried to resend the invite to',
   'people.changeRole': 'tried to change the role of',
+  'people.transferOwnership': 'tried to transfer ownership to',
   'people.disable': 'tried to disable',
   'people.enable': 'tried to re-enable',
   'people.signOutEverywhere': 'tried to sign out',
@@ -192,9 +228,9 @@ export interface ActivityLine {
   actor: string;
   /** "changed the role of", "tried to disable". */
   verb: string;
-  /** The person or record acted on. */
+  /** The person or item acted on. */
   target: string;
-  /** "Editor → Admin", when the row has a before and after worth showing. */
+  /** "Admin – content only → Super admin", when the row has a before and after worth showing. */
   change?: string;
   reason?: string;
   /** "ok", "refused: …", "partly done", "outcome not recorded". */

@@ -52,10 +52,10 @@ describe('createCognitoGateway', () => {
       if (name === 'AdminGetUserCommand') return { Enabled: true, UserStatus: 'CONFIRMED' };
       return input.NextToken
         ? { Groups: [{ GroupName: 'reviewer' }] }
-        : { Groups: [{ GroupName: 'admin' }, {}], NextToken: 'page2' };
+        : { Groups: [{ GroupName: 'admin-content-people' }, {}], NextToken: 'page2' };
     });
     const gateway = createCognitoGateway({ region: 'us-east-1', userPoolId: 'us-east-1_TestPool1', client });
-    expect(await gateway.getLiveUserState('u')).toEqual({ enabled: true, status: 'CONFIRMED', groups: ['admin', 'reviewer'] });
+    expect(await gateway.getLiveUserState('u')).toEqual({ enabled: true, status: 'CONFIRMED', groups: ['admin-content-people', 'reviewer'] });
     expect(sent.map((s) => s.name)).toEqual(['AdminGetUserCommand', 'AdminListGroupsForUserCommand', 'AdminListGroupsForUserCommand']);
   });
 

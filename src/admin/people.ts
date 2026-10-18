@@ -9,7 +9,7 @@ import {
   StepUpRequiredError,
   UnauthenticatedError,
 } from '../server/errors.js';
-import { ADMIN_ROLE_RANK, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
+import { ADMIN_ROLE_RANK, OWNER_GROUP, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
 import { type AuditLogStore, type AuditedRun, runAudited } from './audit.js';
 import { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
 import { describeAwsError } from './aws-errors.js';
@@ -30,7 +30,7 @@ import {
   isStandardGroup,
   roleRank,
 } from './guardrails.js';
-import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier } from './mailer.js';
+import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
 import { type SweepResult, sweepFor } from './sweep.js';
@@ -50,6 +50,7 @@ import {
   type PeopleList,
   type PersonRow,
   type TargetInput,
+  type TransferOwnershipInput,
 } from './types.js';
 
 
@@ -64,16 +65,17 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   inviteMode?: InviteMode;
   /**
    * Sends the branded invite. Required in `emailed-code` mode. `createSesInviteMailer` also sends the
-   * owner-grant alert, so it serves as `ownerAlerts` too, and the last-owner warning
-   * `expireStaleInvites` sends when it leaves the site's only owner's unused invite open.
+   * owner's alerts (a Super admin grant, an ownership transfer), so it serves as `ownerAlerts` too,
+   * and the last-owner warning `expireStaleInvites` sends when it leaves the owner's unused invite open.
    */
   mailer?: InviteMailer & Partial<OwnerAlertNotifier> & Partial<OwnerInviteWarningNotifier>;
   /**
-   * Alerts every owner when someone is made an owner. Granting the owner role requires it: with no
-   * notifier the grant is refused, and if the alert fails the grant is undone. Default: the mailer's
-   * `ownerGranted` (SES, from the site's sender) when it has one.
+   * The owner's alerts: the owner is told when someone is made Super admin, and the previous and new
+   * owner are told when ownership moves. Both changes require it: with no notifier the change is
+   * refused, and if the alert fails the change is undone. Default: the mailer's methods (SES, from the
+   * site's sender) when it has them.
    */
-  ownerAlerts?: OwnerAlertNotifier;
+  ownerAlerts?: Partial<OwnerAlertNotifier>;
   /**
    * Email domains invites normally go to. An invite outside them needs `confirmOutsideDomain`,
    * because an invite to a mistyped address is a live account for whoever owns that inbox.
@@ -106,21 +108,28 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
 
 
 export interface PeopleActions {
-  /** Everyone, with live status and groups: a ListUsers snapshot joined with ListUsersInGroup. */
+  /** Everyone, with live status and groups: a ListUsers snapshot joined with ListUsersInGroup. Needs `people.read`. */
   listPeople(): Promise<PeopleList>;
   /** AdminCreateUser with no password and no `email_verified`; AdminAddUserToGroup; the invite email. */
   invite(input: InviteInput): Promise<ActionResult>;
   /** Sends the invite again. Never resets an account; only for an invite nobody has used. */
   resend(input: TargetInput): Promise<ActionResult>;
-  /** AdminRemoveUserFromGroup / AdminAddUserToGroup, with a reason; promotions need a recent sign-in. */
+  /** AdminRemoveUserFromGroup / AdminAddUserToGroup, with a reason; promotions need a recent sign-in. Never grants `owner`. */
   changeRole(input: ChangeRoleInput): Promise<ActionResult>;
+  /**
+   * The owner hands the site to someone who has signed in: they become the owner, the previous owner
+   * becomes Super admin, both are emailed. Owner only, with a reason, their address typed out, and a
+   * recent sign-in. The new owner is added before the previous one is removed, so a partial failure
+   * can leave two owners (the People page flags it) but never none.
+   */
+  transferOwnership(input: TransferOwnershipInput): Promise<ActionResult>;
   /** AdminDisableUser, then removes admin roles and record memberships. */
   disable(input: TargetInput): Promise<ActionResult>;
   /** AdminEnableUser. Old sessions stay ended; access is member-only until a role is granted again. */
   enable(input: TargetInput): Promise<ActionResult>;
   /** AdminUserGlobalSignOut. Not removal. */
   signOutEverywhere(input: TargetInput): Promise<ActionResult>;
-  /** AdminDeleteUser: owners only, after disabling and the retention period, with the address typed out. */
+  /** AdminDeleteUser: the owner and Super admins, after disabling and the retention period, with the address typed out. */
   deleteUser(input: DeleteUserInput): Promise<ActionResult>;
   /**
    * Disables unaccepted invites older than 7 days, as the acting admin, except the site's last
@@ -137,6 +146,7 @@ export interface PeopleFormActions {
   invite: FormAction;
   resend: FormAction;
   changeRole: FormAction;
+  transferOwnership: FormAction;
   disable: FormAction;
   enable: FormAction;
   signOutEverywhere: FormAction;
@@ -204,11 +214,13 @@ function authFailure(error: unknown): Fail | null {
 
 
 class OwnerAlertFailedError extends Error {
-  constructor(cause: unknown, undone: boolean) {
+  constructor(cause: unknown, undone: boolean, what: 'grant' | 'transfer') {
+    const change = what === 'grant' ? 'the Super admin grant' : 'the ownership transfer';
+    const check = what === 'grant' ? "this person's role" : 'who holds the owner role';
     super(
       undone
-        ? `Couldn't alert the owners (${describeAwsError(cause)}), so the owner grant was undone. Nothing changed; try again.`
-        : `Couldn't alert the owners (${describeAwsError(cause)}), and undoing the owner grant failed too: check this person's role now. The audit log shows each call.`,
+        ? `Couldn't send the owner's alert (${describeAwsError(cause)}), so ${change} was undone. Nothing changed; try again.`
+        : `Couldn't send the owner's alert (${describeAwsError(cause)}), and undoing ${change} failed too: check ${check} now. The audit log shows each call.`,
       { cause },
     );
     this.name = 'OwnerAlertFailedError';
@@ -267,9 +279,10 @@ async function defaultRequestContext(): Promise<AuditRequestContext> {
  * ```
  *
  * Every action, in order: `requireCan(<capability>, { live: true })` (status and groups re-read from
- * Cognito); input checks; the target re-read from Cognito; `checkPeopleAction` with the live owner
- * count; a recent sign-in for promotions and deletions; then the audit intent row, the Cognito calls,
- * and the result row (`runAudited`). A refusal is logged too.
+ * Cognito); input checks; the target re-read from Cognito; `checkPeopleAction` (with the live owner
+ * count when an owner changes another owner's role); a recent sign-in for promotions, transfers, and
+ * deletions; then the audit intent row, the Cognito calls, and the result row (`runAudited`). A
+ * refusal is logged too.
  */
 export function createPeopleActions<G extends string, C extends string>(config: PeopleAdminConfig<G, C>): PeopleActions {
   const { auth, auditLog } = config;
@@ -293,8 +306,13 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   const maxPeople = config.maxPeople ?? ADMIN_POLICY.maxPeople;
   const inviteDomains = (config.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
   const details = peopleActionDetails(mode);
-  const ownerNotifier: OwnerAlertNotifier | undefined =
-    config.ownerAlerts ?? (typeof config.mailer?.ownerGranted === 'function' ? (config.mailer as OwnerAlertNotifier) : undefined);
+  // Each owner alert comes from ownerAlerts, else the mailer; a change whose alert isn't configured is refused.
+  const alertSource = (method: keyof OwnerAlertNotifier): Partial<OwnerAlertNotifier> | undefined =>
+    typeof config.ownerAlerts?.[method] === 'function' ? config.ownerAlerts : typeof config.mailer?.[method] === 'function' ? config.mailer : undefined;
+  const grantAlerts = alertSource('superadminGranted');
+  const transferAlerts = alertSource('ownershipTransferred');
+  const sendGrantAlert = grantAlerts ? (alert: SuperadminGrantAlert) => grantAlerts.superadminGranted!(alert) : undefined;
+  const sendTransferAlert = transferAlerts ? (alert: OwnershipTransferAlert) => transferAlerts.ownershipTransferred!(alert) : undefined;
   const report = (error: unknown, context: string) => {
     try {
       config.onError?.(error, context);
@@ -404,7 +422,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   /** Enabled owners right now, or undefined when Cognito can't say (the guardrail treats that as "no"). */
   async function ownerCount(): Promise<number | undefined> {
     try {
-      return (await cognito().listGroupMembers('superadmin')).filter((p) => p.enabled).length;
+      return (await cognito().listGroupMembers(OWNER_GROUP)).filter((p) => p.enabled).length;
     } catch (error) {
       report(error, 'cognito: owner count');
       return undefined;
@@ -523,25 +541,27 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   const who = (t: Target) => t.person.name ?? t.person.email;
 
-  // ---- owner grants ---------------------------------------------------------------------------
-  // Owners may make owners, but each grant needs a fresh sign-in and an alert to every owner.
+  // ---- the owner's alerts ----------------------------------------------------------------------
+  // Only the owner grants Super admin, and each grant needs a fresh sign-in and an alert to the owner.
 
-  const OWNER_ALERT_MISSING =
-    'Making someone an owner alerts every owner, and no owner alert is configured (ownerAlerts, or a mailer that sends them). Nothing changed.';
+  const GRANT_ALERT_MISSING =
+    'Granting Super admin alerts the owner, and no owner alert is configured (ownerAlerts, or a mailer that sends them). Nothing changed.';
+  const TRANSFER_ALERT_MISSING =
+    'Transferring ownership alerts the previous and the new owner, and no owner alert is configured (ownerAlerts, or a mailer that sends them). Nothing changed.';
 
-  /** Reads every enabled owner (after the grant) and alerts them all; returns who was told. */
-  async function alertOwners(
+  /** Reads the owner (after the grant) and alerts them; returns who was told. */
+  async function alertOwnerOfGrant(
     steps: Parameters<Parameters<typeof runAudited>[1]['run']>[0],
     who: Acting<C>,
     grantedTo: { sub: string; email: string; name?: string },
     via: 'changeRole' | 'invite',
     reason: string | undefined,
   ): Promise<string[]> {
-    const owners = (await cognito().listGroupMembers('superadmin'))
+    const owners = (await cognito().listGroupMembers(OWNER_GROUP))
       .filter((p) => p.enabled)
       .map((p) => ({ sub: p.sub, email: p.email, ...(p.name !== undefined && { name: p.name }) }));
-    await steps.call(`Owner alert (${owners.length} owners)`, () =>
-      ownerNotifier!.ownerGranted({
+    await steps.call(`Super admin alert (to the owner${owners.length === 1 ? '' : `s, ${owners.length}`})`, () =>
+      sendGrantAlert!({
         siteName: config.siteName,
         owners,
         grantedTo,
@@ -591,8 +611,8 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
     const g = guard(acting_, 'invite', undefined, { toRole: role, ...(reason !== undefined && { reason }) });
     if (!g.ok) return refuse(acting_, auditAction, { email }, g.code, g.reason, { after: { role }, ...(reason !== undefined && { reason }) });
-    if (roleRank(role) >= ADMIN_ROLE_RANK.admin && (reason ?? '').length < ADMIN_POLICY.reasonMinLength) {
-      return refuse(acting_, auditAction, { email }, 'reason_required', 'Inviting an admin or owner records a reason.', { after: { role } });
+    if (roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'] && (reason ?? '').length < ADMIN_POLICY.reasonMinLength) {
+      return refuse(acting_, auditAction, { email }, 'reason_required', `Inviting someone as ${roleLabel(role)} needs a reason (it goes in the audit log).`, { after: { role } });
     }
 
     try {
@@ -603,9 +623,9 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       return fail('unavailable', `Couldn't check for an existing account: ${describeAwsError(error)} Nothing was changed.`);
     }
 
-    const ownerGrant = role === 'superadmin';
-    if (ownerGrant && !ownerNotifier) return refuse(acting_, auditAction, { email }, 'owner_alert_unavailable', OWNER_ALERT_MISSING, { after: { role } });
-    const blocked = stepUp(acting_, g.requiresRecentSignIn || ownerGrant);
+    const superadminGrant = role === 'superadmin';
+    if (superadminGrant && !sendGrantAlert) return refuse(acting_, auditAction, { email }, 'owner_alert_unavailable', GRANT_ALERT_MISSING, { after: { role } });
+    const blocked = stepUp(acting_, g.requiresRecentSignIn || superadminGrant);
     if (blocked) return blocked;
 
     const plannedExpiry = inviteExpiresAt(new Date(now()));
@@ -619,7 +639,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           before: null,
           after: { email, ...(name !== undefined && { name }), role, status: 'invited', expiresAt: plannedExpiry.toISOString() },
           ...(reason !== undefined && { reason }),
-          calls: [...details.invite.calls, ...(ownerGrant ? ['Owner alert (every owner)'] : [])],
+          calls: [...details.invite.calls, ...(superadminGrant ? ['Super admin alert (to the owner)'] : [])],
           ...contextOf(acting_.request),
         },
         run: async (steps) => {
@@ -640,12 +660,12 @@ export function createPeopleActions<G extends string, C extends string>(config: 
             }
           }
           let ownerAlert: string[] | undefined;
-          if (ownerGrant) {
+          if (superadminGrant) {
             try {
-              ownerAlert = await alertOwners(steps, acting_, { sub: created.sub, email, ...(name !== undefined && { name }) }, 'invite', reason);
+              ownerAlert = await alertOwnerOfGrant(steps, acting_, { sub: created.sub, email, ...(name !== undefined && { name }) }, 'invite', reason);
             } catch (error) {
               const undone = await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
-              throw new OwnerAlertFailedError(error, undone);
+              throw new OwnerAlertFailedError(error, undone, 'grant');
             }
           }
           const expiresAt = inviteExpiresAt(created.createdAt);
@@ -737,7 +757,8 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   async function changeRole(input: ChangeRoleInput): Promise<ActionResult> {
     const start = await begin('changeRole', input, (raw) => {
-      // Verbatim, like invite: "Owner", " admin", and "superAdmin" are refused.
+      // Verbatim, like invite: "Owner", " superadmin", and "Super admin" are refused. `owner` itself
+      // passes here and is refused (and logged) by the guardrail: it moves only by transfer.
       const toRole = typeof raw.toRole === 'string' ? raw.toRole : '';
       if (toRole !== MEMBER_ROLE && !isStandardGroup(toRole)) throw new InputError('Choose an admin role, or Member for none.');
       const fromRole = typeof raw.fromRole === 'string' && raw.fromRole !== '' ? raw.fromRole : undefined;
@@ -762,13 +783,14 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     if (current.length === wanted.length && current.every((g, i) => g === wanted[i])) {
       return fail('refused', `That's already their role (${roleLabel(currentRole)}).`, { guardrail: 'state' });
     }
-    const removesOwner = target.groups.includes('superadmin') && target.person.enabled && inp.toRole !== 'superadmin';
-    const owners = removesOwner ? await ownerCount() : undefined;
+    // Only an owner changing another owner's role (a site with more than one) needs the live count.
+    const ownerTarget = target.groups.includes(OWNER_GROUP) && target.person.enabled && w.user.groups.includes(OWNER_GROUP);
+    const owners = ownerTarget ? await ownerCount() : undefined;
     const g = guard(w, 'changeRole', target, { toRole: inp.toRole, reason: inp.reason, ...(owners !== undefined && { ownerCount: owners }) });
     if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, { after: { adminRole: inp.toRole === MEMBER_ROLE ? null : inp.toRole }, reason: inp.reason });
-    const ownerGrant = inp.toRole === 'superadmin';
-    if (ownerGrant && !ownerNotifier) return refuse(w, auditAction, target, 'owner_alert_unavailable', OWNER_ALERT_MISSING, { reason: inp.reason });
-    const blocked = stepUp(w, g.requiresRecentSignIn || ownerGrant);
+    const superadminGrant = inp.toRole === 'superadmin' && !target.groups.includes('superadmin');
+    if (superadminGrant && !sendGrantAlert) return refuse(w, auditAction, target, 'owner_alert_unavailable', GRANT_ALERT_MISSING, { reason: inp.reason });
+    const blocked = stepUp(w, g.requiresRecentSignIn || superadminGrant);
     if (blocked) return blocked;
 
     const remove = current.filter((g2) => !wanted.includes(g2));
@@ -783,16 +805,16 @@ export function createPeopleActions<G extends string, C extends string>(config: 
         calls: [
           ...remove.map((r) => `AdminRemoveUserFromGroup ${r}`),
           ...add.map((a) => `AdminAddUserToGroup ${a}`),
-          ...(ownerGrant ? ['Owner alert (every owner)'] : []),
+          ...(superadminGrant ? ['Super admin alert (to the owner)'] : []),
         ],
       },
       // Removing first: if a call fails halfway, they hold less access than before, never more.
       run: async (steps) => {
         for (const r of remove) await steps.call(`AdminRemoveUserFromGroup ${r}`, () => cognito().removeFromGroup(target.person.username, r));
         for (const a of add) await steps.call(`AdminAddUserToGroup ${a}`, () => cognito().addToGroup(target.person.username, a));
-        if (!ownerGrant) return { value: undefined };
+        if (!superadminGrant) return { value: undefined };
         try {
-          const sentTo = await alertOwners(
+          const sentTo = await alertOwnerOfGrant(
             steps,
             w,
             { sub: target.person.sub, email: target.person.email, ...(target.person.name !== undefined && { name: target.person.name }) },
@@ -801,7 +823,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           );
           return { value: undefined, after: { adminRole: 'superadmin', groups: [...wanted, ...appRoles], ownerAlert: { sentTo } } };
         } catch (error) {
-          // An owner grant nobody was told about doesn't stand: put their old roles back.
+          // A Super admin grant the owner wasn't told about doesn't stand: put their old roles back.
           let undone = true;
           for (const a of add) {
             if (!(await steps.rollback(`AdminRemoveUserFromGroup ${a}`, () => cognito().removeFromGroup(target.person.username, a)))) undone = false;
@@ -809,7 +831,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           for (const r of remove) {
             if (!(await steps.rollback(`AdminAddUserToGroup ${r}`, () => cognito().addToGroup(target.person.username, r)))) undone = false;
           }
-          throw new OwnerAlertFailedError(error, undone);
+          throw new OwnerAlertFailedError(error, undone, 'grant');
         }
       },
     });
@@ -817,9 +839,114 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     auth.invalidate({ username: target.person.username, tokenId: '' });
     return finish(run, {
       ok: () =>
-        `${who(target)} is now ${roleLabel(inp.toRole)}. ${details.changeRole.says}${ownerGrant ? ' Every owner was alerted.' : ''}`,
+        `${who(target)} is now ${roleLabel(inp.toRole)}. ${details.changeRole.says}${superadminGrant ? ' The owner was alerted.' : ''}`,
       partial: (error) =>
         `${describeAwsError(error)} Part of the change was made: ${who(target)} may now hold fewer roles than before (removals go first, so never more). Check their role and try again.`,
+    });
+  }
+
+  // ---- transfer ownership ---------------------------------------------------------------------
+
+  async function transferOwnership(input: TransferOwnershipInput): Promise<ActionResult> {
+    const start = await begin('transferOwnership', input, (raw) => ({
+      sub: subOf(raw.sub),
+      reason: text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength) ?? '',
+      confirmEmail: text(raw.confirmEmail, 'Confirmation', 254) ?? '',
+    }));
+    if ('ok' in start) return start;
+    const { who: w, target, input: inp } = start;
+    const auditAction = PEOPLE_AUDIT_ACTIONS.transferOwnership;
+    const g = guard(w, 'transferOwnership', target, { reason: inp.reason });
+    if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, { reason: inp.reason });
+    if (inp.confirmEmail.toLowerCase() !== target.person.email.toLowerCase()) {
+      return fail('refused', 'Type their email address exactly to confirm.', { guardrail: 'confirm' });
+    }
+    if (!sendTransferAlert) return refuse(w, auditAction, target, 'owner_alert_unavailable', TRANSFER_ALERT_MISSING, { reason: inp.reason });
+    const blocked = stepUp(w, true);
+    if (blocked) return blocked;
+
+    const previous = { sub: w.user.sub, username: w.user.username, groups: [...w.user.groups] };
+    let previousEmail = w.actor.email;
+    let previousName: string | undefined;
+    try {
+      const me = await cognito().findBySub(previous.sub);
+      previousEmail = me?.email ?? previousEmail;
+      previousName = me?.name;
+    } catch (error) {
+      return fail('unavailable', `Couldn't read your own account from Cognito: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    if (!previousEmail) return fail('unavailable', "Couldn't find your email address, so the ownership alert couldn't reach you. Nothing was changed.");
+
+    // The new owner keeps their app roles; their admin role becomes owner. The previous owner keeps
+    // their app roles and becomes Super admin.
+    const targetAdmin = adminGroupsOf(target.groups);
+    const dropFromTarget = targetAdmin.filter((r) => r !== OWNER_GROUP);
+    const targetApp = target.groups.filter((r) => !isStandardGroup(r));
+    const previousNeedsSuperadmin = !previous.groups.includes('superadmin');
+    const previousApp = previous.groups.filter((r) => !isStandardGroup(r));
+    const calls = [
+      'AdminAddUserToGroup owner (new owner)',
+      ...dropFromTarget.map((r) => `AdminRemoveUserFromGroup ${r} (new owner)`),
+      ...(previousNeedsSuperadmin ? ['AdminAddUserToGroup superadmin (previous owner)'] : []),
+      'AdminRemoveUserFromGroup owner (previous owner)',
+      'Ownership alert (previous and new owner)',
+    ];
+    const run = await runAudited(auditLog, {
+      intent: {
+        ...base(w, auditAction, target),
+        before: {
+          adminRole: targetAdmin[0] ?? null,
+          groups: target.groups,
+          owner: { sub: previous.sub, email: previousEmail },
+        },
+        after: {
+          adminRole: OWNER_GROUP,
+          groups: [OWNER_GROUP, ...targetApp],
+          previousOwner: { sub: previous.sub, email: previousEmail, adminRole: 'superadmin', groups: ['superadmin', ...previousApp] },
+        },
+        reason: inp.reason,
+        calls,
+      },
+      // The new owner is added first and the previous owner removed last, so a failure partway leaves
+      // two owners (flagged on the People page), never none.
+      run: async (steps) => {
+        const t = target.person.username;
+        await steps.call('AdminAddUserToGroup owner (new owner)', () => cognito().addToGroup(t, OWNER_GROUP));
+        for (const r of dropFromTarget) await steps.call(`AdminRemoveUserFromGroup ${r} (new owner)`, () => cognito().removeFromGroup(t, r));
+        if (previousNeedsSuperadmin) {
+          await steps.call('AdminAddUserToGroup superadmin (previous owner)', () => cognito().addToGroup(previous.username, 'superadmin'));
+        }
+        await steps.call('AdminRemoveUserFromGroup owner (previous owner)', () => cognito().removeFromGroup(previous.username, OWNER_GROUP));
+        const previousOwner = { sub: previous.sub, email: previousEmail, ...(previousName !== undefined && { name: previousName }) };
+        const newOwner = { sub: target.person.sub, email: target.person.email, ...(target.person.name !== undefined && { name: target.person.name }) };
+        try {
+          await steps.call('Ownership alert (previous and new owner)', () =>
+            sendTransferAlert({ siteName: config.siteName, previousOwner, newOwner, reason: inp.reason, at: new Date(now()), context: w.request }),
+          );
+        } catch (error) {
+          // A transfer neither owner was told about doesn't stand. Undo in the same safe order: the
+          // previous owner is restored before the new one is removed.
+          let undone = await steps.rollback('AdminAddUserToGroup owner (previous owner)', () => cognito().addToGroup(previous.username, OWNER_GROUP));
+          if (previousNeedsSuperadmin) {
+            undone =
+              (await steps.rollback('AdminRemoveUserFromGroup superadmin (previous owner)', () => cognito().removeFromGroup(previous.username, 'superadmin'))) &&
+              undone;
+          }
+          for (const r of dropFromTarget) {
+            undone = (await steps.rollback(`AdminAddUserToGroup ${r} (new owner)`, () => cognito().addToGroup(t, r))) && undone;
+          }
+          undone = (await steps.rollback('AdminRemoveUserFromGroup owner (new owner)', () => cognito().removeFromGroup(t, OWNER_GROUP))) && undone;
+          throw new OwnerAlertFailedError(error, undone, 'transfer');
+        }
+        return { value: undefined, after: { adminRole: OWNER_GROUP, groups: [OWNER_GROUP, ...targetApp], previousOwner: { ...previousOwner, adminRole: 'superadmin', groups: ['superadmin', ...previousApp] }, ownershipAlert: { sentTo: [previousEmail, target.person.email] } } };
+      },
+    });
+    auth.invalidate({ username: target.person.username, tokenId: '' });
+    auth.invalidate({ username: previous.username, tokenId: '' });
+    return finish(run, {
+      ok: () => `${who(target)} is now the owner, and you're a Super admin. You were both emailed. ${details.transferOwnership.later}`,
+      partial: (error) =>
+        `${describeAwsError(error)} Part of the transfer was made: the new owner is added before you're removed, so the site may now have two owners, never none. Check the People page and try again.`,
     });
   }
 
@@ -830,9 +957,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     if ('ok' in start) return start;
     const { who: w, target, input: inp } = start;
     const auditAction = PEOPLE_AUDIT_ACTIONS.disable;
-    const isOwner = target.groups.includes('superadmin') && target.person.enabled;
-    const owners = isOwner ? await ownerCount() : undefined;
-    const g = guard(w, 'disable', target, owners !== undefined ? { ownerCount: owners } : {});
+    const g = guard(w, 'disable', target, {});
     if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, inp.reason !== undefined ? { reason: inp.reason } : {});
 
     const remove = adminGroupsOf(target.groups);
@@ -845,7 +970,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
         before: { enabled: true, adminRole: remove[0] ?? null, groups: target.groups, ...(revokingInvite && { invite: target.invite }) },
         after: { enabled: false, adminRole: null, groups: appRoles },
         ...(inp.reason !== undefined && { reason: inp.reason }),
-        calls: ['AdminDisableUser', ...remove.map((r) => `AdminRemoveUserFromGroup ${r}`), ...(hook ? ['App: remove record memberships'] : [])],
+        calls: ['AdminDisableUser', ...remove.map((r) => `AdminRemoveUserFromGroup ${r}`), ...(hook ? ['App: remove item memberships'] : [])],
       },
       // Disable first: it's the removal step, and it stops sign-in and refresh at once.
       run: async (steps) => {
@@ -853,7 +978,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
         auth.invalidate({ username: target.person.username, tokenId: '' });
         for (const r of remove) await steps.call(`AdminRemoveUserFromGroup ${r}`, () => cognito().removeFromGroup(target.person.username, r));
         const memberships = hook
-          ? await steps.call('App: remove record memberships', () =>
+          ? await steps.call('App: remove item memberships', () =>
               hook({ sub: target.person.sub, username: target.person.username, email: target.person.email }),
             )
           : undefined;
@@ -959,7 +1084,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       return fail('refused', 'Type their email address exactly to confirm.', { guardrail: 'confirm' });
     }
     if (inp.reason.length < ADMIN_POLICY.reasonMinLength) {
-      return fail('refused', 'Deleting an account records a reason.', { guardrail: 'reason_required' });
+      return fail('refused', 'Deleting an account needs a reason (it goes in the audit log).', { guardrail: 'reason_required' });
     }
     const g = guard(w, 'delete', target, { reason: inp.reason });
     if (!g.ok) return refuse(w, auditAction, target, g.code, g.reason, { reason: inp.reason });
@@ -1025,7 +1150,8 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   async function listPeople(): Promise<PeopleList> {
     try {
-      await acting(PEOPLE_ACTION_CAPABILITY.invite);
+      // Every admin role can see the list (view-only admins change nothing); actions check their own capability.
+      await acting('people.read');
     } catch (error) {
       const f = authFailure(error);
       return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
@@ -1144,6 +1270,11 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       if (!d) return badForm();
       return changeRole({ sub: field(d, F.sub), toRole: field(d, F.toRole), fromRole: field(d, F.fromRole), reason: field(d, F.reason) } as ChangeRoleInput);
     },
+    transferOwnership: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return transferOwnership({ sub: field(d, F.sub), reason: field(d, F.reason), confirmEmail: field(d, F.confirmEmail) } as TransferOwnershipInput);
+    },
     disable: (_prev, data) => (formOf(data) ? disable(targetFrom(data) as TargetInput) : badForm()),
     enable: (_prev, data) => (formOf(data) ? enable(targetFrom(data) as TargetInput) : badForm()),
     signOutEverywhere: (_prev, data) => (formOf(data) ? signOutEverywhere(targetFrom(data) as TargetInput) : badForm()),
@@ -1159,6 +1290,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     invite,
     resend,
     changeRole,
+    transferOwnership,
     disable,
     enable,
     signOutEverywhere,

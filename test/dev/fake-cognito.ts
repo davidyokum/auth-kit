@@ -98,7 +98,7 @@ export function createFakeCognito(options: FakePoolOptions = {}): FakeCognito {
     account: options.account ?? ACCOUNT,
     deletionProtection: options.deletionProtection ?? 'INACTIVE',
     mfa: options.mfa ?? 'OPTIONAL',
-    groups: options.groups ?? ['superadmin', 'admin', 'editor', 'viewer', 'reviewer'],
+    groups: options.groups ?? ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
     adminFlow: options.adminFlow ?? true,
     ...(options.estimatedUsers !== undefined && { estimatedUsers: options.estimatedUsers }),
   };

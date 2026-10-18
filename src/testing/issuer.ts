@@ -8,7 +8,7 @@ import type { JwksLike } from '../server/jwks.js';
  * ```ts
  * const issuer = createTestIssuer({ userPoolId: 'us-east-1_TestPool1', clientId: 'testclient' });
  * const auth = createServerAuth({ userPoolId, clientId, capabilities, jwks: issuer.jwks, cognito: fakeCognito });
- * const token = issuer.mintAccessToken({ groups: ['editor'] });
+ * const token = issuer.mintAccessToken({ groups: ['admin-content'] });
  * ```
  */
 export interface TestIssuerOptions {

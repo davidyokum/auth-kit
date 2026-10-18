@@ -21,7 +21,7 @@ npx ampx sandbox --profile personal                         # writes amplify_out
 npx auth-kit init-personas --domain reports.test --app-roles reviewer
 ```
 
-`personas.json` is the only list of test accounts: `key`, a `.test` `email`, `groups` (at most one admin role, plus app roles; `[]` for a member), and optional `label` and `attributes`. You need a persona for each of superadmin, admin, editor, viewer, and a member with no group; add more (a second member for record tests, one per app role) as you like. Passwords never go in this file.
+`personas.json` is the only list of test accounts: `key`, a `.test` `email`, `groups` (at most one admin role, plus app roles; `[]` for a member), and optional `label` and `attributes`. You need a persona for each admin role (`owner`, exactly one; `superadmin`; `admin-content-people`; `admin-content`; `admin-view`) and a member with no group; add more (a second member for record tests, one per app role) as you like. Passwords never go in this file.
 
 **2. `.env.local`** (git-ignored; the seed script refuses to write it otherwise):
 
@@ -120,7 +120,7 @@ npm run dev                                                            # open ht
 
 The seed script refuses unless the pool is a sandbox: tagged `Environment=sandbox`, not an Amplify branch, deletion protection off, at most 50 users, and (with `--account`) in that AWS account per the pool's ARN. It then creates each persona with no invitation email, sets a permanent password, puts it in exactly its groups, enrolls an authenticator (the standard requires one of password users), and proves each persona signs in. Passwords (`PERSONA_PASSWORD_<KEY>`) and authenticator secrets (`PERSONA_TOTP_<KEY>`) go to `.env.local` and are never printed. A rerun with nothing to change makes no writes. `--dry-run` reports without writing.
 
-Pick a persona from **Sign in as…** in the ribbon. The route signs it in with `AdminInitiateAuth`, answers the authenticator challenge, and sets the same cookies Amplify's own sign-in sets, so every server check runs exactly as in production. An agent can do the same: `POST /api/dev/sign-in` with `{"persona":"editor"}` from the page's origin, or click the menu.
+Pick a persona from **Sign in as…** in the ribbon. The route signs it in with `AdminInitiateAuth`, answers the authenticator challenge, and sets the same cookies Amplify's own sign-in sets, so every server check runs exactly as in production. An agent can do the same: `POST /api/dev/sign-in` with `{"persona":"admin-content"}` from the page's origin, or click the menu.
 
 ## What the route checks
 

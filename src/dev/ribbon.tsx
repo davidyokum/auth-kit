@@ -87,7 +87,7 @@ export function EnvironmentRibbon(props: EnvironmentRibbonProps): ReactElement |
 }
 
 export interface ViewAsBannerProps {
-  /** Who the admin is viewing as: a role ("Editor") or a person's name. */
+  /** Who the admin is viewing as: a role ("Admin – content only") or a person's name. */
   viewingAs: string;
   /**
    * Ends View as: a server action, or a URL the Exit button POSTs to. Ending is a state change the
@@ -101,7 +101,7 @@ export interface ViewAsBannerProps {
 
 /**
  * The View as frame: a hatched border around the whole page and a sticky bar,
- * "Viewing as Editor · read-only · Exit". The server still blocks every write; this only makes the
+ * "Viewing as Admin – content only · read-only · Exit". The server still blocks every write; this only makes the
  * mode impossible to miss.
  */
 export function ViewAsBanner(props: ViewAsBannerProps): ReactElement {

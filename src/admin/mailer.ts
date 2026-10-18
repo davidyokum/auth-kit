@@ -55,10 +55,10 @@ export function renderInviteEmail(input: InviteEmail): RenderedEmail {
   return { subject, text, html };
 }
 
-/** Who an owner-grant alert goes to and what it says. */
-export interface OwnerGrantAlert {
+/** A Super admin grant (only the owner grants it): who was granted, by whom, and who's told. */
+export interface SuperadminGrantAlert {
   siteName: string;
-  /** Every current owner (read live after the grant, so the new owner is included). */
+  /** Who gets the alert: the site's owner (every enabled member of the owner group, read live after the grant). */
   owners: readonly { sub: string; email: string; name?: string }[];
   grantedTo: { sub: string; email: string; name?: string };
   grantedBy: { sub: string; email?: string };
@@ -69,32 +69,42 @@ export interface OwnerGrantAlert {
   context?: { ip?: string; userAgent?: string; requestId?: string };
 }
 
-/**
- * Tells every owner that someone was made an owner. Granting the owner role requires it: if the alert
- * can't be sent, the grant is undone. Throw to report a failure.
- */
-export interface OwnerAlertNotifier {
-  ownerGranted(alert: OwnerGrantAlert): Promise<void>;
+/** An ownership transfer: the previous owner (now Super admin) and the new owner both get it. */
+export interface OwnershipTransferAlert {
+  siteName: string;
+  /** Who started it and is now Super admin. */
+  previousOwner: { sub: string; email: string; name?: string };
+  newOwner: { sub: string; email: string; name?: string };
+  reason: string;
+  at: Date;
+  context?: { ip?: string; userAgent?: string; requestId?: string };
 }
 
-/** The default owner-grant alert: who, whom, when, from where, why, and what to do if it's unexpected. */
-export function renderOwnerAlertEmail(alert: OwnerGrantAlert): RenderedEmail {
-  const who = alert.grantedBy.email ?? alert.grantedBy.sub;
-  const whom = alert.grantedTo.name ? `${alert.grantedTo.name} (${alert.grantedTo.email})` : alert.grantedTo.email;
-  const when = `${alert.at.toISOString().replace('T', ' ').slice(0, 16)} UTC`;
-  const lines = [
-    `${who} made ${whom} an owner of ${alert.siteName}${alert.via === 'invite' ? ' by inviting them as one' : ''}.`,
-    '',
-    `When: ${when}`,
-    ...(alert.reason ? [`Reason given: ${alert.reason}`] : []),
-    ...(alert.context?.ip ? [`From: ${alert.context.ip}${alert.context.userAgent ? ` (${alert.context.userAgent})` : ''}`] : []),
-    ...(alert.context?.requestId ? [`Request: ${alert.context.requestId}`] : []),
-    '',
-    'Owners can manage admins, security settings, exports, and delete accounts. Every owner gets this email.',
-    `If you didn't expect it, disable both accounts from the People page (or the break-glass path) and check the Activity page.`,
+/**
+ * The alerts the owner gets. Granting Super admin and transferring ownership require them: if the
+ * alert can't be sent, the change is undone. Throw to report a failure.
+ */
+export interface OwnerAlertNotifier {
+  /** Someone was made Super admin: tell the owner. */
+  superadminGranted(alert: SuperadminGrantAlert): Promise<void>;
+  /** Ownership moved: tell the previous and the new owner. */
+  ownershipTransferred(alert: OwnershipTransferAlert): Promise<void>;
+}
+
+function when(at: Date): string {
+  return `${at.toISOString().replace('T', ' ').slice(0, 16)} UTC`;
+}
+
+function contextLines(context: SuperadminGrantAlert['context']): string[] {
+  return [
+    ...(context?.ip ? [`From: ${context.ip}${context.userAgent ? ` (${context.userAgent})` : ''}`] : []),
+    ...(context?.requestId ? [`Request: ${context.requestId}`] : []),
   ];
+}
+
+function rendered(subject: string, lines: string[]): RenderedEmail {
   return {
-    subject: `${alert.siteName}: ${alert.grantedTo.email} is now an owner`,
+    subject,
     text: lines.join('\n'),
     html: lines.map((l) => (l === '' ? '' : `<p>${escapeHtml(l)}</p>`)).filter(Boolean).join('\n'),
   };
@@ -155,7 +165,7 @@ export function renderOwnerInviteWarningEmail(warning: OwnerInviteWarning): Rend
       `The owner invite for ${whom} on ${site}, sent ${sent} (UTC), hasn't been used. Invites expire after 7 days (this one on ${expired}), but this is the site's only owner, so the invite-expiry job left it enabled and warned them.`,
       '',
       'Until they sign in, it is a live owner account for whoever controls that inbox.',
-      'If the address is wrong, or they no longer need it, make someone else an owner: the next run then disables this invite.',
+      'If the address is wrong, give the owner role to the right person through the break-glass path (the Cognito console): the next run then disables this invite. A site has exactly one owner, and only a signed-in owner can transfer it.',
       '',
       `You get this because you're the fallback contact for ${site}'s owner warnings.`,
     ];
@@ -172,6 +182,38 @@ export function renderOwnerInviteWarningEmail(warning: OwnerInviteWarning): Rend
   return { subject, text: lines.join('\n'), html };
 }
 
+/** The default Super admin grant alert: who, whom, when, from where, why, and what to do if it's unexpected. */
+export function renderSuperadminGrantEmail(alert: SuperadminGrantAlert): RenderedEmail {
+  const who = alert.grantedBy.email ?? alert.grantedBy.sub;
+  const whom = alert.grantedTo.name ? `${alert.grantedTo.name} (${alert.grantedTo.email})` : alert.grantedTo.email;
+  return rendered(`${alert.siteName}: ${alert.grantedTo.email} is now a Super admin`, [
+    `${who} made ${whom} a Super admin of ${alert.siteName}${alert.via === 'invite' ? ' by inviting them as one' : ''}.`,
+    '',
+    `When: ${when(alert.at)}`,
+    ...(alert.reason ? [`Reason given: ${alert.reason}`] : []),
+    ...contextLines(alert.context),
+    '',
+    'Super admins can manage people and roles below Super admin, security settings, exports, and deletion. Only the owner can grant it, and the owner gets this email.',
+    `If you didn't expect it, disable the new Super admin from the People page (or the break-glass path) and check the Activity page.`,
+  ]);
+}
+
+/** The default ownership transfer alert, sent to the previous and the new owner. */
+export function renderOwnershipTransferEmail(alert: OwnershipTransferAlert): RenderedEmail {
+  const from = alert.previousOwner.name ? `${alert.previousOwner.name} (${alert.previousOwner.email})` : alert.previousOwner.email;
+  const to = alert.newOwner.name ? `${alert.newOwner.name} (${alert.newOwner.email})` : alert.newOwner.email;
+  return rendered(`${alert.siteName}: ${alert.newOwner.email} is now the owner`, [
+    `${from} transferred ownership of ${alert.siteName} to ${to}.`,
+    '',
+    `When: ${when(alert.at)}`,
+    `Reason given: ${alert.reason}`,
+    ...contextLines(alert.context),
+    '',
+    `${alert.newOwner.email} is now the site's only owner. ${alert.previousOwner.email} is now a Super admin.`,
+    `If you didn't expect it, sign in and check the People and Activity pages, or use the break-glass path.`,
+  ]);
+}
+
 export interface SesInviteMailerOptions {
   /** A verified SES identity, e.g. `Example Reports <noreply@example.org>`. */
   from: string;
@@ -181,24 +223,28 @@ export interface SesInviteMailerOptions {
   replyTo?: readonly string[];
   /** Your own invite template. Default `renderInviteEmail`. */
   render?: (input: InviteEmail) => RenderedEmail;
-  /** Your own owner-alert template. Default `renderOwnerAlertEmail`. */
-  renderOwnerAlert?: (alert: OwnerGrantAlert) => RenderedEmail;
+  /** Your own Super admin grant alert. Default `renderSuperadminGrantEmail`. */
+  renderSuperadminGrant?: (alert: SuperadminGrantAlert) => RenderedEmail;
+  /** Your own ownership transfer alert. Default `renderOwnershipTransferEmail`. */
+  renderOwnershipTransfer?: (alert: OwnershipTransferAlert) => RenderedEmail;
   /** Your own last-owner warning template. Default `renderOwnerInviteWarningEmail`. */
   renderOwnerInviteWarning?: (warning: OwnerInviteWarning) => RenderedEmail;
 }
 
 /**
- * The site's mailer through SES (SESv2 `SendEmail`): the invite email, the alert every owner gets
- * when someone is made an owner (one message to all of them, so it's sent to all or to none), and the
- * last-owner warning the invite-expiry sweep sends (one message per recipient). The role needs
- * `ses:SendEmail` on the identity.
+ * The site's mailer through SES (SESv2 `SendEmail`): the invite email, the alert the owner gets when
+ * someone is made Super admin, the alert the previous and new owner get when ownership moves (each
+ * alert is one message to all its recipients, so it's sent to all or to none), and the last-owner
+ * warning the invite-expiry sweep sends (one message per recipient). The role needs `ses:SendEmail`
+ * on the identity.
  */
 export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier {
   if (!options.from) throw new Error('auth-kit: createSesInviteMailer needs a from address.');
   let client = options.client;
   const ses = (): SESv2Client => (client ??= new SESv2Client(options.region ? { region: options.region } : {}));
   const render = options.render ?? renderInviteEmail;
-  const renderAlert = options.renderOwnerAlert ?? renderOwnerAlertEmail;
+  const renderGrant = options.renderSuperadminGrant ?? renderSuperadminGrantEmail;
+  const renderTransfer = options.renderOwnershipTransfer ?? renderOwnershipTransferEmail;
   const renderWarning = options.renderOwnerInviteWarning ?? renderOwnerInviteWarningEmail;
   const send = async (to: string[], email: RenderedEmail) => {
     await ses().send(
@@ -218,10 +264,15 @@ export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMa
   };
   return {
     sendInvite: (input) => send([input.email], render(input)),
-    async ownerGranted(alert) {
+    async superadminGranted(alert) {
       const to = [...new Set(alert.owners.map((o) => o.email).filter(Boolean))];
-      if (to.length === 0) throw new Error('auth-kit: no owner has an email address to alert.');
-      await send(to, renderAlert(alert));
+      if (to.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
+      await send(to, renderGrant(alert));
+    },
+    async ownershipTransferred(alert) {
+      const to = [...new Set([alert.previousOwner.email, alert.newOwner.email].filter(Boolean))];
+      if (to.length < 2) throw new Error('auth-kit: the ownership alert needs both the previous and the new owner’s email address.');
+      await send(to, renderTransfer(alert));
     },
     async ownerInviteUnused(warning) {
       if (!warning.to.email) throw new Error('auth-kit: the owner warning has no address to go to.');

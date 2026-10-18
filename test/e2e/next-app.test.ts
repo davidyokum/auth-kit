@@ -37,11 +37,11 @@ const POOL = { userPoolId: 'us-east-1_TestPool1', clientId: 'testclient000000000
 const PERSONAS = {
   member: {},
   otherMember: {},
-  admin: { groups: ['admin'] },
+  admin: { groups: ['admin-content-people'] },
   noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } },
-  demotedAdmin: { groups: ['admin'], liveGroups: [] },
-  disabledAdmin: { groups: ['admin'], enabled: false },
-  revokedSession: { groups: ['editor'], sessionRevoked: true },
+  demotedAdmin: { groups: ['admin-content-people'], liveGroups: [] },
+  disabledAdmin: { groups: ['admin-content-people'], enabled: false },
+  revokedSession: { groups: ['admin-content'], sessionRevoked: true },
 };
 type Name = keyof typeof PERSONAS | 'anonymous';
 type Expect = Record<Name, number>;

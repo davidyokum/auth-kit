@@ -1,6 +1,6 @@
 # 0011. People actions: live checks, exact roles, owner grants, two invite modes, and where the primer was unclear
 
-- **Status:** Accepted, 2026-10-17
+- **Status:** Accepted, 2026-10-17. Owner grants are superseded by [0020](0020-site-wide-roles.md) (2026-10-18): the owner role is never granted, it moves only by Transfer ownership, and the alert is now for Super admin grants, to the owner. Ranks and role names below are the old ones.
 - **Standard:** 03 §2 Admin area, Roles and lifecycle; primer §8, §9, Chapter 7
 
 ## Decision

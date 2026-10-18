@@ -32,11 +32,11 @@ describe('getUser', () => {
 
   it('reads a bearer token', async () => {
     const { auth, issuer } = harness();
-    const user = await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 's1', groups: ['editor'] })) });
+    const user = await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 's1', groups: ['admin-content'] })) });
     expect(user?.sub).toBe('s1');
     expect(user?.username).toBe('s1');
-    expect(user?.groups).toEqual(['editor']);
-    expect([...(user?.capabilities ?? [])].sort()).toEqual(['content.edit', 'content.publish', 'content.read']);
+    expect(user?.groups).toEqual(['admin-content']);
+    expect([...(user?.capabilities ?? [])].sort()).toEqual(['audit.read', 'content.edit', 'content.publish', 'content.read', 'people.read']);
     expect(user?.live).toBe(false);
   });
 
@@ -70,7 +70,7 @@ describe('getUser', () => {
   it('returns null for forged, expired, or foreign tokens', async () => {
     const { auth, issuer } = harness();
     for (const token of [
-      tamperToken(issuer.mintAccessToken({ groups: [] }), { 'cognito:groups': ['superadmin'] }),
+      tamperToken(issuer.mintAccessToken({ groups: [] }), { 'cognito:groups': ['owner'] }),
       issuer.mintAccessToken({ expiresIn: -1 }),
       issuer.mintAccessToken({ claims: { client_id: 'some-other-client' } }),
       issuer.mintIdToken(),
@@ -236,7 +236,7 @@ describe('claim shape and the authenticator cache (L1)', () => {
     ['iat', { iat: undefined }],
     ['a string exp', { exp: '9999999999' }],
     ['an empty username', { username: '' }],
-    ['non-string groups', { 'cognito:groups': 'superadmin' }],
+    ['non-string groups', { 'cognito:groups': 'owner' }],
   ])('refuses a pool-signed token with missing or malformed %s', async (_label, claims) => {
     const { auth, issuer } = harness();
     const req = bearer(issuer.mintAccessToken({ claims }));
@@ -274,7 +274,7 @@ describe('createServerAuth fails loudly on bad options', () => {
 describe('requireCan and requireGroup', () => {
   it('allows a capability the groups grant and refuses one they do not (403)', async () => {
     const { auth, issuer } = harness();
-    const editor = bearer(issuer.mintAccessToken({ groups: ['editor'] }));
+    const editor = bearer(issuer.mintAccessToken({ groups: ['admin-content'] }));
     await expect(auth.requireCan('content.publish', { request: editor })).resolves.toBeTruthy();
     const error = await rejection(auth.requireCan('people.manage', { request: editor }));
     expect(error).toBeInstanceOf(ForbiddenError);
@@ -304,16 +304,16 @@ describe('requireCan and requireGroup', () => {
 
   it('checks any-of for requireGroup', async () => {
     const { auth, issuer } = harness();
-    const req = bearer(issuer.mintAccessToken({ groups: ['admin'] }));
-    await expect(auth.requireGroup(['superadmin', 'admin'], { request: req })).resolves.toBeTruthy();
-    expect(await rejection(auth.requireGroup('superadmin', { request: req }))).toBeInstanceOf(ForbiddenError);
+    const req = bearer(issuer.mintAccessToken({ groups: ['admin-content-people'] }));
+    await expect(auth.requireGroup(['owner', 'admin-content-people'], { request: req })).resolves.toBeTruthy();
+    expect(await rejection(auth.requireGroup('owner', { request: req }))).toBeInstanceOf(ForbiddenError);
   });
 
   it('runs the authenticator rule before the role check', async () => {
     const { auth, issuer, cognito } = harness();
     cognito.setFactors('adm', { configured: ['PASSWORD'], mfa: [] });
     const error = await rejection(
-      auth.requireCan('people.manage', { request: bearer(issuer.mintAccessToken({ sub: 'adm', groups: ['admin'] })) }),
+      auth.requireCan('people.manage', { request: bearer(issuer.mintAccessToken({ sub: 'adm', groups: ['admin-content-people'] })) }),
     );
     expect(error).toBeInstanceOf(MfaEnrollmentRequiredError);
   });
@@ -322,18 +322,18 @@ describe('requireCan and requireGroup', () => {
 describe('live checks for the admin area', () => {
   it("re-reads groups: a demoted admin is refused at once though the token still says admin", async () => {
     const { auth, issuer, cognito } = harness();
-    cognito.setLiveState('demoted', { enabled: true, groups: ['viewer'] });
-    const req = bearer(issuer.mintAccessToken({ sub: 'demoted', groups: ['admin'] }));
+    cognito.setLiveState('demoted', { enabled: true, groups: ['admin-view'] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'demoted', groups: ['admin-content-people'] }));
     await expect(auth.requireCan('people.manage', { request: req })).resolves.toBeTruthy(); // token-only
     expect(await rejection(auth.requireCan('people.manage', { request: req, live: true }))).toBeInstanceOf(ForbiddenError);
   });
 
   it('refuses a disabled account with 401 account_disabled', async () => {
     const { auth, issuer, cognito } = harness();
-    cognito.setLiveState('gone', { enabled: false, groups: ['admin'] });
+    cognito.setLiveState('gone', { enabled: false, groups: ['admin-content-people'] });
     const error = await rejection(
       auth.requireCan('people.manage', {
-        request: bearer(issuer.mintAccessToken({ sub: 'gone', groups: ['admin'] })),
+        request: bearer(issuer.mintAccessToken({ sub: 'gone', groups: ['admin-content-people'] })),
         live: true,
       }),
     );
@@ -343,11 +343,11 @@ describe('live checks for the admin area', () => {
 
   it('returns the live groups on the user and caches them for about a minute', async () => {
     const { auth, issuer, cognito, clock } = harness();
-    cognito.setLiveState('a', { enabled: true, groups: ['admin', 'reviewer'] });
-    const req = bearer(issuer.mintAccessToken({ sub: 'a', groups: ['admin'] }));
+    cognito.setLiveState('a', { enabled: true, groups: ['admin-content-people', 'reviewer'] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'a', groups: ['admin-content-people'] }));
     const user = await auth.requireCan('people.manage', { request: req, live: true });
     expect(user.live).toBe(true);
-    expect(user.groups).toEqual(['admin', 'reviewer']);
+    expect(user.groups).toEqual(['admin-content-people', 'reviewer']);
     await auth.requireCan('people.manage', { request: req, live: true });
     expect(cognito.calls.filter((c) => c.method === 'getLiveUserState')).toHaveLength(1);
     clock.now += 61_000;
@@ -357,8 +357,8 @@ describe('live checks for the admin area', () => {
 
   it('invalidate() by username alone (what the admin module knows) forgets the live read', async () => {
     const { auth, issuer, cognito } = harness();
-    cognito.setLiveState('j', { enabled: true, groups: ['admin'] });
-    const req = bearer(issuer.mintAccessToken({ sub: 'j', groups: ['admin'] }));
+    cognito.setLiveState('j', { enabled: true, groups: ['admin-content-people'] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'j', groups: ['admin-content-people'] }));
     await auth.requireCan('people.manage', { request: req, live: true });
     cognito.setLiveState('j', { enabled: true, groups: [] });
     auth.invalidate({ username: 'j' });
@@ -367,8 +367,8 @@ describe('live checks for the admin area', () => {
 
   it('invalidate() forgets cached results', async () => {
     const { auth, issuer, cognito } = harness();
-    cognito.setLiveState('i', { enabled: true, groups: ['admin'] });
-    const req = bearer(issuer.mintAccessToken({ sub: 'i', groups: ['admin'] }));
+    cognito.setLiveState('i', { enabled: true, groups: ['admin-content-people'] });
+    const req = bearer(issuer.mintAccessToken({ sub: 'i', groups: ['admin-content-people'] }));
     const user = await auth.requireCan('people.manage', { request: req, live: true });
     cognito.setLiveState('i', { enabled: true, groups: [] });
     auth.invalidate(user);
@@ -380,20 +380,20 @@ describe('step-up (auth_time)', () => {
   it('requires a sign-in within 5 minutes by default', async () => {
     const { auth, issuer, clock } = harness();
     const now = Math.floor(clock.now / 1000);
-    const stale = bearer(issuer.mintAccessToken({ groups: ['superadmin'], authTime: now - 600 }));
+    const stale = bearer(issuer.mintAccessToken({ groups: ['owner'], authTime: now - 600 }));
     const error = await rejection(auth.requireCan('roles.manage', { request: stale, recentSignIn: true }));
     expect(error).toBeInstanceOf(StepUpRequiredError);
     expect((error as StepUpRequiredError).status).toBe(401);
     expect((error as StepUpRequiredError).maxAgeSeconds).toBe(300);
 
-    const fresh = bearer(issuer.mintAccessToken({ groups: ['superadmin'], authTime: now - 60 }));
+    const fresh = bearer(issuer.mintAccessToken({ groups: ['owner'], authTime: now - 60 }));
     await expect(auth.requireCan('roles.manage', { request: fresh, recentSignIn: true })).resolves.toBeTruthy();
   });
 
   it('accepts a custom maximum age and checks capability before asking to re-authenticate', async () => {
     const { auth, issuer, clock } = harness();
     const now = Math.floor(clock.now / 1000);
-    const req = bearer(issuer.mintAccessToken({ groups: ['viewer'], authTime: now - 120 }));
+    const req = bearer(issuer.mintAccessToken({ groups: ['admin-view'], authTime: now - 120 }));
     expect(await rejection(auth.requireCan('roles.manage', { request: req, recentSignIn: 60 }))).toBeInstanceOf(ForbiddenError);
     const user = await auth.requireUser({ request: req });
     expect(() => auth.requireRecentSignIn(user, 60)).toThrow(StepUpRequiredError);
@@ -430,7 +430,7 @@ describe('requireRecordAccess (IDOR)', () => {
 
   it('allows a capability that covers every record', async () => {
     const { auth, issuer } = harness();
-    const admin = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ groups: ['admin'] })) });
+    const admin = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ groups: ['admin-content-people'] })) });
     expect(auth.requireRecordAccess(admin, record, { ...rule, coveredBy: 'audit.read' })).toBe(record);
   });
 

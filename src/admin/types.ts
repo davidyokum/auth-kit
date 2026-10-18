@@ -93,10 +93,10 @@ export type FormAction = (previous: ActionResult | null, data: FormData) => Prom
 
 export interface InviteInput {
   email: string;
-  /** An admin role, an app role, or `member` for no group. */
+  /** An admin role (never `owner`), an app role, or `member` for no group. */
   role: string;
   name?: string;
-  /** Required when the role is admin or owner. */
+  /** Required when the role is Admin – content & people or Super admin. */
   reason?: string;
   /** Required when the address is outside `inviteDomains`. */
   confirmOutsideDomain?: boolean;
@@ -109,11 +109,19 @@ export interface TargetInput {
 
 export interface ChangeRoleInput {
   sub: string;
-  /** The new admin role, or `member` for none. App roles are left as they are. */
+  /** The new admin role, or `member` for none. App roles are left as they are. `owner` is refused: it moves only by transfer. */
   toRole: StandardGroup | 'member';
   /** The admin role the page showed. If it changed since, the action refuses (`stale`). */
   fromRole?: StandardGroup | 'member';
   reason: string;
+}
+
+export interface TransferOwnershipInput {
+  /** The person who becomes the owner. They must be enabled and have signed in. */
+  sub: string;
+  reason: string;
+  /** Their email address, typed out to confirm. */
+  confirmEmail: string;
 }
 
 export interface DeleteUserInput {
@@ -136,7 +144,7 @@ export const PEOPLE_FORM_FIELDS = {
   confirmOutsideDomain: 'confirmOutsideDomain',
 } as const;
 
-export { MEMBER_ROLE } from './guardrails.js';
+export { MEMBER_ROLE } from '../shared/policy.js';
 
 // ---- Audit log ---------------------------------------------------------------------------------
 

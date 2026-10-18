@@ -185,7 +185,7 @@ describe('protected routes without a valid session', () => {
 
   it('refuses a forged token (it verifies, not just checks for a cookie)', async () => {
     const { proxy, issuer } = setup();
-    const forged = tamperToken(issuer.mintAccessToken({ groups: [] }), { 'cognito:groups': ['superadmin'] });
+    const forged = tamperToken(issuer.mintAccessToken({ groups: [] }), { 'cognito:groups': ['owner'] });
     const res = await proxy(request('/api/admin', { headers: { authorization: `Bearer ${forged}` } }));
     expect(res.status).toBe(401);
   });
@@ -305,7 +305,7 @@ describe('server-side refresh is attempted only for a genuine expired session (M
   it('never refreshes a forged token, even with a refresh cookie', async () => {
     const h = harness();
     const { calls, proxy } = counting(h);
-    const forged = tamperToken(h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -10 }), { 'cognito:groups': ['superadmin'] });
+    const forged = tamperToken(h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -10 }), { 'cognito:groups': ['owner'] });
     const res = await proxy(request('/api/x', { headers: { cookie: expiredSession(h, { accessToken: forged }) } }));
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({ error: 'invalid_token' });

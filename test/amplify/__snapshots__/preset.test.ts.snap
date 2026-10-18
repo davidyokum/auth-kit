@@ -363,13 +363,13 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
     },
     "Type": "AWS::Cognito::UserPoolClient",
   },
-  "authadminGroupB06C2B06": {
+  "authadmincontentGroupAA48903B": {
     "Properties": {
-      "GroupName": "admin",
-      "Precedence": 1,
+      "GroupName": "admin-content",
+      "Precedence": 3,
       "RoleArn": {
         "Fn::GetAtt": [
-          "authadminGroupRole3D6C56FA",
+          "authadmincontentGroupRole51BDF2C7",
           "Arn",
         ],
       },
@@ -379,13 +379,45 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
     },
     "Type": "AWS::Cognito::UserPoolGroup",
   },
-  "autheditorGroupEA1BDB9A": {
+  "authadmincontentpeopleGroup36D16CBA": {
     "Properties": {
-      "GroupName": "editor",
+      "GroupName": "admin-content-people",
       "Precedence": 2,
       "RoleArn": {
         "Fn::GetAtt": [
-          "autheditorGroupRoleFE95BACC",
+          "authadmincontentpeopleGroupRoleD0A3868F",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "authadminviewGroup59C2E390": {
+    "Properties": {
+      "GroupName": "admin-view",
+      "Precedence": 4,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authadminviewGroupRole61EAF1CA",
+          "Arn",
+        ],
+      },
+      "UserPoolId": {
+        "Ref": "authUserPoolA78B038B",
+      },
+    },
+    "Type": "AWS::Cognito::UserPoolGroup",
+  },
+  "authownerGroup938D5099": {
+    "Properties": {
+      "GroupName": "owner",
+      "Precedence": 0,
+      "RoleArn": {
+        "Fn::GetAtt": [
+          "authownerGroupRoleD57B5FF7",
           "Arn",
         ],
       },
@@ -398,7 +430,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
   "authreviewerGroupFA7E5676": {
     "Properties": {
       "GroupName": "reviewer",
-      "Precedence": 4,
+      "Precedence": 5,
       "RoleArn": {
         "Fn::GetAtt": [
           "authreviewerGroupRole8D48604D",
@@ -414,26 +446,10 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
   "authsuperadminGroup37E714B4": {
     "Properties": {
       "GroupName": "superadmin",
-      "Precedence": 0,
+      "Precedence": 1,
       "RoleArn": {
         "Fn::GetAtt": [
           "authsuperadminGroupRole6A03E294",
-          "Arn",
-        ],
-      },
-      "UserPoolId": {
-        "Ref": "authUserPoolA78B038B",
-      },
-    },
-    "Type": "AWS::Cognito::UserPoolGroup",
-  },
-  "authviewerGroup718C1E53": {
-    "Properties": {
-      "GroupName": "viewer",
-      "Precedence": 3,
-      "RoleArn": {
-        "Fn::GetAtt": [
-          "authviewerGroupRoleA78ECDF9",
           "Arn",
         ],
       },
