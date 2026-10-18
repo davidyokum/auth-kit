@@ -3,6 +3,7 @@ import {
   type AccountCreationSettings,
   AccountCreationConfigError,
   type NormalizedAccountCreation,
+  allowsSelfSignUp,
   normalizeAccountCreation,
 } from '../shared/account-creation.js';
 import {
@@ -190,6 +191,15 @@ export interface AuthStandardOptions {
    * to the screens (`SignIn`, `SignUp`) and the custom message trigger, which all say it.
    */
   codeLifetimeMinutes?: number;
+  /**
+   * The CLOUDFRONT-scope web ACL in front of the site's sign-up route (`createSiteWebAcl`, with
+   * `accountCreationWafRules`: a silent challenge and a per-IP limit), as a literal ARN
+   * (`arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>`). **Required in `open` mode**
+   * (ADR 0023): anyone may create an account there, so the challenge is the bot check, and synthesis
+   * fails without it. Optional in `domains` mode. Associate it with the Amplify app (Hosting →
+   * Firewall); the sign-up route also refuses requests that didn't pass the challenge.
+   */
+  siteWebAclArn?: string;
   /** @deprecated Removed in 0.1.8: throws. Use `accountCreation` (ADR 0023). */
   selfSignUp?: SelfSignUpOptions;
 }
@@ -211,6 +221,8 @@ export interface NormalizedAuthStandardOptions {
   environment: string | undefined;
   deletionProtectionInSandbox: boolean;
   accountCreation: NormalizedAccountCreation;
+  /** The site's CLOUDFRONT web ACL for the sign-up route (required in `open` mode). */
+  siteWebAclArn: string | null;
   codeLifetimeMinutes: number;
 }
 
@@ -232,6 +244,9 @@ const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', ...RULE_KEYS]
 // A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
 const WEB_ACL_ARN_RE =
   /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
+
+/** A CLOUDFRONT-scope web ACL: always in us-east-1, with `global` in place of `regional`. */
+const SITE_WEB_ACL_ARN_RE = /^arn:aws(?:-cn|-us-gov)?:wafv2:us-east-1:\d{12}:global\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
 
 /** The Region in a literal web ACL ARN, or undefined for a CDK token (resolved at deploy). */
 export function webAclArnRegion(arn: string): string | undefined {
@@ -443,6 +458,20 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (o.adminPool && accountCreation.mode !== 'invite') {
     fail(`An admin pool is invite only: accountCreation.mode '${accountCreation.mode}' would let people make their own admin-pool accounts.`);
   }
+  let siteWebAclArn: string | null = null;
+  if (o.siteWebAclArn !== undefined) {
+    if (typeof o.siteWebAclArn !== 'string' || !SITE_WEB_ACL_ARN_RE.test(o.siteWebAclArn.trim())) {
+      fail(`siteWebAclArn "${String(o.siteWebAclArn)}" isn't a CLOUDFRONT web ACL ARN (arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>); createSiteWebAcl makes one.`);
+    }
+    if (!allowsSelfSignUp(accountCreation)) fail(`siteWebAclArn guards the sign-up route; accountCreation.mode '${accountCreation.mode}' has none.`);
+    siteWebAclArn = o.siteWebAclArn.trim();
+  }
+  if (accountCreation.mode === 'open' && siteWebAclArn === null) {
+    fail(
+      "accountCreation mode 'open' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route " +
+        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Anyone can create an account in open mode, so the challenge is required (ADR 0023).',
+    );
+  }
   let codeLifetime: number;
   try {
     codeLifetime = codeLifetimeMinutes(o.codeLifetimeMinutes);
@@ -474,6 +503,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     environment,
     deletionProtectionInSandbox: o.deletionProtectionInSandbox === true,
     accountCreation,
+    siteWebAclArn,
     codeLifetimeMinutes: codeLifetime,
   };
 }

@@ -408,13 +408,15 @@ describe('account creation (ADR 0023)', () => {
     (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.PRE_SIGN_UP, fn);
   };
 
+  const SITE_ACL = `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:global/webacl/auth-kit-site-routes/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`;
+
   it.each([
     ['invite', { mode: 'invite' }],
     ['request', { mode: 'request' }],
     ['domains', { mode: 'domains', domains: ['example.edu'] }],
     ['open', { mode: 'open' }],
-  ] as const)("keeps Cognito's own SignUp off in mode %s", (_mode, accountCreation) => {
-    const t = synth({ ...BASE, accountCreation }, { beforeApply: preSignUpTrigger }).template();
+  ] as const)("keeps Cognito's own SignUp off in mode %s", (mode, accountCreation) => {
+    const t = synth({ ...BASE, accountCreation, ...(mode === 'open' && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
     t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
   });
 
@@ -430,6 +432,18 @@ describe('account creation (ADR 0023)', () => {
     const { template, auth } = synth(BASE);
     auth.resources.cfnResources.cfnUserPool.addPropertyOverride('LambdaConfig.CustomMessage', undefined);
     expect(() => template()).toThrow(/no custom message trigger/);
+  });
+
+  it('open mode requires the site’s CLOUDFRONT web ACL with the challenge rules (M4)', () => {
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' } })).toThrow(/mode 'open' needs siteWebAclArn.*createSiteWebAcl/s);
+    expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
+    expect(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).applied.siteWebAclArn).toBe(SITE_ACL);
+    // A REGIONAL ACL (the user pool's kind) or another Region can't front CloudFront.
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL.replace(':global/', ':regional/') })).toThrow(/CLOUDFRONT web ACL ARN/);
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL.replace('us-east-1', 'us-west-2') })).toThrow(/CLOUDFRONT web ACL ARN/);
+    // Optional in domains mode; meaningless without a sign-up route.
+    expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'request' }, siteWebAclArn: SITE_ACL })).toThrow(/has none/);
   });
 
   it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {
@@ -450,7 +464,7 @@ describe('account creation (ADR 0023)', () => {
   it('marks sign-up accounts with an immutable attribute only on sign-up sites', () => {
     const schema = (t: Template) =>
       (Object.values(t.findResources('AWS::Cognito::UserPool'))[0] as { Properties: { Schema?: { Name: string; Mutable?: boolean }[] } }).Properties.Schema ?? [];
-    const open = schema(synth({ ...BASE, accountCreation: { mode: 'open' } }).template());
+    const open = schema(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).template());
     expect(open.find((a) => a.Name === 'authkit_origin')).toMatchObject({ Mutable: false, AttributeDataType: 'String' });
     for (const accountCreation of [undefined, { mode: 'request' as const }]) {
       expect(schema(synth({ ...BASE, ...(accountCreation && { accountCreation }) }).template()).some((a) => a.Name === 'authkit_origin')).toBe(false);
@@ -459,7 +473,7 @@ describe('account creation (ADR 0023)', () => {
   });
 
   it("leaves the app client's write permissions at Cognito's default (every app client can write required attributes such as email anyway)", () => {
-    const client = Object.values(synth({ ...BASE, accountCreation: { mode: 'open' } }).template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
+    const client = Object.values(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
     expect(client.Properties).not.toHaveProperty('WriteAttributes');
   });
 

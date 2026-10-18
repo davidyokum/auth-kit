@@ -53,6 +53,8 @@ export interface AppliedAuthStandard {
   waf: AppliedWaf;
   /** The sign-in session (and so an emailed code's lifetime), in minutes. */
   codeLifetimeMinutes: number;
+  /** The CLOUDFRONT web ACL in front of the sign-up route (required in `open` mode), or null. */
+  siteWebAclArn: string | null;
 
   /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
   hostedUiOAuth: boolean;
@@ -348,5 +350,6 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     waf,
     hostedUiOAuth,
     codeLifetimeMinutes: o.codeLifetimeMinutes,
+    siteWebAclArn: o.siteWebAclArn,
   };
 }
