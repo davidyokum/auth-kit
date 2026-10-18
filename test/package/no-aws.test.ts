@@ -1,7 +1,9 @@
 /**
  * The canary for "tests make no AWS calls": with the test environment (vitest.config.ts uses
  * `AWS_BLOCKED_ENV`), a real SDK call can't find credentials, so it fails before any request leaves
- * this machine. If a call ever gets through, the environment block is broken: fix it first.
+ * this machine. Cognito's token-only user APIs (ChangePassword) need no credentials, so a test setup
+ * file (test/setup/no-network.ts) also refuses any fetch beyond this machine. If a call ever gets
+ * through, the block is broken: fix it first.
  */
 import { CognitoIdentityProviderClient, ListUserPoolsCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
@@ -23,5 +25,11 @@ describe('tests can’t reach AWS', () => {
   it('a real Cognito admin call fails at credential lookup', async () => {
     const client = new CognitoIdentityProviderClient({ region: 'us-east-1', maxAttempts: 1 });
     await expect(client.send(new ListUserPoolsCommand({ MaxResults: 1 }))).rejects.toThrow(NO_CREDENTIALS);
+  });
+
+  it('a fetch to Cognito’s public endpoint is refused before it leaves', async () => {
+    // Checked first, so a missing guard fails here instead of sending the request.
+    expect(globalThis.fetch.name).toBe('guardedFetch');
+    await expect(fetch('https://cognito-idp.us-east-1.amazonaws.com/', { method: 'POST', body: '{}' })).rejects.toThrow(/no network calls beyond this machine/);
   });
 });
