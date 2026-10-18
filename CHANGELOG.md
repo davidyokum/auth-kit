@@ -2,6 +2,39 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.7-alpha] - 2026-10-18
+
+Resource roles: Manager, Contributor, Reader on one item, combined with the site-wide roles (David's decision; [ADR 0022](docs/decisions/0022-resource-roles.md)). Pre-release. Two renames keep their old names, deprecated, for one release; see Migration.
+
+### Security
+
+- **One check for every item, combined with the site role.** `requireResourceRole(type, id, need)` allows an action when the site role grants it on every item (by capability: `content.read` sees, `content.edit` edits, `people.manage` manages access and invites) or the person's role on the item does. Someone who can't see the item gets 404, the same as an item that doesn't exist; someone who can see it but not do this gets 403; unreadable memberships are 503, never a pass. An ID that can't name an item gets nothing, not even the site floor.
+- **Every item keeps a Manager, even with two Managers acting at once.** Each change to an item's access is one DynamoDB transaction conditioned on the version it read; the last Manager can't be removed, demoted, or leave, except by a site admin who manages people naming the new Manager in the same step.
+- **Every access change is audited** (intent → transaction → result, with the person and the item named), and refusals by anyone who can see the item are logged. Access changes re-read the acting person live, so a demoted admin loses the site floor at once.
+- **A Manager's invite is Member-level and reported.** It creates an account with no admin role and access to that one item; the admins who manage people (owner included) are alerted every time; if the alert or the invite email fails, the account and the membership are removed again; with no alert configured, invites are refused.
+- **Least privilege for the membership table:** the app's role gets `GetItem`, `PutItem`, `DeleteItem`, and `Query` on it (transactions of Put and Delete need nothing more); deletion protection, point-in-time recovery, retained on stack delete, and `DeleteTable` denied to everyone outside sandboxes.
+
+### Added
+
+- `auth-kit/resources`: `defineResourceTypes` (nouns, per-type actions within startup-checked rules, `selfServiceCreate` and `sharedDirectory`, both off by default); `createDynamoResourceStore` and `createMemoryResourceStore` (the `ResourceAccessStore` contract); `createResourceActions` with `listAccess`, `add`, `grant`, `changeRole`, `remove` (and leaving), `invite`, `create` (an item's access and the app's record as one audited change), `deleteResourceAccess`, `removeResourceMemberships`, and `forms`; `checkAccessChange`, `decideResourceAccess`, `neededActions`, `createPermission`, `resourceAccessCopy`; `RESOURCE_AUDIT_ACTIONS` (`resources.create`, `.add`, `.changeRole`, `.remove`, `.invite`, `.delete`); `RESOURCE_TABLE_SCHEMA`.
+- The vocabulary in `src/shared/policy.ts` (from `auth-kit/server` and `auth-kit/resources`): `RESOURCE_ROLES`, `RESOURCE_ROLE_LABEL` (Manager, Contributor, Reader), `RESOURCE_ROLE_RANK`, `resourceRoleDescriptions(noun)` and `RESOURCE_ROLE_DESCRIPTIONS`, `RESOURCE_ACTIONS` (`view`, `edit`, `manage-access`, `invite`), `RESOURCE_ACTION_LABEL`, `DEFAULT_RESOURCE_ROLE_ACTIONS`, `RESOURCE_SITE_FLOOR`, `RESOURCE_POLICY`, and `RESOURCE_ACCESS_MATRIX` (site roles and resource roles × actions, built from the constants the server uses).
+- `auth-kit/server`: the `resources: { types, store }` option; `requireResourceRole`, `resourceAccess`, `listMyResources`; `pages.requireResourceRole` (403 and 404 render the not-found page).
+- `auth-kit/resources/ui`: `WhoHasAccess` ("Who has access to this {noun}": role chips; add by email with a role picker giving each role's can and can't; an address with no account turns into the invite form; remove and leave; the last-Manager messages; "Site admins can also see and edit this {noun} (view-only admins can only see it)."), `ResourceRolePicker`, `ResourceRoleChip`, `ResourceRolesSummary` (for the site role picker's `resourceAccess` slot), `ResourceAccessTable`.
+- `auth-kit/admin/cdk`: `ResourceAccessTable` with `grantApp`. `auth-kit/admin`: `resourceAccessAppPolicy`, `RESOURCE_ACCESS_APP_ACTIONS`, `renderResourceInviteAlertEmail`, `ResourceInviteNotifier`; the SES mailer's `resourceInviteSent` (and `renderResourceInvite`); `InviteEmail.item` (the invite email names the inviter and the item).
+- `auth-kit/testing/matrix-server`: `resources`, an in-memory membership store shared by every bundle.
+- The Activity page describes access changes ("gave access to m-2@example.org · project:p-1: no access → Contributor").
+
+### Changed
+
+- **Deprecated:** `requireRecordAccess` and `RecordAccessRule` (use `requireResourceRole`); `PeopleAdminConfig.removeRecordMemberships` (now `removeResourceMemberships`; both at once, if different, is refused). Both old names work unchanged for this release.
+- The disable row records `after.resourceMemberships` (was `recordMemberships`).
+- The People invite's account steps moved to `src/admin/invite-core.ts`, shared with a Manager's invite; behavior unchanged.
+- The e2e fixture's records are on resource roles: created with their Manager and checked by `requireResourceRole` on real Next.js bundles.
+
+### Migration
+
+Deploy `ResourceAccessTable` and grant the server role (`grantApp`, or `resourceAccessAppPolicy`). Declare the app's types with `defineResourceTypes` and pass `resources: { types, store }` to `createServerAuth`. For records that kept an owner field: give each owner a Manager membership (a one-time script through `create`), then replace `requireRecordAccess(user, record, { owner, coveredBy })` with `requireResourceRole(type, id, 'view')` (the site floor replaces `coveredBy`). Rename `removeRecordMemberships` to `removeResourceMemberships` and pass `createResourceActions(…).removeResourceMemberships`. [ADR 0022](docs/decisions/0022-resource-roles.md#migration) has the details.
+
 ## [0.1.6-alpha] - 2026-10-18
 
 Backdrops: a site's identity behind the fixed sign-in card. Pre-release.

@@ -162,9 +162,9 @@ export interface PeopleTableProps {
   appRoles?: readonly string[];
   /** False for an admin pool (no emailed codes), which changes the lost-passkey guide. Default true. */
   emailCodes?: boolean;
-  /** Links the note under the role picker to where item access is explained (resource roles, coming next). */
+  /** Links the note under the role picker to where item access is explained (resource roles: the items' list). */
   resourceAccessHref?: string;
-  /** Shown under that note: the site's resource-access section, when it has one. */
+  /** Shown under that note: `ResourceRolesSummary` from `auth-kit/resources/ui`, or the site's own section. */
   resourceAccess?: ReactNode;
 }
 

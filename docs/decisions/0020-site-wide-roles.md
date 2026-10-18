@@ -9,7 +9,7 @@ The first ladder was `superadmin` (shown as Owner), `admin`, `editor`, `viewer`,
 
 ## Decision
 
-**Two layers.** Site-wide admin roles (this record) decide who runs the site. Resource roles (Manager, Contributor, Reader, attached to one item; built next) decide who can do what to one project, plan, or other item. On any item a person gets whichever of the two allows more. These roles never stand in for resource access.
+**Two layers.** Site-wide admin roles (this record) decide who runs the site. Resource roles (Manager, Contributor, Reader, attached to one item; [0022](0022-resource-roles.md)) decide who can do what to one project, plan, or other item. On any item a person gets whichever of the two allows more. These roles never stand in for resource access.
 
 **The ladder.** Each role includes everything below it. Groups are created in this order, which is their precedence.
 
