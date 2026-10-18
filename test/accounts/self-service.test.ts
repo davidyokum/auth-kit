@@ -338,6 +338,19 @@ describe('change my email address', () => {
     expect(failing.errors).toEqual(['email change: rate limit']);
   });
 
+  it('per new address: many accounts can’t flood one inbox with codes, plus-tags included (L3)', async () => {
+    const shared = createMemoryRateLimitStore();
+    for (let i = 1; i <= 5; i++) {
+      const t = setupSelf({ rateLimits: shared, actor: { sub: `member-${i}`, groups: [] } });
+      expect(await t.actions.requestEmailChange({ newEmail: `victim+${i}@example.org` })).toMatchObject({ ok: true });
+    }
+    const sixth = setupSelf({ rateLimits: shared, actor: { sub: 'member-6', groups: [] } });
+    expect(await sixth.actions.requestEmailChange({ newEmail: 'Victim@example.org' })).toMatchObject({ ok: false, code: 'refused', guardrail: 'rate_limited' });
+    expect(updates(sixth)).toEqual([]);
+    // Another address is still fine for that account.
+    expect(await sixth.actions.requestEmailChange({ newEmail: 'someone-else@example.org' })).toMatchObject({ ok: true });
+  });
+
   it('confirming: a wrong code, or no pending change, reads the same', async () => {
     const t = setupSelf();
     const didnt = { ok: false, code: 'invalid', error: `That code didn’t work. Check it against the newest email from ${SITE}.` };

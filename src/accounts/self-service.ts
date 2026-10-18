@@ -27,7 +27,7 @@ import { type QuotaLimiterOptions, createQuotaLimiter } from '../admin/quota.js'
 import type { ActionResult, AuditActor, AuditRequestContext, FormAction } from '../admin/types.js';
 import { type AuthUser, type ServerAuth, accessTokenOf } from '../server/auth.js';
 import { UnauthenticatedError } from '../server/errors.js';
-import { type AccountCreationSettings, allowsSelfSignUp, mayCreateOwnAccount, normalizeAccountCreation } from '../shared/account-creation.js';
+import { type AccountCreationSettings, allowsSelfSignUp, mayCreateOwnAccount, normalizeAccountCreation, rateLimitAddress } from '../shared/account-creation.js';
 import { type EmailSite, accountDeletedEmail, emailChangedEmail } from '../shared/emails.js';
 import { ACCOUNT_CREATION_POLICY, OWNER_GROUP } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
@@ -220,8 +220,14 @@ export function createSelfServiceActions<G extends string, C extends string>(con
     if (newEmail === who.person.email.toLowerCase()) return fail('invalid', 'That’s already your email address.');
     if (!mayCreateOwnAccount(newEmail, settings)) return fail('refused', notOnListMessage(config.siteName, settings.domains, false), { guardrail: 'domain' });
     try {
-      const hit = await config.rateLimits.hit(rateLimitKey('email-change:account', who.user.sub), ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount, new Date(now()));
-      if (!hit.allowed) return fail('refused', `Too many attempts. Wait ${Math.max(1, Math.ceil(hit.retryAfterSeconds / 60))} minutes, then try again.`, { guardrail: 'rate_limited' });
+      // Per account, and per new address (by the mailbox it reaches): many accounts can't flood one inbox with codes.
+      const at = new Date(now());
+      const [perAccount, perTarget] = await Promise.all([
+        config.rateLimits.hit(rateLimitKey('email-change:account', who.user.sub), ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount, at),
+        config.rateLimits.hit(rateLimitKey('email-change:target', rateLimitAddress(newEmail)), ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerTarget, at),
+      ]);
+      const over = [perAccount, perTarget].find((hit) => !hit.allowed);
+      if (over) return fail('refused', `Too many attempts. Wait ${Math.max(1, Math.ceil(over.retryAfterSeconds / 60))} minutes, then try again.`, { guardrail: 'rate_limited' });
     } catch (error) {
       report(error, 'email change: rate limit');
       return fail('unavailable', 'We couldn’t check this request just now. Try again in a few minutes. Nothing was changed.');
