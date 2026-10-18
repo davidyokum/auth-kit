@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import tsupConfig from '../../tsup.config.js';
 
@@ -81,8 +81,23 @@ describe('module boundaries', () => {
     expect(readFileSync(join(ROOT, 'src/client/index.ts'), 'utf8').startsWith("'use client';")).toBe(true);
   });
 
-  it('auth-kit/amplify/pre-sign-up has no imports (small Lambda bundle)', () => {
-    expect(importsOf('src/amplify/pre-sign-up.ts')).toEqual([]);
+  it('auth-kit/amplify/pre-sign-up imports only the pure account-creation rules (small Lambda bundle)', () => {
+    expect(importsOf('src/amplify/pre-sign-up.ts')).toEqual(['../shared/account-creation.js']);
+    expect(importsOf('src/shared/account-creation.ts')).toEqual([]);
+  });
+
+  it('auth-kit/amplify/custom-message imports no AWS SDK, CDK, or React (small Lambda bundle)', () => {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const spec of importsOf(file)) {
+        expect(spec, `${file} imports ${spec}`).toMatch(/^\.\.?\//);
+        walk(join(dirname(file), spec).replace(/\.js$/, '.ts'));
+      }
+    };
+    walk('src/amplify/custom-message.ts');
+    expect(seen.size).toBeGreaterThan(3);
   });
 
   it('auth-kit/backdrops is framework-free: the core imports only its own files', () => {

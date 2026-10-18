@@ -41,7 +41,7 @@ export default defineConfig({
     'backdrops/react': 'src/backdrops/react.tsx',
     // Dev only: carries the backdrop picker marker that check-prod-build looks for.
     'backdrops/picker': 'src/backdrops/picker.tsx',
-    themes: 'src/themes/index.ts',
+    'themes/index': 'src/themes/index.ts',
     // The `auth-kit` command (not a subpath).
     'bin/auth-kit': 'src/dev/bin.ts',
   },
