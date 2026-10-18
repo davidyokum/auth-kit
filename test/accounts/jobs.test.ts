@@ -300,13 +300,13 @@ describe('the unverified-sweep handler', () => {
   }
 
   it('logs one JSON line of subs and counts, builds the sweep once, and passes on the settings', async () => {
-    const { handler, lines, createSweep } = handlerWith({ deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false });
-    expect(await handler()).toEqual({ event: 'auth-kit.unverified-sweep', deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false });
+    const { handler, lines, createSweep } = handlerWith({ deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false, deferred: false });
+    expect(await handler()).toEqual({ event: 'auth-kit.unverified-sweep', deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false, deferred: false });
     await handler();
     expect(createSweep).toHaveBeenCalledTimes(1);
     expect(createSweep.mock.calls[0]).toEqual([expect.objectContaining({ userPoolId: POOL_ID, maxPeople: 5000, olderThanHours: 24, auditLog: expect.any(Object) })]);
     expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]!)).toEqual({ event: 'auth-kit.unverified-sweep', deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false });
+    expect(JSON.parse(lines[0]!)).toEqual({ event: 'auth-kit.unverified-sweep', deleted: ['stray'], skipped: [{ sub: 'owner', reason: 'has-role' }], failed: [], checked: 9, truncated: false, deferred: false });
     expect(lines[0]).not.toMatch(/@/);
   });
 
@@ -317,6 +317,7 @@ describe('the unverified-sweep handler', () => {
       failed: [{ sub: 'stray', error: 'Cognito refused stray@example.com: try again' }],
       checked: 3,
       truncated: false,
+      deferred: false,
     });
     const error = (await handler().catch((e: unknown) => e)) as Error;
     expect(error).toBeInstanceOf(Error);
@@ -339,7 +340,7 @@ describe('the unverified-sweep handler', () => {
   });
 
   it('skips alone are not a failure', async () => {
-    const { handler } = handlerWith({ deleted: [], skipped: [{ sub: 'owner', reason: 'has-role' }, { sub: 'd', reason: 'disabled' }], failed: [], checked: 2, truncated: false });
+    const { handler } = handlerWith({ deleted: [], skipped: [{ sub: 'owner', reason: 'has-role' }, { sub: 'd', reason: 'disabled' }], failed: [], checked: 2, truncated: false, deferred: false });
     await expect(handler()).resolves.toMatchObject({ skipped: [{ reason: 'has-role' }, { reason: 'disabled' }] });
   });
 
