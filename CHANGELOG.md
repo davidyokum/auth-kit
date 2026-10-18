@@ -58,7 +58,7 @@ Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the 
 ### Migration
 
 - **`selfSignUp` and `preSignUpAllowlist` throw.** Use `accountCreation` and `preSignUpForAccountCreation`; mount `createAccountCreationRoutes`' handlers at `/api/auth/sign-up` and `/api/auth/request-access`; deploy the tables and jobs your mode needs (README section 11).
-- **Set `email.replyTo`** to the family's help mailbox (or the site's own).
+- **Set `email.replyTo`** to the family's help mailbox (or the site's own): a plain, role-based mailbox (letters, digits, dots, plus, hyphen, or underscore before the @).
 - **`SignIn` needs `help={{ address, owner }}`** (read the address in effect on the server with `createSignInHelp(…).effective()`), and renders its own card: drop the site's card wrapper, owner line, footer, and accent rule, and pass `theme`.
 - **`ChooseFirstCredential`**: remove `onSkip`.
 - Pass the same `codeLifetimeMinutes` to the preset and the screens if you change it from 3.
@@ -66,7 +66,9 @@ Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the 
 - **Add the chooser page** at `/account/sign-in-method` (or set `firstCredentialPath`): `pages.requireUser({ allowFirstCredentialEnrollment: true })` and `ChooseFirstCredential`.
 - **`createAccountCreationRoutes` needs `clientIp`** (`forwardedForClientIp()` behind Amplify Hosting). **Open mode needs `siteWebAclArn`** in the preset and AWS WAF's script on the sign-up page. **`createSiteWebAcl` needs `accountCreation`**. After each deploy of an open site, run the WAF smoke test (README section 11).
 - Pass the family to `createSignInHelp({ theme })` so a Super admin's override can use the family's domains.
-- `PendingRequestsTable`'s `actions` gains `declineRequests`.
+- `PendingRequestsTable`'s `actions` gains `declineRequests` (`people.forms.declineRequests`).
+- The screens' link props (`signUpHref`, `requestAccessHref`, `termsUrl`, `privacyNoticeUrl`, `stepUpHref`, `deletedPath`, `signedOutPath`, `signInHref`) must be a site path or an http(s) URL; anything else throws when the screen renders. Pass `SignIn`'s `passkey={{ relyingPartyId }}` once passkeys are on.
+- `AccessRequestTable` keeps no point-in-time backups by default; pass `pointInTimeRecovery: true` only if the privacy notice says backups keep requests longer.
 - **The auth matrix needs a `codeOnlyMember` persona** (`EMAILED_CODE_ONLY_MEMBER`) on every site (pass `requireFirstCredential: false` only if the server turns the rule off), and `routesFromNextBuild` needs the chooser page in the build (or `firstCredentialPath`). Sign-up sites' `FRESH_SIGN_UP_MEMBER` now has a passkey.
 
 ## [0.1.7-alpha.1] - 2026-10-18
