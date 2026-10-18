@@ -109,7 +109,7 @@ export interface PeopleAdminPolicyOptions {
   userPoolArn: string;
   /** The audit table, to include its append-and-query statements. */
   auditTableArn?: string;
-  /** Grant `AdminDeleteUser` (owners delete accounts). Default true. */
+  /** Grant `AdminDeleteUser` (the owner and Super admins delete accounts). Default true. */
   allowDelete?: boolean;
   /** SES identity (and configuration set) ARNs, for the invite mailer. */
   sesResourceArns?: readonly string[];

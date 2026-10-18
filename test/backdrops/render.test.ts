@@ -283,7 +283,7 @@ describe('renderBackdrop', () => {
     expect(controller.stats().width).toBe(900);
   });
 
-  it('follows a card element and keeps the scrim on it', () => {
+  it('follows a card element (its place keeps focal points visible and taps off the art; nothing fades around it)', () => {
     const host = new FakeHost();
     const card = { getBoundingClientRect: () => ({ left: 300, top: 100, width: 200, height: 300 }) };
     const { controller } = setup({ card }, host);
