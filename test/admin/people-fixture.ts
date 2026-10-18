@@ -5,6 +5,7 @@ import {
   AdminDeleteUserCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
+  AdminGetUserCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
   AdminUpdateUserAttributesCommand,
@@ -49,6 +50,8 @@ export interface FakeUser {
   origin?: string;
   /** An email change waiting for its code (the pool keeps the old address until then). */
   pendingEmail?: string;
+  /** When Cognito last changed the account (defaults to its creation). */
+  modifiedAt?: Date;
 }
 
 /** The code the fake pool "sends" to a pending new address. */
@@ -96,7 +99,7 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
       ...(u.name !== undefined ? [{ Name: 'name', Value: u.name }] : []),
       ...(u.origin !== undefined ? [{ Name: 'custom:authkit_origin', Value: u.origin }] : []),
     ].filter((a) => !only || only.includes(a.Name));
-    return { Username: u.username, Attributes: attrs, Enabled: u.enabled, UserStatus: u.status as never, UserCreateDate: u.createdAt };
+    return { Username: u.username, Attributes: attrs, Enabled: u.enabled, UserStatus: u.status as never, UserCreateDate: u.createdAt, UserLastModifiedDate: u.modifiedAt ?? u.createdAt };
   };
   const page = <T>(list: T[], token: string | undefined, limit: number | undefined) => {
     const size = Math.min(limit ?? 60, options.pageSize ?? 60);
@@ -122,9 +125,14 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
     handle('ListUsersCommand', (input: { Filter?: string; Limit?: number; PaginationToken?: string; AttributesToGet?: string[] }) => {
       let list = users;
       if (input.Filter) {
-        const m = /^(sub|email) = "([^"]*)"$/.exec(input.Filter);
+        const m = /^(sub|email|status) = "([^"]*)"$/.exec(input.Filter);
         if (!m) throw awsError('InvalidParameterException', `bad filter ${input.Filter}`);
-        list = users.filter((u) => (m[1] === 'sub' ? u.sub : u.email) === m[2]);
+        if (m[1] === 'status') {
+          if (m[2] !== 'Enabled' && m[2] !== 'Disabled') throw awsError('InvalidParameterException', `bad status ${m[2]}`);
+          list = users.filter((u) => u.enabled === (m[2] === 'Enabled'));
+        } else {
+          list = users.filter((u) => (m[1] === 'sub' ? u.sub : u.email) === m[2]);
+        }
       }
       const { slice, next } = page(list, input.PaginationToken, input.Limit);
       return { Users: slice.map((u) => toType(u, input.AttributesToGet)), ...(next && { PaginationToken: next }) };
@@ -138,6 +146,12 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
         input.Limit,
       );
       return { Users: slice.map((u) => toType(u)), ...(next && { NextToken: next }) };
+    }),
+  );
+  mock.on(AdminGetUserCommand).callsFake(
+    handle('AdminGetUserCommand', (input: { Username: string }) => {
+      const t = toType(find(input.Username));
+      return { Username: t.Username, UserAttributes: t.Attributes, Enabled: t.Enabled, UserStatus: t.UserStatus, UserCreateDate: t.UserCreateDate, UserLastModifiedDate: t.UserLastModifiedDate };
     }),
   );
   mock.on(AdminListGroupsForUserCommand).callsFake(

@@ -257,7 +257,7 @@ describe('UnverifiedAccountSweep', () => {
         Variables: {
           AUTH_KIT_USER_POOL_ID: { Ref: Match.stringLikeRegexp('^Pool') },
           AUTH_KIT_AUDIT_TABLE: { Ref: Match.stringLikeRegexp('^AuditLogTable') },
-          AUTH_KIT_MAX_PEOPLE: '5000',
+          AUTH_KIT_MAX_PEOPLE: '100000',
           AUTH_KIT_UNVERIFIED_HOURS: '24',
         },
       },
@@ -271,7 +271,7 @@ describe('UnverifiedAccountSweep', () => {
     template.hasResource('AWS::Logs::LogGroup', { DeletionPolicy: 'Delete' });
   });
 
-  it("the function's role: ListUsers, AdminListGroupsForUser, AdminDeleteUser on the pool, PutItem on the audit table, its own log group, nothing else", () => {
+  it("the function's role: ListUsers, AdminListGroupsForUser, AdminGetUser, AdminDeleteUser on the pool, PutItem on the audit table, its own log group, nothing else", () => {
     const { template } = sweep();
     const fnRole = Object.entries(template.findResources('AWS::IAM::Role')).find(([id]) => id.startsWith('UnverifiedFunctionRole'))![1] as {
       Properties: { AssumeRolePolicyDocument: { Statement: { Principal: unknown }[] }; ManagedPolicyArns?: unknown };
@@ -283,7 +283,7 @@ describe('UnverifiedAccountSweep', () => {
     expect(statements).toHaveLength(3);
     for (const s of statements) expect(s.Effect).toBe('Allow');
     const cognitoStatement = statementWith(statements, 'cognito-idp:ListUsers');
-    expect(actionsOf([cognitoStatement])).toEqual(['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminDeleteUser']);
+    expect(actionsOf([cognitoStatement])).toEqual(['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser']);
     expect(actionsOf([cognitoStatement])).toEqual([...UNVERIFIED_SWEEP_COGNITO_ACTIONS]);
     expect(cognitoStatement.Resource).toEqual({ 'Fn::GetAtt': [expect.stringMatching(/^Pool/), 'Arn'] });
     const audit = statementWith(statements, 'dynamodb:PutItem');

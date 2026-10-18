@@ -405,6 +405,10 @@ export interface RateLimitRule {
 export const ACCOUNT_CREATION_POLICY = {
   /** A sign-up account whose address is never verified is deleted after this long (there's nothing to keep). */
   unverifiedAccountHours: 24,
+  /** Accounts the unverified sweep checks a run, a page at a time (never the whole pool in memory). */
+  sweepMaxAccounts: 100_000,
+  /** Deletions the unverified sweep makes a run; past it, the rest wait an hour (the site-wide sign-up limit keeps this far off). */
+  sweepMaxDeletesPerRun: 1_000,
   /** A request nobody answers expires after this many days. */
   requestExpiryDays: 30,
   /** A settled request (approved, declined, or expired) is deleted this many days later: the typed name and reason go with it. */

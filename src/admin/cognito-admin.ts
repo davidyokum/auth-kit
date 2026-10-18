@@ -6,6 +6,7 @@ import {
   AdminDeleteUserCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
+  AdminGetUserCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
   AdminUpdateUserAttributesCommand,
@@ -31,6 +32,8 @@ export interface CognitoPerson {
   enabled: boolean;
   status: string;
   createdAt: Date;
+  /** When Cognito last changed the account (its attributes, status, or enabled state). */
+  modifiedAt?: Date;
   /** `signup` for an account auth-kit's sign-up route made (read only on sign-up sites). */
   origin?: string;
 }
@@ -55,6 +58,7 @@ export function personFromUser(user: UserType | undefined): CognitoPerson | null
     enabled: user.Enabled === true,
     status: user.UserStatus ?? 'UNKNOWN',
     createdAt: user.UserCreateDate instanceof Date ? user.UserCreateDate : new Date(user.UserCreateDate ?? 0),
+    ...(user.UserLastModifiedDate !== undefined && { modifiedAt: user.UserLastModifiedDate instanceof Date ? user.UserLastModifiedDate : new Date(user.UserLastModifiedDate) }),
     ...(attr(attributes, SIGN_UP_ORIGIN_ATTRIBUTE) !== undefined && { origin: attr(attributes, SIGN_UP_ORIGIN_ATTRIBUTE) }),
   };
 }
@@ -110,6 +114,44 @@ export class CognitoAdmin {
       token = page.PaginationToken;
     } while (token);
     return { users, truncated: false };
+  }
+
+  /**
+   * The pool a page (60 people) at a time, optionally narrowed by a ListUsers filter, without holding
+   * the whole pool in memory: a job that only needs a few of the people can page past any size.
+   */
+  async *userPages(filter?: string): AsyncGenerator<CognitoPerson[]> {
+    let token: string | undefined;
+    do {
+      const page = await this.limiter.run(
+        'UserList',
+        () =>
+          this.client.send(
+            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, AttributesToGet: this.attributes, PaginationToken: token, ...(filter !== undefined && { Filter: filter }) }),
+          ),
+        { read: true },
+      );
+      yield (page.Users ?? []).map(personFromUser).filter((p): p is CognitoPerson => p !== null);
+      token = page.PaginationToken;
+    } while (token);
+  }
+
+  /** AdminGetUser: the account as it is now (every attribute), or null when it's gone. */
+  async getUser(username: string): Promise<CognitoPerson | null> {
+    try {
+      const out = await this.limiter.run('UserResourceRead', () => this.client.send(new AdminGetUserCommand({ UserPoolId: this.userPoolId, Username: username })), { read: true });
+      return personFromUser({
+        Username: out.Username,
+        Attributes: out.UserAttributes,
+        Enabled: out.Enabled,
+        UserStatus: out.UserStatus,
+        UserCreateDate: out.UserCreateDate,
+        UserLastModifiedDate: out.UserLastModifiedDate,
+      });
+    } catch (error) {
+      if ((error as { name?: string } | null)?.name === 'UserNotFoundException') return null;
+      throw error;
+    }
   }
 
   /** Every member of one group (ListUsersInGroup, 60 a page). */

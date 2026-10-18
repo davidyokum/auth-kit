@@ -3,7 +3,7 @@
  * digest, their logic over the fake Cognito pool and the in-memory stores, and their Lambda handlers'
  * environment, log line, and failure rules. The deployed resources are in cdk.test.ts. No AWS.
  */
-import { AdminDeleteUserCommand, AdminListGroupsForUserCommand, ListUsersCommand, ListUsersInGroupCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { AdminDeleteUserCommand, AdminGetUserCommand, AdminListGroupsForUserCommand, ListUsersCommand, ListUsersInGroupCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { describe, expect, it, vi } from 'vitest';
 import { ACCESS_REQUEST_DIGEST_ENV, UNVERIFIED_SWEEP_ENV } from '../../src/accounts/jobs-env.js';
 import { PEOPLE_MANAGER_GROUPS, createAccessRequestDigest, type AccessRequestDigestOptions, type AccessRequestDigestResult } from '../../src/accounts/digest.js';
@@ -21,6 +21,7 @@ import { OWNER_GROUP } from '../../src/shared/policy.js';
 import { DAY, NOW, awsError, fakeUserPool } from '../admin/people-fixture.js';
 
 const HOUR = 60 * 60 * 1000;
+const MIN = 60 * 1000;
 const POOL_ID = 'us-east-1_TestPool1';
 const noSleep = () => Promise.resolve();
 
@@ -42,7 +43,7 @@ function seedAccounts(pool: ReturnType<typeof fakeUserPool>) {
   pool.add({ sub: 'disabled', email: 'disabled@example.com', ...signUp, enabled: false, createdAt: new Date(NOW - 3 * DAY) });
 }
 
-function sweepSetup(options: { olderThanHours?: number; maxPeople?: number } = {}) {
+function sweepSetup(options: { olderThanHours?: number; maxPeople?: number; maxDeletesPerRun?: number } = {}) {
   const timeline: string[] = [];
   const pool = fakeUserPool({ timeline });
   const log = createMemoryAuditLog({ now: () => NOW });
@@ -65,17 +66,19 @@ describe('createUnverifiedAccountSweep', () => {
     const { pool, sweep } = sweepSetup();
     seedAccounts(pool);
     const result = await sweep();
+    // The disabled account isn't even listed: the sweep asks Cognito for enabled accounts only.
     expect(result).toEqual({
       deleted: ['stray', 'exactly-24h'],
       skipped: [
         { sub: 'owner', reason: 'has-role' },
         { sub: 'given-role', reason: 'has-role' },
-        { sub: 'disabled', reason: 'disabled' },
       ],
       failed: [],
-      checked: 9,
+      checked: 8,
       truncated: false,
+      deferred: false,
     });
+    for (const input of pool.inputsOf(ListUsersCommand)) expect((input as { Filter?: string }).Filter).toBe('status = "Enabled"');
     expect(pool.get('stray')).toBeUndefined();
     expect(pool.get('exactly-24h')).toBeUndefined();
     for (const sub of ['young', 'invite-old', 'invite-role', 'verified', 'owner', 'given-role', 'disabled']) expect(pool.get(sub), sub).toBeDefined();
@@ -86,12 +89,58 @@ describe('createUnverifiedAccountSweep', () => {
     expect(pool.writes()).toEqual(['AdminDeleteUserCommand', 'AdminDeleteUserCommand']);
   });
 
+  it('re-reads each due account just before deleting it: one verified, disabled, or changed since the listing stays (L1)', async () => {
+    const { pool, sweep } = sweepSetup();
+    pool.add({ sub: 'verified-meanwhile', email: 'a@example.com', origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    pool.add({ sub: 'disabled-meanwhile', email: 'b@example.com', origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    pool.add({ sub: 'touched-meanwhile', email: 'c@example.com', origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    pool.add({ sub: 'gone-meanwhile', email: 'd@example.com', origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    pool.add({ sub: 'still-due', email: 'e@example.com', origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    // Between the listing and the delete: a first code entered, an admin's disable, a passkey saved (a modification), a delete.
+    const meanwhile: Record<string, () => void> = {
+      'verified-meanwhile': () => void (pool.get('verified-meanwhile')!.emailVerified = true),
+      'disabled-meanwhile': () => void (pool.get('disabled-meanwhile')!.enabled = false),
+      'touched-meanwhile': () => void (pool.get('touched-meanwhile')!.modifiedAt = new Date(NOW - MIN)),
+      'gone-meanwhile': () => void pool.users.splice(pool.users.findIndex((u) => u.sub === 'gone-meanwhile'), 1),
+    };
+    pool.mock.on(AdminListGroupsForUserCommand).callsFake((input: { Username: string }) => {
+      meanwhile[input.Username]?.();
+      return { Groups: [] };
+    });
+    const result = await sweep();
+    expect(result.deleted).toEqual(['still-due']);
+    expect(result.skipped).toEqual([
+      { sub: 'verified-meanwhile', reason: 'changed' },
+      { sub: 'disabled-meanwhile', reason: 'changed' },
+      { sub: 'touched-meanwhile', reason: 'changed' },
+      { sub: 'gone-meanwhile', reason: 'gone' },
+    ]);
+    expect(usernames(pool.inputsOf(AdminDeleteUserCommand))).toEqual(['still-due']);
+  });
+
+  it('pages past 5,000 accounts without stopping, and defers past maxDeletesPerRun (M4)', async () => {
+    const { pool, sweep } = sweepSetup({ maxDeletesPerRun: 3 });
+    for (let i = 0; i < 6000; i++) pool.add({ sub: `member-${i}`, email: `m${i}@example.org`, emailVerified: true, createdAt: new Date(NOW - 100 * DAY) });
+    for (let i = 0; i < 5; i++) pool.add({ sub: `late-stray-${i}`, email: `late${i}@example.com`, origin: 'signup', emailVerified: false, createdAt: new Date(NOW - 25 * HOUR) });
+    const result = await sweep();
+    expect(result.deleted).toEqual(['late-stray-0', 'late-stray-1', 'late-stray-2']);
+    expect(result.deferred).toBe(true);
+    expect(result.truncated).toBe(false);
+    expect(result.checked).toBe(6004);
+    // The next run carries on.
+    const next = await sweep();
+    expect(next.deleted).toEqual(['late-stray-3', 'late-stray-4']);
+    expect(next.deferred).toBe(false);
+  });
+
   it('reads the sign-up mark, and only the due, enabled accounts’ roles', async () => {
     const { pool, sweep, timeline } = sweepSetup();
     seedAccounts(pool);
     await sweep();
     for (const input of pool.inputsOf(ListUsersCommand)) expect(input.AttributesToGet).toContain('custom:authkit_origin');
     expect(usernames(pool.inputsOf(AdminListGroupsForUserCommand))).toEqual(['stray', 'exactly-24h', 'owner', 'given-role']);
+    // Re-read just before each delete, and only then.
+    expect(usernames(pool.inputsOf(AdminGetUserCommand))).toEqual(['stray', 'exactly-24h']);
     // The calls it made are exactly the ones its role allows (the construct, UNVERIFIED_SWEEP_COGNITO_ACTIONS).
     const calls = new Set(timeline.filter((t) => t.startsWith('cognito:')).map((t) => `cognito-idp:${t.slice('cognito:'.length)}`));
     expect([...calls].sort()).toEqual([...UNVERIFIED_SWEEP_COGNITO_ACTIONS].sort());
@@ -279,10 +328,14 @@ describe('the unverified-sweep handler', () => {
   });
 
   it('throws when the pool outgrew maxPeople (the rest went unchecked), naming both problems at once', async () => {
-    await expect(handlerWith({ deleted: [], skipped: [], failed: [], checked: 5000, truncated: true }).handler()).rejects.toThrow(/more than 5000 accounts.*raise maxPeople/);
-    await expect(handlerWith({ deleted: [], skipped: [], failed: [{ sub: 'a', error: 'x' }], checked: 5000, truncated: true }).handler()).rejects.toThrow(
+    await expect(handlerWith({ deleted: [], skipped: [], failed: [], checked: 5000, truncated: true, deferred: false }).handler()).rejects.toThrow(/more than 5000 enabled accounts.*raise maxPeople/);
+    await expect(handlerWith({ deleted: [], skipped: [], failed: [{ sub: 'a', error: 'x' }], checked: 5000, truncated: true, deferred: false }).handler()).rejects.toThrow(
       /couldn't be deleted; the pool has more than 5000/,
     );
+  });
+
+  it('a run that reached maxDeletesPerRun (deferred) is not a failure: the next run carries on', async () => {
+    await expect(handlerWith({ deleted: ['a'], skipped: [], failed: [], checked: 10, truncated: false, deferred: true }).handler()).resolves.toMatchObject({ deferred: true });
   });
 
   it('skips alone are not a failure', async () => {
@@ -300,7 +353,7 @@ describe('the unverified-sweep handler', () => {
       createSweep: (options) => createUnverifiedAccountSweep({ ...options, auditLog: log, cognito: pool.client, now: () => NOW, sleep: noSleep }),
       log: (l) => lines.push(l),
     });
-    expect(await handler()).toMatchObject({ deleted: ['stray', 'exactly-24h'], failed: [], checked: 9, truncated: false });
+    expect(await handler()).toMatchObject({ deleted: ['stray', 'exactly-24h'], failed: [], checked: 8, truncated: false, deferred: false });
     expect(log.rows).toHaveLength(4);
     expect(lines[0]).not.toMatch(/@/);
   });

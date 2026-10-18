@@ -767,8 +767,9 @@ export interface UnverifiedAccountSweepProps {
  * the release bundle, intent → `AdminDeleteUser` → result in the audit log as
  * `system:unverified-sweep`. Only accounts marked `custom:authkit_origin = signup`, never one with a
  * role (so never the owner), never a disabled one, never an admin's invite (unmarked: those keep the
- * 7-day disable). Its role: `ListUsers`, `AdminListGroupsForUser`, `AdminDeleteUser` on this pool,
- * `PutItem` on the audit table, its own log group.
+ * 7-day disable). Each due account is re-read (`AdminGetUser`) just before the delete. Its role:
+ * `ListUsers`, `AdminListGroupsForUser`, `AdminGetUser`, `AdminDeleteUser` on this pool, `PutItem` on
+ * the audit table, its own log group.
  */
 export class UnverifiedAccountSweep extends Construct {
   readonly function: lambda.Function;
@@ -785,7 +786,7 @@ export class UnverifiedAccountSweep extends Construct {
     if (minutes !== undefined && (minutes < 10 || minutes > 1440)) throw new Error(`auth-kit: schedule "${expression}" must run between every 10 minutes and once a day.`);
     const hours = props.olderThanHours ?? ACCOUNT_CREATION_POLICY.unverifiedAccountHours;
     if (!Number.isInteger(hours) || hours < 1) throw new Error('auth-kit: olderThanHours must be a whole number of at least 1.');
-    const maxPeople = props.maxPeople ?? ADMIN_POLICY.maxPeople;
+    const maxPeople = props.maxPeople ?? ACCOUNT_CREATION_POLICY.sweepMaxAccounts;
     if (!Number.isInteger(maxPeople) || maxPeople < 1) throw new Error('auth-kit: maxPeople must be a whole number of at least 1.');
     const job = createScheduledJob(this, {
       bundle: lambdaBundle(UNVERIFIED_SWEEP_BUNDLE_PATH, 'unverified-sweep'),

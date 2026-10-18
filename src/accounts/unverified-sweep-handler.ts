@@ -66,9 +66,10 @@ export function createUnverifiedSweepHandler(options: UnverifiedSweepHandlerOpti
     const result = await sweep();
     const report: UnverifiedSweepReport = { event: 'auth-kit.unverified-sweep', ...result, failed: result.failed.map((f) => ({ ...f, error: redactAddresses(f.error) })) };
     log(JSON.stringify(report));
+    // A run that hit maxDeletesPerRun (deferred) isn't a failure: the next run carries on.
     const problems = [
       ...(result.failed.length > 0 ? [`${result.failed.length} due account(s) couldn't be deleted`] : []),
-      ...(result.truncated ? [`the pool has more than ${result.checked} accounts, so the rest weren't checked (raise maxPeople)`] : []),
+      ...(result.truncated ? [`the pool has more than ${result.checked} enabled accounts, so the rest weren't checked (raise maxPeople)`] : []),
     ];
     if (problems.length > 0) throw new Error(`auth-kit unverified-account sweep: ${problems.join('; ')}. See the log line above.`);
     return report;

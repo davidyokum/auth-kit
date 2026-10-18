@@ -190,7 +190,7 @@ export const SELF_SERVICE_COGNITO_ACTIONS = [
   'cognito-idp:AdminDeleteUser',
 ] as const;
 /** The unverified-account sweep: list everyone, read a due account's roles, delete it. */
-export const UNVERIFIED_SWEEP_COGNITO_ACTIONS = ['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminDeleteUser'] as const;
+export const UNVERIFIED_SWEEP_COGNITO_ACTIONS = ['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser'] as const;
 /** The digest reads who manages people. */
 export const ACCESS_REQUEST_DIGEST_COGNITO_ACTIONS = ['cognito-idp:ListUsersInGroup'] as const;
 
