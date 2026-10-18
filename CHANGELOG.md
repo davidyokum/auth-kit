@@ -2,7 +2,7 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
-## [__NEXT_VERSION__] - 2026-10-18
+## [0.1.5-alpha] - 2026-10-18
 
 Site-wide roles: one owner, an explicit admin ladder, and Transfer ownership (David's decision; [ADR 0020](docs/decisions/0020-site-wide-roles.md)). Pre-release. **Breaking:** group names, capabilities, and the owner alerts changed; see Migration.
 
