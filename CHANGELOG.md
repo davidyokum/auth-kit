@@ -30,6 +30,7 @@ Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the 
 - Audit rows cap request IDs and user agents (L2); email changes are limited per new address (L3); the decoy passkey prompt takes the pool's relying-party ID and timeout (`SignIn`'s `passkey`, L6); link props must be paths or http(s) URLs (I6).
 - Tests refuse any socket or `fetch` beyond this machine, covering the SDK's unsigned Cognito calls (L7). The PR job packs and checks the tarball (M7). No source maps (L8) or dated reviews (L10) in the package; the Lucide notice names the version (L9). `AccessRequestTable` keeps no point-in-time backups by default (I1).
 - Copy: the passkey help's device line uses the theme's `devDesk` ("the device maker's support" on personal sites); "Try again, or use a password instead." when a passkey can't be created; request access's own network message.
+- **From the verification review:** `createSiteWebAcl({ accountCreation })` fails synthesis if the challenge rule doesn't challenge or, in open mode, the per-IP rule doesn't block (N1), with an operator smoke test in the README and ADR 0023; `withAuthKitCustomMessage(handler)` keeps the refusal for sites with their own wording, and synthesis checks the trigger's function carries `CUSTOM_MESSAGE_GATE_ENV` (N2); the matrix requires `codeOnlyMember` wherever the first credential is enforced, and `routesFromNextBuild` fails without the chooser page (N3).
 
 ### Added
 
@@ -61,11 +62,12 @@ Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the 
 - **`SignIn` needs `help={{ address, owner }}`** (read the address in effect on the server with `createSignInHelp(…).effective()`), and renders its own card: drop the site's card wrapper, owner line, footer, and accent rule, and pass `theme`.
 - **`ChooseFirstCredential`**: remove `onSkip`.
 - Pass the same `codeLifetimeMinutes` to the preset and the screens if you change it from 3.
-- **Every pool needs the custom message trigger** (`triggers: { customMessage }` with `customMessageHandler`): synthesis fails without it.
+- **Every pool needs the custom message trigger** (`triggers: { customMessage }` with `customMessageHandler`, or your handler wrapped in `withAuthKitCustomMessage`), and its function needs `environment: { ...CUSTOM_MESSAGE_GATE_ENV }`: synthesis fails without either.
 - **Add the chooser page** at `/account/sign-in-method` (or set `firstCredentialPath`): `pages.requireUser({ allowFirstCredentialEnrollment: true })` and `ChooseFirstCredential`.
-- **`createAccountCreationRoutes` needs `clientIp`** (`forwardedForClientIp()` behind Amplify Hosting). **Open mode needs `siteWebAclArn`** in the preset and AWS WAF's script on the sign-up page.
+- **`createAccountCreationRoutes` needs `clientIp`** (`forwardedForClientIp()` behind Amplify Hosting). **Open mode needs `siteWebAclArn`** in the preset and AWS WAF's script on the sign-up page. **`createSiteWebAcl` needs `accountCreation`**. After each deploy of an open site, run the WAF smoke test (README section 11).
 - Pass the family to `createSignInHelp({ theme })` so a Super admin's override can use the family's domains.
-- `PendingRequestsTable`'s `actions` gains `declineRequests`. The matrix's `FRESH_SIGN_UP_MEMBER` now has a passkey, and sign-up sites also need a `codeOnlyMember` persona (`EMAILED_CODE_ONLY_MEMBER`).
+- `PendingRequestsTable`'s `actions` gains `declineRequests`.
+- **The auth matrix needs a `codeOnlyMember` persona** (`EMAILED_CODE_ONLY_MEMBER`) on every site (pass `requireFirstCredential: false` only if the server turns the rule off), and `routesFromNextBuild` needs the chooser page in the build (or `firstCredentialPath`). Sign-up sites' `FRESH_SIGN_UP_MEMBER` now has a passkey.
 
 ## [0.1.7-alpha.1] - 2026-10-18
 

@@ -79,11 +79,16 @@ export const auth = defineAuth(standardAuthProps(authOptions, { triggers: { cust
 ```ts
 // amplify/auth/custom-message/resource.ts and handler.ts
 import { defineFunction } from '@aws-amplify/backend';
-export const customMessage = defineFunction({ name: 'custom-message', entry: './handler.ts' });
+import { CUSTOM_MESSAGE_GATE_ENV } from 'auth-kit/amplify';
+// The marker tells the preset this function is auth-kit's handler (synthesis checks it).
+export const customMessage = defineFunction({ name: 'custom-message', entry: './handler.ts', environment: { ...CUSTOM_MESSAGE_GATE_ENV } });
 // handler.ts
 import { customMessageHandler } from 'auth-kit/amplify/custom-message';
 export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 3 });
+// Your own wording instead? Keep the refusal: export const handler = withAuthKitCustomMessage(async (event) => { …; return event; });
 ```
+
+The custom message trigger is a security control, not only wording: it refuses email changes made through Cognito's public API. Use `customMessageHandler` as is, or wrap your own handler with `withAuthKitCustomMessage`, and give the function `CUSTOM_MESSAGE_GATE_ENV`; synthesis fails if the trigger's function lacks it or isn't in the app.
 
 ```ts
 // amplify/backend.ts
@@ -767,9 +772,15 @@ export const POST = (request: Request) => accountRoutes.requestAccess(request);
 
 - **Sign-up** checks the address (and the list), rate-limits per mailbox (`victim+1@` and `victim+2@` count as one; Gmail without dots), per IP, and site-wide (past 300 attempts an hour every address gets the same "try again later"), and either creates the account with invite-core (no password, no group: Member) or emails "You already have an account". Every answer is identical and takes at least 800 ms, refusals and failures included. `SignUp` then runs the invite's emailed-code sign-in, "Your name", and the required "Choose how you'll sign in next time". A sign-up whose address is never verified is deleted after 24 hours (`UnverifiedAccountSweep`: only marked accounts, never one with a role, never the owner, never an admin's invite).
 - **Request access** stores the request in DynamoDB (never as a Cognito user; one conditional write of a per-address marker and one of the request, whatever the queue holds; at most 100 new requests a day site-wide), or emails an address that already has an account; the same answer either way. Admins with `people.manage` approve (the ordinary invite, with the name the approver confirms) or decline (silent unless `notifyOnDecline`) on the People page's "Pending requests" tab (`createPeopleActions({ accessRequests: requests, help: signInHelp, theme })`, `people.listAccessRequests()`, `people.declineRequests()` for up to 100 at once, always silent, `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`), and get a daily digest instead of one email per request (counts in the subject, never a typed name; at most 25 listed). Requests expire after 30 days, and each is deleted, with its typed name and reason, 30 days after it's settled; the table keeps no point-in-time backups by default.
-- **The silent WAF check**: `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`. **Required in `open` mode:** the preset fails synthesis without `siteWebAclArn` (the ACL's ARN), and the sign-up route refuses requests without AWS WAF's `aws-waf-token` cookie (`requireWafToken: false` for local development only). Optional in `domains` mode.
+- **The silent WAF check**: `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`. **Required in `open` mode:** the preset fails synthesis without `siteWebAclArn` (the ACL's ARN), `createSiteWebAcl({ accountCreation })` fails synthesis if its challenge rule doesn't challenge or its per-IP rule doesn't block, and the sign-up route refuses requests without AWS WAF's `aws-waf-token` cookie (`requireWafToken: false` for local development only). Optional in `domains` mode. The app can't see the ACL's association or validate the token (a cookie can be forged; only WAF at the edge checks it), so **after each deploy, run the smoke test** from outside, with no token:
+
+  ```sh
+  curl -si -X POST https://reports.example.org/api/auth/sign-up -H 'origin: https://reports.example.org' -H 'content-type: application/json' -d '{"email":"smoke-test@example.org"}' | head -12
+  ```
+
+  Expect AWS WAF's challenge, `HTTP/2 202` with `x-amzn-waf-action: challenge`. The route's own JSON (a 503 saying it couldn't create the account) means the ACL isn't associated with the app or the challenge isn't in effect.
 - **Members on sign-up sites** delete their own account (a recent sign-in, the address typed; never the owner) and change their own email (a recent sign-in; limited per account and per new address; verified before it takes effect; the old address told) through `MyAccount`'s `selfService` prop. On every site, the custom message trigger refuses an email change started through Cognito's public API, so this route (or an admin) is the only way ([ADR 0023](docs/decisions/0023-account-creation.md)).
-- **The matrix:** pass `signUpSite: true` and two personas to `assertAuthMatrix`: `newMember` (`FRESH_SIGN_UP_MEMBER`: signed up and chose a passkey), held to a member's expectations on every route, and `codeOnlyMember` (`EMAILED_CODE_ONLY_MEMBER`: only emailed codes), expected to get 403 wherever a signed-in person is needed, unless its row says otherwise (the chooser page). Any site can add `codeOnlyMember`; invitees start that way too.
+- **The matrix:** every site whose server enforces the first credential (the default) needs the `codeOnlyMember` persona (`EMAILED_CODE_ONLY_MEMBER`: only emailed codes, as invitees start), expected to get 403 wherever a signed-in person is needed and a redirect from page guards, unless its row says otherwise (the chooser page); `requireFirstCredential: false` only if the server turns the rule off. `routesFromNextBuild` fails when the build has no page at `firstCredentialPath` (default `/account/sign-in-method`). Sign-up sites also pass `signUpSite: true` and `newMember` (`FRESH_SIGN_UP_MEMBER`: signed up and chose a passkey), held to a member's expectations on every route.
 
 ### 12. Families as themes and the help address: `auth-kit/themes`
 
@@ -956,6 +967,7 @@ Still to check on a live pool (each needs a real person or a deploy approved by 
 - **The invite-expiry schedule end to end** (a real invite disabled after 7 days, its audit rows on the Activity page), and a sole owner's unused invite skipped with the warning delivered through SES.
 - **The email-change refusal** ([ADR 0023](docs/decisions/0023-account-creation.md)): `callerContext.clientId` is `CLIENT_ID_NOT_APPLICABLE` for `AdminUpdateUserAttributes`; a user's own `UpdateUserAttributes` and `GetUserAttributeVerificationCode` fail with the trigger's message; and no pending address survives the refusal (inert without a code if one does).
 - **Which `X-Forwarded-For` entry is the client** behind Amplify Hosting (the last one, if CloudFront is the only proxy that appends), and that the `aws-waf-token` cookie reaches the sign-up route.
+- **The site web ACL's smoke test** ([section 11](#11-account-creation-auth-kitaccounts)): a POST to the sign-up route without a token gets WAF's challenge (202, `x-amzn-waf-action: challenge`), not the route's JSON.
 - **A disabled account on the passkey and emailed-code paths**: that Cognito answers `NotAuthorizedException`, which the screens now treat like an unknown address.
 
 ## What the pool can't enforce
