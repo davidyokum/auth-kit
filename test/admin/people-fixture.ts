@@ -22,6 +22,8 @@ import {
   type InviteMailer,
   type OwnerAlertNotifier,
   type OwnerGrantAlert,
+  type OwnerInviteWarning,
+  type OwnerInviteWarningNotifier,
   type PeopleAdminConfig,
 } from '../../src/admin/index.js';
 import { toRequestContext } from '../../src/server/index.js';
@@ -244,7 +246,8 @@ export function setup(options: SetupOptions = {}) {
   const mailFailures: Error[] = [];
   const ownerAlerts: OwnerGrantAlert[] = [];
   const alertFailures: Error[] = [];
-  const mailer: InviteMailer & OwnerAlertNotifier = {
+  const ownerWarnings: OwnerInviteWarning[] = [];
+  const mailer: InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier = {
     sendInvite(input) {
       timeline.push('mail:sendInvite');
       const f = mailFailures.shift();
@@ -257,6 +260,11 @@ export function setup(options: SetupOptions = {}) {
       const f = alertFailures.shift();
       if (f) return Promise.reject(f);
       ownerAlerts.push(alert);
+      return Promise.resolve();
+    },
+    ownerInviteUnused(warning) {
+      timeline.push('mail:ownerInviteUnused');
+      ownerWarnings.push(warning);
       return Promise.resolve();
     },
   };
@@ -300,6 +308,7 @@ export function setup(options: SetupOptions = {}) {
     clock,
     failMail: (e: Error = awsError('MessageRejected', 'Email address is not verified.')) => void mailFailures.push(e),
     ownerAlerts,
+    ownerWarnings,
     failOwnerAlert: (e: Error = awsError('MessageRejected', 'Email address is not verified.')) => void alertFailures.push(e),
     signOut: () => {
       token = null;

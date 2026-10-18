@@ -77,6 +77,7 @@ describe('InviteExpirySweep', () => {
           AUTH_KIT_AUDIT_TABLE: { Ref: Match.stringLikeRegexp('AuditLogTable') },
           AUTH_KIT_INVITE_MODE: 'emailed-code',
           AUTH_KIT_MAX_PEOPLE: '5000',
+          AUTH_KIT_RUN_EVERY_MINUTES: '60',
         },
       },
     });
@@ -91,7 +92,7 @@ describe('InviteExpirySweep', () => {
     });
   });
 
-  it("the function's role: the four Cognito calls on this pool, PutItem on the audit table, its own log group, nothing else", () => {
+  it("the function's role: the five Cognito calls on this pool, PutItem on the audit table, its own log group, nothing else", () => {
     const { template } = synth();
     const role = Object.entries(template.findResources('AWS::IAM::Role')).find(([id]) => id.startsWith('InviteExpiryFunctionRole'))![1] as {
       Properties: { AssumeRolePolicyDocument: { Statement: { Principal: unknown }[] }; ManagedPolicyArns?: unknown };
@@ -115,6 +116,53 @@ describe('InviteExpirySweep', () => {
     expect(JSON.stringify(audit.Resource)).not.toContain('/index/');
     const logs = statements.find((s) => actionsOf([s]).includes('logs:PutLogEvents'))!;
     expect(JSON.stringify(logs.Resource)).toMatch(/InviteExpiryLogs/);
+  });
+
+  it('with ownerWarnings: the warning settings in the environment, and ses:SendEmail from that identity only', () => {
+    const { template } = synth({
+      ownerWarnings: {
+        siteName: 'Example Reports',
+        from: '"Example Reports (NC)" <noreply@mail.example.org>',
+        signInUrl: 'https://reports.example.org/sign-in',
+        fallbackEmail: 'ops@example.org',
+        configurationSet: 'auth',
+      },
+    });
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: {
+        Variables: Match.objectLike({
+          AUTH_KIT_SITE_NAME: 'Example Reports',
+          AUTH_KIT_MAIL_FROM: '"Example Reports (NC)" <noreply@mail.example.org>',
+          AUTH_KIT_SIGN_IN_URL: 'https://reports.example.org/sign-in',
+          AUTH_KIT_OWNER_WARNING_FALLBACK: 'ops@example.org',
+          AUTH_KIT_MAIL_CONFIGURATION_SET: 'auth',
+        }),
+      },
+    });
+    const statements = policyStatements(template, 'InviteExpiryFunctionRole');
+    const sesStatement = statements.find((s) => actionsOf([s]).includes('ses:SendEmail'))!;
+    expect(actionsOf([sesStatement])).toEqual(['ses:SendEmail']);
+    const resources = JSON.stringify(sesStatement.Resource);
+    expect(resources).toContain(':identity/mail.example.org');
+    expect(resources).toContain(':configuration-set/auth');
+    expect(new Set(actionsOf(statements))).toEqual(
+      new Set([...INVITE_EXPIRY_COGNITO_ACTIONS, 'dynamodb:PutItem', 'logs:CreateLogStream', 'logs:PutLogEvents', 'ses:SendEmail']),
+    );
+    // Without it: no SES at all, and no warning settings.
+    const plain = synth().template;
+    expect(actionsOf(policyStatements(plain, 'InviteExpiryFunctionRole'))).not.toContain('ses:SendEmail');
+    plain.hasResourceProperties('AWS::Lambda::Function', { Environment: { Variables: Match.not(Match.objectLike({ AUTH_KIT_MAIL_FROM: Match.anyValue() })) } });
+  });
+
+  it('ownerWarnings: an explicit SES identity, and settings that would send something odd are refused', () => {
+    const { template } = synth({ ownerWarnings: { siteName: 'Example Reports', from: 'noreply@mail.example.org', sesIdentity: 'example.org' } });
+    const sesStatement = policyStatements(template, 'InviteExpiryFunctionRole').find((s) => actionsOf([s]).includes('ses:SendEmail'))!;
+    expect(JSON.stringify(sesStatement.Resource)).toContain(':identity/example.org"');
+    const base = { siteName: 'Example Reports', from: 'Example Reports <noreply@example.org>' };
+    expect(() => synth({ ownerWarnings: { ...base, siteName: ' ' } })).toThrow(/siteName/);
+    expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports' } })).toThrow(/from/);
+    expect(() => synth({ ownerWarnings: { ...base, signInUrl: 'http://reports.example.org/sign-in' } })).toThrow(/https/);
+    expect(() => synth({ ownerWarnings: { ...base, fallbackEmail: 'ops' } })).toThrow(/fallbackEmail/);
   });
 
   it("the scheduler's role: assumable only by this account's scheduler for this group, may only invoke the function", () => {
@@ -173,6 +221,13 @@ describe('InviteExpirySweep', () => {
     template.hasResourceProperties('AWS::Scheduler::Schedule', { ScheduleExpression: 'cron(15 6 * * ? *)', ScheduleExpressionTimezone: 'America/New_York' });
     template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: { Variables: Match.objectLike({ AUTH_KIT_INVITE_MODE: 'temporary-password', AUTH_KIT_MAX_PEOPLE: '20000' }) },
+    });
+    // A cron's interval is unknown, so the function isn't told one (every skip then warns).
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.not(Match.objectLike({ AUTH_KIT_RUN_EVERY_MINUTES: Match.anyValue() })) },
+    });
+    synth({ schedule: 'rate(30 minutes)' }).template.hasResourceProperties('AWS::Lambda::Function', {
+      Environment: { Variables: Match.objectLike({ AUTH_KIT_RUN_EVERY_MINUTES: '30' }) },
     });
   });
 

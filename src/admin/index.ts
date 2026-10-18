@@ -7,8 +7,8 @@
  *   re-enable, sign out everywhere, delete, list, Activity), each checked live and guarded.
  * - `createDynamoAuditLog`: the append-only audit log, and `runAudited` / `recordChange`, the
  *   intent → calls → result ordering for any change an app logs.
- * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days (deployed by
- *   `InviteExpirySweep` from `auth-kit/admin/cdk`).
+ * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days, never the
+ *   site's last owner's (deployed by `InviteExpirySweep` from `auth-kit/admin/cdk`).
  */
 export {
   checkPeopleAction,
@@ -44,7 +44,16 @@ export {
   type ActivityLine,
 } from './copy.js';
 export { createPeopleActions, type PeopleAdminConfig, type PeopleActions, type PeopleFormActions } from './people.js';
-export { createInviteExpirySweep, INVITE_EXPIRY_ACTOR, type SweepResult, type InviteExpirySweepOptions } from './sweep.js';
+export {
+  createInviteExpirySweep,
+  INVITE_EXPIRY_ACTOR,
+  LAST_OWNER_SKIP_MESSAGE,
+  type SweepResult,
+  type SweepSkip,
+  type SweepWarningRecipient,
+  type OwnerWarningOptions,
+  type InviteExpirySweepOptions,
+} from './sweep.js';
 export { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
 export { describeAwsError } from './aws-errors.js';
 export {
@@ -69,10 +78,13 @@ export {
   createSesInviteMailer,
   renderInviteEmail,
   renderOwnerAlertEmail,
+  renderOwnerInviteWarningEmail,
   type InviteMailer,
   type InviteEmail,
   type OwnerAlertNotifier,
   type OwnerGrantAlert,
+  type OwnerInviteWarning,
+  type OwnerInviteWarningNotifier,
   type RenderedEmail,
   type SesInviteMailerOptions,
 } from './mailer.js';

@@ -108,25 +108,36 @@ export function peopleAdminPolicy(options: PeopleAdminPolicyOptions): IamPolicyD
   return { Version: '2012-10-17', Statement: statements };
 }
 
-/** The Cognito calls the invite-expiry sweep makes: list, read groups, disable, remove admin roles. */
+/**
+ * The Cognito calls the invite-expiry sweep makes: list everyone, read each due invite's groups,
+ * list the owners (so it never disables the last one), disable, remove admin roles.
+ */
 export const INVITE_EXPIRY_COGNITO_ACTIONS = [
   'cognito-idp:ListUsers',
   'cognito-idp:AdminListGroupsForUser',
+  'cognito-idp:ListUsersInGroup',
   'cognito-idp:AdminDisableUser',
   'cognito-idp:AdminRemoveUserFromGroup',
 ] as const;
 
 /**
- * Everything the scheduled sweep needs and nothing else: those four calls on one pool and `PutItem`
- * on the audit table (it writes intent and result rows; it never reads the log). Logging permissions
- * belong to whoever runs it (the construct grants its own log group).
+ * Everything the scheduled sweep needs and nothing else: those calls on one pool, `PutItem` on the
+ * audit table (it writes intent, result, and refusal rows; it never reads the log), and, when it
+ * warns a last owner by email, `ses:SendEmail` on the sending identity (and configuration set).
+ * Logging permissions belong to whoever runs it (the construct grants its own log group).
  */
-export function inviteExpirySweepPolicy(options: { userPoolArn: string; auditTableArn: string }): IamPolicyDocument {
-  return {
-    Version: '2012-10-17',
-    Statement: [
-      { Sid: 'InviteExpiryCognito', Effect: 'Allow', Action: [...INVITE_EXPIRY_COGNITO_ACTIONS], Resource: options.userPoolArn },
-      { Sid: 'InviteExpiryAudit', Effect: 'Allow', Action: [...AUDIT_LOG_APP_ACTIONS.append], Resource: options.auditTableArn },
-    ],
-  };
+export function inviteExpirySweepPolicy(options: {
+  userPoolArn: string;
+  auditTableArn: string;
+  /** SES identity (and configuration set) ARNs, for the last-owner warning. */
+  sesResourceArns?: readonly string[];
+}): IamPolicyDocument {
+  const statements: IamStatement[] = [
+    { Sid: 'InviteExpiryCognito', Effect: 'Allow', Action: [...INVITE_EXPIRY_COGNITO_ACTIONS], Resource: options.userPoolArn },
+    { Sid: 'InviteExpiryAudit', Effect: 'Allow', Action: [...AUDIT_LOG_APP_ACTIONS.append], Resource: options.auditTableArn },
+  ];
+  if (options.sesResourceArns && options.sesResourceArns.length > 0) {
+    statements.push({ Sid: 'InviteExpiryOwnerWarning', Effect: 'Allow', Action: ['ses:SendEmail'], Resource: [...options.sesResourceArns] });
+  }
+  return { Version: '2012-10-17', Statement: statements };
 }

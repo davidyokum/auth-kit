@@ -21,6 +21,13 @@ export const ADMIN_ROLE_RANK: Readonly<Record<StandardGroup, number>> = {
   superadmin: 4,
 };
 
+/**
+ * The group whose enabled members are the site's owners ("Owner" on screens). Each site keeps at
+ * least one: the invite-expiry sweep never disables the last enabled holder of this group. Read the
+ * owner role from here, not from a literal, so changing which group it is changes it everywhere.
+ */
+export const OWNER_GROUP = 'superadmin';
+
 /** Display names. `superadmin` is called "Owner" on screens. */
 export const ADMIN_ROLE_LABEL: Readonly<Record<StandardGroup, string>> = {
   viewer: 'Viewer',

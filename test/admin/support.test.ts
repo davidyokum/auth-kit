@@ -11,6 +11,7 @@ import {
   peopleAdminPolicy,
   renderInviteEmail,
   renderOwnerAlertEmail,
+  renderOwnerInviteWarningEmail,
   roleLabel,
   type ActivityEntry,
 } from '../../src/admin/index.js';
@@ -98,6 +99,55 @@ describe('owner-grant alert email (the default notifier)', () => {
     await expect(mailer.ownerGranted({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
     ses.on(SendEmailCommand).rejects(Object.assign(new Error('nope'), { name: 'MessageRejected' }));
     await expect(mailer.ownerGranted(alert)).rejects.toMatchObject({ name: 'MessageRejected' });
+  });
+});
+
+describe('last-owner warning email (the sweep leaves the only owner’s unused invite open)', () => {
+  const warning = {
+    siteName: 'Example & Co',
+    owner: { sub: 'o1', email: 'olivia@example.org', name: 'Olivia <b>' },
+    to: { email: 'olivia@example.org', kind: 'owner' as const },
+    invitedAt: new Date('2026-10-10T12:00:00Z'),
+    expiredAt: new Date('2026-10-17T12:00:00Z'),
+    signInUrl: 'https://reports.example.org/sign-in?x="1"&$&',
+    at: new Date('2026-10-17T13:00:00Z'),
+  };
+
+  it('tells the owner why the invite is still open and where to sign in, escaping HTML', () => {
+    const email = renderOwnerInviteWarningEmail(warning);
+    expect(email.subject).toBe("Your owner invite to Example & Co hasn't been used");
+    expect(email.text).toContain('Hi Olivia <b>,');
+    expect(email.text).toContain('invited as an owner of Example & Co on October 10, 2026 (UTC)');
+    expect(email.text).toContain("you're the site's only owner, so yours was left open");
+    expect(email.text).toContain('Sign in at https://reports.example.org/sign-in?x="1"&$& with this email address');
+    expect(email.html).toContain('<a href="https://reports.example.org/sign-in?x=&quot;1&quot;&amp;$&amp;">');
+    expect(email.html).toContain('Olivia &lt;b&gt;');
+    expect(email.html).not.toContain('<b>');
+    expect(`${email.text}${email.html}`).not.toMatch(/password|code:/i);
+    const { signInUrl: _signInUrl, ...withoutUrl } = warning;
+    expect(renderOwnerInviteWarningEmail(withoutUrl).text).toContain('Sign in to Example & Co with this email address');
+  });
+
+  it('tells the fallback address whose invite it is and how to resolve it', () => {
+    const email = renderOwnerInviteWarningEmail({ ...warning, to: { email: 'ops@example.org', kind: 'fallback' } });
+    expect(email.subject).toBe("Example & Co: the owner invite for olivia@example.org hasn't been used");
+    expect(email.text).toContain('The owner invite for Olivia <b> (olivia@example.org) on Example & Co');
+    expect(email.text).toMatch(/make someone else an owner: the next run then disables this invite/);
+    expect(email.html).not.toContain('<a ');
+  });
+
+  it('goes through SESv2, one message per recipient', async () => {
+    const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
+    const ses = mockClient(client);
+    ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
+    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    await mailer.ownerInviteUnused(warning);
+    await mailer.ownerInviteUnused({ ...warning, to: { email: 'ops@example.org', kind: 'fallback' } });
+    expect(ses.commandCalls(SendEmailCommand).map((c) => c.args[0].input.Destination)).toEqual([
+      { ToAddresses: ['olivia@example.org'] },
+      { ToAddresses: ['ops@example.org'] },
+    ]);
+    await expect(mailer.ownerInviteUnused({ ...warning, to: { email: '', kind: 'owner' } })).rejects.toThrow(/no address/);
   });
 });
 

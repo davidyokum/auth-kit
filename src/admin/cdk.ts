@@ -3,14 +3,18 @@
  * (via `backend.createStack`) or any CDK app.
  *
  * - `AuditLogTable`: the append-only audit log's DynamoDB table.
- * - `InviteExpirySweep`: the schedule that disables invites unused for 7 days.
+ * - `InviteExpirySweep`: the schedule that disables invites unused for 7 days (never the last owner's).
  *
  * ```ts
  * // amplify/backend.ts
  * import { AuditLogTable, InviteExpirySweep } from 'auth-kit/admin/cdk';
  * const admin = backend.createStack('admin');
  * const auditLog = new AuditLogTable(admin, 'AuditLog');
- * new InviteExpirySweep(admin, 'InviteExpiry', { userPool: backend.auth.resources.userPool, auditLog });
+ * new InviteExpirySweep(admin, 'InviteExpiry', {
+ *   userPool: backend.auth.resources.userPool,
+ *   auditLog,
+ *   ownerWarnings: { siteName: 'Example Reports', from: 'Example Reports <noreply@example.org>', signInUrl: 'https://reports.example.org/sign-in' },
+ * });
  * backend.addOutput({ custom: { auditLogTable: auditLog.tableName } });
  * ```
  */
@@ -18,10 +22,12 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import {
+  ArnFormat,
   Duration,
   RemovalPolicy,
   Stack,
   Tags,
+  Token,
   aws_cloudwatch as cloudwatch,
   aws_cloudwatch_actions as cloudwatchActions,
   aws_dynamodb as dynamodb,
@@ -184,6 +190,51 @@ export function inviteExpiryScheduleMinutes(expression: string): number | undefi
   throw new Error(`auth-kit: schedule "${expression}" must be an EventBridge Scheduler rate(...) or cron(...) expression.`);
 }
 
+/**
+ * How the sweep warns a site's last owner whose invite is unused past 7 days (it never disables
+ * them). Sent through SES, one message to the owner and one to `fallbackEmail`.
+ */
+export interface InviteExpiryOwnerWarnings {
+  /** The site's name, as the emails say it. */
+  siteName: string;
+  /** The sender, on a verified SES identity: `Example Reports <noreply@example.org>`. */
+  from: string;
+  /**
+   * The SES identity `from` sends through: a domain or the address itself. The function may send only
+   * from it. Default: `from`'s domain.
+   */
+  sesIdentity?: string;
+  /** Absolute https sign-in URL, for the owner's message. */
+  signInUrl?: string;
+  /** Also warn this address (an operator), in a message of its own. */
+  fallbackEmail?: string;
+  /** An SES configuration set to send through (the function may use only it). */
+  configurationSet?: string;
+}
+
+const EMAIL_RE = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+
+/** The address in a sender (`Name <a@b>` or `a@b`), or undefined. */
+function senderAddress(from: string): string | undefined {
+  const bracketed = /<([^<>\s]+)>\s*$/.exec(from)?.[1];
+  const address = bracketed ?? from.trim();
+  return EMAIL_RE.test(address) ? address : undefined;
+}
+
+/** Checks the warning settings; returns the SES identity to grant. Tokens are taken as given. */
+function checkOwnerWarnings(w: InviteExpiryOwnerWarnings): string {
+  const literal = (v: string | undefined) => v !== undefined && !Token.isUnresolved(v);
+  if (literal(w.siteName) && !w.siteName.trim()) throw new Error('auth-kit: ownerWarnings.siteName is required.');
+  if (literal(w.from) && (/[\r\n]/.test(w.from) || !senderAddress(w.from))) {
+    throw new Error(`auth-kit: ownerWarnings.from "${w.from}" must be a sender, like "Example Reports <noreply@example.org>".`);
+  }
+  if (literal(w.signInUrl) && !/^https:\/\/[^\s]+$/.test(w.signInUrl!)) throw new Error('auth-kit: ownerWarnings.signInUrl must be an absolute https URL.');
+  if (literal(w.fallbackEmail) && !EMAIL_RE.test(w.fallbackEmail!)) throw new Error(`auth-kit: ownerWarnings.fallbackEmail "${w.fallbackEmail}" isn't an email address.`);
+  if (w.sesIdentity !== undefined) return w.sesIdentity;
+  if (!literal(w.from)) throw new Error('auth-kit: ownerWarnings.sesIdentity is required when from is a token.');
+  return senderAddress(w.from)!.split('@')[1]!.toLowerCase();
+}
+
 export interface InviteExpirySweepProps {
   /** The pool whose invites expire: Amplify's `backend.auth.resources.userPool`, or any `IUserPool`. */
   userPool: { readonly userPoolId: string; readonly userPoolArn: string };
@@ -192,16 +243,25 @@ export interface InviteExpirySweepProps {
   /** `emailed-code` (default, everyday pools) or `temporary-password` (the Tier 3 admin pool). */
   inviteMode?: InviteMode;
   /**
+   * Warn the site's last owner (and `fallbackEmail`) when their invite is unused past 7 days: the
+   * sweep never disables the last owner, so it emails them instead, on the first run after the invite
+   * expired and then once a day. Without it, a run that skips a last owner fails (and alarms with
+   * `alarmTopic`), so someone still hears about it.
+   */
+  ownerWarnings?: InviteExpiryOwnerWarnings;
+  /**
    * An EventBridge Scheduler expression. Default `rate(1 hour)`. A `rate` must be between 10
    * minutes and 1 day (an invite then outlives its 7 days by at most that long); a `cron` must run at
-   * least daily.
+   * least daily. With a `cron` the function can't tell how often it runs, so every run that skips a
+   * last owner warns them: use a daily `cron` or a `rate`.
    */
   schedule?: string;
   /** Time zone for a `cron` schedule. Default `UTC`. */
   scheduleTimezone?: string;
   /**
    * Alarms to this topic when a run fails (a due invite it couldn't disable, a pool larger than
-   * `maxPeople`, an error) or when the scheduler couldn't invoke the function.
+   * `maxPeople`, a last owner it couldn't warn, an error) or when the scheduler couldn't invoke the
+   * function.
    */
   alarmTopic?: sns.ITopic;
   /** Accounts checked per run. Default 5000; a bigger pool fails the run (and alarms) until raised. */
@@ -212,7 +272,7 @@ export interface InviteExpirySweepProps {
 
 /**
  * Disables invites unused for 7 days, on a schedule, with least privilege (03 §2: "An invite with
- * no sign-in after 7 days is disabled"):
+ * no sign-in after 7 days is disabled"), except the site's last owner's (ADR 0019):
  *
  * - **EventBridge Scheduler** (its own schedule group) invokes a Lambda function hourly, through a
  *   role that may invoke only that function, assumable only by this account's scheduler for this
@@ -221,9 +281,14 @@ export interface InviteExpirySweepProps {
  *   every disable is an intent row, the Cognito calls, then a result row, so the Activity page shows
  *   it as "Scheduled job". Its code is the release tarball's bundle (AWS SDK included), Node 22 on
  *   ARM, no retries (the next run retries), five minutes at most.
- * - **Its role** may make exactly `ListUsers`, `AdminListGroupsForUser`, `AdminDisableUser`, and
- *   `AdminRemoveUserFromGroup` on this pool, `PutItem` on the audit table (no reads, no edits), and
- *   write to its own log group. Nothing else, not even `logs:CreateLogGroup`.
+ * - **The last owner** is never disabled: an expired owner invite is disabled only while another
+ *   enabled owner remains. Otherwise the run skips it, logs a refusal ("skipped: last owner"), and
+ *   warns the owner by email (`ownerWarnings`), once a day. An owner count it can't read is a skip
+ *   too, and a failed run.
+ * - **Its role** may make exactly `ListUsers`, `AdminListGroupsForUser`, `ListUsersInGroup`,
+ *   `AdminDisableUser`, and `AdminRemoveUserFromGroup` on this pool, `PutItem` on the audit table (no
+ *   reads, no edits), `ses:SendEmail` from the warning's identity (with `ownerWarnings`), and write to
+ *   its own log group. Nothing else, not even `logs:CreateLogGroup`.
  * - **Alarms** (with `alarmTopic`): a failed run, or an invocation the scheduler dropped.
  */
 export class InviteExpirySweep extends Construct {
@@ -246,6 +311,8 @@ export class InviteExpirySweep extends Construct {
     if (mode !== 'emailed-code' && mode !== 'temporary-password') throw new Error(`auth-kit: inviteMode "${String(mode)}" is unknown.`);
     const maxPeople = props.maxPeople ?? ADMIN_POLICY.maxPeople;
     if (!Number.isInteger(maxPeople) || maxPeople < 1) throw new Error('auth-kit: maxPeople must be a whole number of at least 1.');
+    const warnings = props.ownerWarnings;
+    const sesIdentity = warnings ? checkOwnerWarnings(warnings) : undefined;
 
     const bundle = join(packageRoot(), INVITE_EXPIRY_BUNDLE_PATH);
     if (!existsSync(join(bundle, 'index.mjs'))) {
@@ -268,6 +335,19 @@ export class InviteExpirySweep extends Construct {
     );
     props.auditLog.grantAppend(this.role);
     this.logGroup.grantWrite(this.role);
+    if (warnings && sesIdentity !== undefined) {
+      const sesArn = (resource: string, resourceName: string) =>
+        stack.formatArn({ service: 'ses', resource, resourceName, arnFormat: ArnFormat.SLASH_RESOURCE_NAME });
+      this.role.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: ['ses:SendEmail'],
+          resources: [
+            sesArn('identity', sesIdentity),
+            ...(warnings.configurationSet !== undefined ? [sesArn('configuration-set', warnings.configurationSet)] : []),
+          ],
+        }),
+      );
+    }
 
     this.function = new lambda.Function(this, 'Function', {
       description: `auth-kit: disables invites unused for ${INVITE_EXPIRY_DAYS} days, as system:invite-expiry`,
@@ -285,6 +365,15 @@ export class InviteExpirySweep extends Construct {
         [INVITE_EXPIRY_ENV.auditTable]: props.auditLog.tableName,
         [INVITE_EXPIRY_ENV.inviteMode]: mode,
         [INVITE_EXPIRY_ENV.maxPeople]: String(maxPeople),
+        // How often it runs, so a skipped last owner is warned once a day; unknown for a cron.
+        ...(minutes !== undefined && { [INVITE_EXPIRY_ENV.runEveryMinutes]: String(minutes) }),
+        ...(warnings && {
+          [INVITE_EXPIRY_ENV.siteName]: warnings.siteName,
+          [INVITE_EXPIRY_ENV.mailFrom]: warnings.from,
+          ...(warnings.signInUrl !== undefined && { [INVITE_EXPIRY_ENV.signInUrl]: warnings.signInUrl }),
+          ...(warnings.fallbackEmail !== undefined && { [INVITE_EXPIRY_ENV.ownerWarningFallback]: warnings.fallbackEmail }),
+          ...(warnings.configurationSet !== undefined && { [INVITE_EXPIRY_ENV.mailConfigurationSet]: warnings.configurationSet }),
+        }),
       },
     });
 

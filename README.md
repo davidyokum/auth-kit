@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.3-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.4-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -17,7 +17,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
-| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days | **Implemented** (phase 2) |
+| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the last owner's) | **Implemented** (phase 2) |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
@@ -27,10 +27,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.3-alpha/auth-kit-0.1.3-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.4-alpha/auth-kit-0.1.4-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.3-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.4-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -388,6 +388,13 @@ const auditLog = new AuditLogTable(admin, 'AuditLog');
 new InviteExpirySweep(admin, 'InviteExpiry', {
   userPool: backend.auth.resources.userPool,
   auditLog,
+  // The last owner's unused invite is never disabled; the owner (and fallbackEmail) is warned instead.
+  ownerWarnings: {
+    siteName: 'Example Reports',
+    from: 'Example Reports <noreply@example.org>', // on a verified SES identity (default: its domain)
+    signInUrl: 'https://reports.example.org/sign-in',
+    fallbackEmail: 'ops@example.org',
+  },
   // alarmTopic: an SNS topic that emails someone: a run failed, or the scheduler couldn't run it.
   // inviteMode: 'temporary-password', // the Tier 3 admin pool
 });
@@ -458,7 +465,9 @@ Every action re-reads the acting person and the target from Cognito, runs the gu
 
 The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResourceArns })` (Amplify Hosting's compute role is set in the console, so this returns plain JSON; in CDK, `auditLog.grantAppendAndQuery(role)`). The Tier 3 admin pool, which has no emailed codes, uses `inviteMode: 'temporary-password'`: Cognito emails a one-time password the app never sees.
 
-**Invite expiry.** An invite is a live account until it's used, so `InviteExpirySweep` disables every invite still unused after 7 days, within the hour ([ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)). EventBridge Scheduler runs a Lambda function with the package's own bundle (`createInviteExpirySweep` as the `system:invite-expiry` actor; each disable is an audit intent, the Cognito calls, then a result, shown as "Scheduled job" on the Activity page). Its role may call only `ListUsers`, `AdminListGroupsForUser`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on that pool, `PutItem` on the audit table, and write its own log; the scheduler's role may only invoke it. Options: `schedule` (a `rate` from 10 minutes to a day, or a `cron`), `inviteMode`, `alarmTopic`, `maxPeople` (a run fails, and alarms, rather than silently skip accounts past it), `logRetention`. For a role defined outside CDK, `inviteExpirySweepPolicy({ userPoolArn, auditTableArn })` is the same policy as JSON. An admin can also run the sweep from the People page (`people.expireStaleInvites()`).
+**Invite expiry.** An invite is a live account until it's used, so `InviteExpirySweep` disables every invite still unused after 7 days, within the hour ([ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)). EventBridge Scheduler runs a Lambda function with the package's own bundle (`createInviteExpirySweep` as the `system:invite-expiry` actor; each disable is an audit intent, the Cognito calls, then a result, shown as "Scheduled job" on the Activity page). Its role may call only `ListUsers`, `AdminListGroupsForUser`, `ListUsersInGroup`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on that pool, `PutItem` on the audit table, `ses:SendEmail` from the warning's identity, and write its own log; the scheduler's role may only invoke it. Options: `schedule` (a `rate` from 10 minutes to a day, or a `cron`), `inviteMode`, `ownerWarnings`, `alarmTopic`, `maxPeople` (a run fails, and alarms, rather than silently skip accounts past it), `logRetention`. For a role defined outside CDK, `inviteExpirySweepPolicy({ userPoolArn, auditTableArn, sesResourceArns })` is the same policy as JSON. An admin can also run the sweep from the People page (`people.expireStaleInvites()`).
+
+**The last owner is never disabled.** Each site keeps at least one owner, so the sweep disables an expired owner invite only while another enabled holder of the owner role (`OWNER_GROUP` in the shared policy, today `superadmin`) remains (read live; two owners with one unused invite: the unused one goes). The last owner, even one who never signed in, keeps their account and role: the run logs a refusal ("skipped: last owner") and emails them "Your owner invite to {Site} hasn't been used", plus a separate copy to `fallbackEmail`, on the first run after the invite expired and then once a day. If the owner count can't be read, the owner is skipped too and the run fails, so the alarm says so. Without `ownerWarnings`, a run that skips a last owner fails instead of emailing. With a `cron` schedule every skipping run warns, so use a daily `cron` or a `rate`. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner) has the details.
 
 ## Status codes
 
@@ -548,12 +557,12 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
 | Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
-| Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)) | Pkg |
+| Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)); never the last owner's, who is warned instead | Pkg |
 | Recovery defined | Email recovery (everyday), admin-only (admin pool); admin MFA reset P2 | Partial |
 | Email changes admin-only | Can't be enforced in the pool ([why](#what-the-pool-cant-enforce)) | Gap |
 | First admin bootstrapped once at deploy | Not built | P2 |
 | **Admin area** | | |
-| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, run live by every action | Pkg |
+| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, run live by every action; the invite-expiry sweep keeps the last owner too | Pkg |
 | People page buttons and copy | `createPeopleActions`, `peopleActionDetails`, `auth-kit/admin/ui` | Pkg |
 | Append-only audit log, written with the change | `createDynamoAuditLog`, `runAudited` (intent → calls → result), `AuditLogTable` ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md)) | Pkg |
 | Grants and removals alert a named person | `onChange` hook on every completed change | Pkg (alert channel: App) |
@@ -625,7 +634,7 @@ Still to check on a live pool (each needs a real person or a deploy approved by 
 - **Which rule sees token refreshes.** Amplify JS 6.22 refreshes with `GetTokensFromRefreshToken` (overall rule only); older clients use `InitiateAuth` with `REFRESH_TOKEN_AUTH`, which the sign-in rule also counts. Read the samples after a session refreshes (the command above).
 - **`request.url`'s scheme in route handlers behind Amplify Hosting.** If handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
-- **The invite-expiry schedule end to end** (a real invite disabled after 7 days, its audit rows on the Activity page).
+- **The invite-expiry schedule end to end** (a real invite disabled after 7 days, its audit rows on the Activity page), and a sole owner's unused invite skipped with the warning delivered through SES.
 
 ## What the pool can't enforce
 
