@@ -15,8 +15,8 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
 | `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
-| `auth-kit/admin` | The People page actions and an append-only audit log | **Implemented** (phase 2) |
-| `auth-kit/admin/ui` | People table, invite form, role-change dialog, Activity log (React client components) | **Implemented** (phase 2) |
+| `auth-kit/admin` | The People page actions (including Transfer ownership) and an append-only audit log, on the site-wide roles ([below](#site-wide-roles)) | **Implemented** (phase 2) |
+| `auth-kit/admin/ui` | People table, invite form, role picker (each role's can/can't, "Compare roles"), role-change and Transfer ownership dialogs, Activity log (React client components) | **Implemented** (phase 2) |
 | `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the last owner's) | **Implemented** (phase 2) |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
@@ -79,6 +79,24 @@ export const capabilities = defineCapabilities({
   reviewer: ['reviews.read', 'reviews.comment'],
 });
 ```
+
+#### Site-wide roles
+
+Every site has the same admin ladder ([ADR 0020](docs/decisions/0020-site-wide-roles.md)). Each role includes everything below it; the preset creates the groups in this order (their precedence), then the app's roles.
+
+| Role (exact label) | Group | View everything | Edit any content | Manage people | Security, exports, deletion | Owner-only pages |
+|---|---|---|---|---|---|---|
+| Owner (only one) | `owner` | Yes | Yes | Yes, everyone but themselves | Yes | Yes |
+| Super admin | `superadmin` | Yes | Yes | Roles below Super admin | Yes | No |
+| Admin – content & people | `admin-content-people` | Yes | Yes | Roles below their own | No | No |
+| Admin – content only | `admin-content` | Yes | Yes | No | No | No |
+| Admin – view only | `admin-view` | Yes | No | No | No | No |
+| Member | (no group) | Their own account and items | Only items they've been given access to | No | No | No |
+
+- You grant, and act on, only roles below your own: only the owner grants (or manages) Super admins. Nobody changes their own role.
+- The owner role is never granted. It moves only by **Transfer ownership** (owner only, to someone who has signed in, with a reason, their address typed out, and a recent sign-in; both are emailed; the previous owner becomes Super admin). Nobody disables, demotes, or deletes the owner, and the invite-expiry sweep never disables them. The People table flags a site without exactly one owner.
+- These roles are for running the site. What a member can do with one project, plan, or other item is decided on that item (resource roles, next), never by these roles.
+- `STANDARD_CAPABILITIES`, `ADMIN_ROLE_LABEL`, `ROLE_DESCRIPTIONS` (one line each of can and can't), and `ROLE_MATRIX` (this table, built from the capability map) come from `auth-kit/server` and `auth-kit/admin`. Moving from `superadmin`/`admin`/`editor`/`viewer`: see [ADR 0020's migration note](docs/decisions/0020-site-wide-roles.md#migration-from-superadmin--admin--editor--viewer).
 
 ```ts
 // lib/auth.ts
@@ -227,11 +245,11 @@ const server = await startMatrixServer({
   personas: {
     member: {},
     otherMember: {},
-    admin: { groups: ['admin'] },
+    admin: { groups: ['admin-content-people'] }, // the matrix's required "admin" persona
     noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } }, // a password user without TOTP
-    demotedAdmin: { groups: ['admin'], liveGroups: [] }, // the token says admin, Cognito no longer does
-    disabledAdmin: { groups: ['admin'], enabled: false },
-    revokedSession: { groups: ['editor'], sessionRevoked: true }, // signed out everywhere
+    demotedAdmin: { groups: ['admin-content-people'], liveGroups: [] }, // the token says admin, Cognito no longer does
+    disabledAdmin: { groups: ['admin-content-people'], enabled: false },
+    revokedSession: { groups: ['admin-content'], sessionRevoked: true }, // signed out everywhere
   },
   env: { APP_DEV_ORIGIN: 'http://127.0.0.1:3210' }, // whatever your expectedOrigin reads in development
   port: 3210,
@@ -429,14 +447,14 @@ export async function invite(previous: ActionResult | null, data: FormData) {
   if (result.ok) revalidatePath('/admin/people');
   return result;
 }
-// …and the same for resend, changeRole, disable, enable, signOutEverywhere, deleteUser
+// …and the same for resend, changeRole, transferOwnership, disable, enable, signOutEverywhere, deleteUser
 ```
 
 ```tsx
 // app/admin/people/page.tsx (server component; admin pages are never cached)
 import { InviteForm, PeopleTable } from 'auth-kit/admin/ui';
 import { signInUrl } from 'auth-kit/server';
-import { changeRole, deleteUser, disable, enable, invite, resend, signOutEverywhere } from './actions';
+import { changeRole, deleteUser, disable, enable, invite, resend, signOutEverywhere, transferOwnership } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -445,15 +463,18 @@ export const dynamic = 'force-dynamic';
 const stepUpHref = signInUrl('/admin/people', { reauth: true });
 
 export default async function PeoplePage() {
-  const user = await pages.requireCan('people.manage', { live: true });
+  // Every admin role sees the list (people.read); each action checks its own capability.
+  const user = await pages.requireCan('people.read', { live: true });
   const viewer = { sub: user.sub, groups: [...user.groups], capabilities: [...user.capabilities] };
   return (
     <>
-      <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref={stepUpHref} />
+      {user.capabilities.has('people.manage') && (
+        <InviteForm action={invite} viewer={viewer} inviteDomains={['example.org']} stepUpHref={stepUpHref} />
+      )}
       <PeopleTable
         people={await people.listPeople()}
         viewer={viewer}
-        actions={{ resend, changeRole, disable, enable, signOutEverywhere, deleteUser }}
+        actions={{ resend, changeRole, transferOwnership, disable, enable, signOutEverywhere, deleteUser }}
         stepUpHref={stepUpHref}
       />
     </>
@@ -461,13 +482,15 @@ export default async function PeoplePage() {
 }
 ```
 
-Every action re-reads the acting person and the target from Cognito, runs the guardrails with a live owner count, asks for a recent sign-in before a grant or a delete (making someone an owner also emails every owner, and is undone if that email can't be sent), and writes the audit intent before any Cognito call and the result after ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md), [ADR 0011](docs/decisions/0011-people-actions.md)). Each returns `{ ok, message }` or `{ ok: false, code, error, changed }`, where `changed` says honestly whether anything happened. The Activity page is `people.listActivity({ cursor })` with `<ActivityLog>`; apps log their own content changes with `recordChange(auditLog, …)`.
+Every action re-reads the acting person and the target from Cognito, runs the guardrails ([site-wide roles](#site-wide-roles)), asks for a recent sign-in before a grant, a transfer, or a delete (granting Super admin also emails the owner, and transferring ownership emails both owners; either is undone if that email can't be sent), and writes the audit intent before any Cognito call and the result after ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md), [ADR 0011](docs/decisions/0011-people-actions.md), [ADR 0020](docs/decisions/0020-site-wide-roles.md)). Each returns `{ ok, message }` or `{ ok: false, code, error, changed }`, where `changed` says honestly whether anything happened. The Activity page is `people.listActivity({ cursor })` with `<ActivityLog>`; apps log their own content changes with `recordChange(auditLog, …)`.
+
+The role picker (in `InviteForm` and `RoleChangeDialog`, or on its own as `RolePicker`) shows each role's one-line can and can't, disables what the viewer can't grant and says why, shows the owner apart (with "Transfer ownership…" for the owner), puts `ROLE_MATRIX` one click away ("Compare roles", or `RoleMatrixTable` anywhere), and ends with the note "These roles are for running the site. Access to individual projects, plans, and other items is managed on each one." Pass `resourceAccessHref` (links that note) and `resourceAccess` (rendered under it) for the item-access section a site adds; screens never say "resource" or "record".
 
 The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResourceArns })` (Amplify Hosting's compute role is set in the console, so this returns plain JSON; in CDK, `auditLog.grantAppendAndQuery(role)`). The Tier 3 admin pool, which has no emailed codes, uses `inviteMode: 'temporary-password'`: Cognito emails a one-time password the app never sees.
 
 **Invite expiry.** An invite is a live account until it's used, so `InviteExpirySweep` disables every invite still unused after 7 days, within the hour ([ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)). EventBridge Scheduler runs a Lambda function with the package's own bundle (`createInviteExpirySweep` as the `system:invite-expiry` actor; each disable is an audit intent, the Cognito calls, then a result, shown as "Scheduled job" on the Activity page). Its role may call only `ListUsers`, `AdminListGroupsForUser`, `ListUsersInGroup`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on that pool, `PutItem` on the audit table, `ses:SendEmail` from the warning's identity, and write its own log; the scheduler's role may only invoke it. Options: `schedule` (a `rate` from 10 minutes to a day, or a `cron`), `inviteMode`, `ownerWarnings`, `alarmTopic`, `maxPeople` (a run fails, and alarms, rather than silently skip accounts past it), `logRetention`. For a role defined outside CDK, `inviteExpirySweepPolicy({ userPoolArn, auditTableArn, sesResourceArns })` is the same policy as JSON. An admin can also run the sweep from the People page (`people.expireStaleInvites()`).
 
-**The last owner is never disabled.** Each site keeps at least one owner, so the sweep disables an expired owner invite only while another enabled holder of the owner role (`OWNER_GROUP` in the shared policy, today `superadmin`) remains (read live; two owners with one unused invite: the unused one goes). The last owner, even one who never signed in, keeps their account and role: the run logs a refusal ("skipped: last owner") and emails them "Your owner invite to {Site} hasn't been used", plus a separate copy to `fallbackEmail`, on the first run after the invite expired and then once a day. If the owner count can't be read, the owner is skipped too and the run fails, so the alarm says so. Without `ownerWarnings`, a run that skips a last owner fails instead of emailing. With a `cron` schedule every skipping run warns, so use a daily `cron` or a `rate`. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner) has the details.
+**The last owner is never disabled.** Each site keeps at least one owner, so the sweep disables an expired owner invite only while another enabled holder of the owner role (`OWNER_GROUP` in the shared policy: `owner`, of which a site has exactly one) remains (read live; two owners with one unused invite: the unused one goes). The last owner, even one who never signed in, keeps their account and role: the run logs a refusal ("skipped: last owner") and emails them "Your owner invite to {Site} hasn't been used", plus a separate copy to `fallbackEmail`, on the first run after the invite expired and then once a day. If the owner count can't be read, the owner is skipped too and the run fails, so the alarm says so. Without `ownerWarnings`, a run that skips a last owner fails instead of emailing. With a `cron` schedule every skipping run warns, so use a daily `cron` or a `rate`. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner) has the details.
 
 ## Status codes
 
@@ -553,7 +576,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Post-login redirects through `safeRedirect` | `safeRedirect`; `signInUrl` uses it | Pkg |
 | Gen 2 data rules; admin data re-checked live | `liveState` for the function; rules live in the site | App |
 | **Roles and lifecycle** | | |
-| Roles only from Cognito groups | Preset groups `superadmin`, `admin`, `editor`, `viewer`, + app roles | Pkg |
+| Roles only from Cognito groups | Preset groups `owner`, `superadmin`, `admin-content-people`, `admin-content`, `admin-view`, + app roles ([ADR 0020](docs/decisions/0020-site-wide-roles.md)) | Pkg |
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
 | Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
@@ -562,7 +585,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Email changes admin-only | Can't be enforced in the pool ([why](#what-the-pool-cant-enforce)) | Gap |
 | First admin bootstrapped once at deploy | Not built | P2 |
 | **Admin area** | | |
-| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, run live by every action; the invite-expiry sweep keeps the last owner too | Pkg |
+| Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, `roleOptions`, run live by every action: one owner, never granted, moved only by `transferOwnership`; only the owner grants Super admin; the invite-expiry sweep keeps the owner too | Pkg |
 | People page buttons and copy | `createPeopleActions`, `peopleActionDetails`, `auth-kit/admin/ui` | Pkg |
 | Append-only audit log, written with the change | `createDynamoAuditLog`, `runAudited` (intent → calls → result), `AuditLogTable` ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md)) | Pkg |
 | Grants and removals alert a named person | `onChange` hook on every completed change | Pkg (alert channel: App) |

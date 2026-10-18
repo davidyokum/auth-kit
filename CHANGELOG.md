@@ -2,6 +2,37 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [__NEXT_VERSION__] - 2026-10-18
+
+Site-wide roles: one owner, an explicit admin ladder, and Transfer ownership (David's decision; [ADR 0020](docs/decisions/0020-site-wide-roles.md)). Pre-release. **Breaking:** group names, capabilities, and the owner alerts changed; see Migration.
+
+### Security
+
+- **Exactly one owner, never granted.** The owner is the `owner` group. Nobody can grant it by invite or role change, not even the owner (`owner_transfer`); it moves only by `people.transferOwnership`, which only the owner can start, only to an enabled account that has signed in, with a reason, the new owner's address typed out, and a sign-in in the last five minutes. The new owner is added before the previous one is removed (who becomes Super admin), so a failure partway can leave two owners, never none; both are emailed, and if that email can't be sent the transfer is undone. Nobody disables, demotes, or deletes the owner (`last_owner`), and the invite-expiry sweep keeps them (its `OWNER_GROUP` is now `owner`).
+- **Only the owner grants Super admin, and the owner is told.** You grant and act only below your own level, so Super admins manage every role below theirs but not each other. A Super admin grant needs a recent sign-in and an alert to the owner (`superadminGranted`), and is undone if the alert fails; before, owners made other owners and every owner was emailed.
+- **The People table flags a site without exactly one owner.** Zero: the owner role can't be granted in the app, so the message names the break-glass path. More than one: an owner may change another owner's role while the live count is two or more (an unknown count is a "no").
+
+### Added
+
+- The ladder in `src/shared/policy.ts`: `STANDARD_GROUPS` = `owner`, `superadmin`, `admin-content-people`, `admin-content`, `admin-view` (precedence in that order); `ADMIN_ROLE_RANK`; `ADMIN_ROLE_LABEL` (Owner, Super admin, Admin – content & people, Admin – content only, Admin – view only); `MEMBER_ROLE`, `MEMBER_LABEL`, `SiteRole`; `ROLE_DESCRIPTIONS` (one line each of can and can't, Member included); `ROLE_MATRIX` (rows: each role then Member; columns: View everything, Edit any content, Manage people, Security, exports, deletion, Owner-only pages), built from the capability map; `ROLE_MATRIX_CAPABILITIES`; `OWNER_GROUP = 'owner'`; `RETIRED_GROUPS`.
+- `STANDARD_CAPABILITIES` as a ladder: `admin-view` holds `content.read`, `people.read` (new), and `audit.read`; `admin-content` adds `content.edit`, `content.publish`; `admin-content-people` adds `people.manage`, `roles.manage`; `superadmin` adds `settings.security`, `data.export`, `data.delete`; `owner` adds `owner.private` and `owner.transfer` (new).
+- `people.transferOwnership` (and `forms.transferOwnership`, `TransferOwnershipInput`, audit action `people.transferOwnership`); `roleOptions` (the picker's choices with can/can't and why each is unavailable), `roleLabel` and `isStandardGroup` from `auth-kit/admin`; `ownerCountWarning`, `SUPERADMIN_GRANT_NOTE`, `TRANSFER_OWNERSHIP_NOTE`, `OWNER_ROLE_NOTE`, `RESOURCE_ACCESS_NOTE`.
+- `auth-kit/admin/ui`: `RolePicker` (each role's label and one-line can/can't; unavailable ones disabled with the reason; the owner shown apart, with "Transfer ownership…" for the owner; "Compare roles"; the note "These roles are for running the site. Access to individual projects, plans, and other items is managed on each one."), `RoleMatrixTable`, `CompareRoles`, `ResourceAccessNote`, `TransferOwnershipDialog`. `InviteForm`, `RoleChangeDialog`, and `PeopleTable` take `resourceAccessHref` and `resourceAccess` for the item-access section a site adds; `PeopleTable` takes `actions.transferOwnership`.
+- `OwnerAlertNotifier.ownershipTransferred`, `OwnershipTransferAlert`, `renderOwnershipTransferEmail`; the SES mailer sends it to both owners in one message.
+
+### Changed
+
+- **Breaking:** the groups. `superadmin` is now Super admin, one rank below the owner; `admin`, `editor`, and `viewer` are retired (refused as app roles and persona groups, with the new name in the message). Deploying the preset deletes those three groups and their memberships; see Migration.
+- **Breaking:** `OwnerAlertNotifier.ownerGranted` → `superadminGranted`; `OwnerGrantAlert` → `SuperadminGrantAlert`; `renderOwnerAlertEmail` → `renderSuperadminGrantEmail`; the SES mailer's `renderOwnerAlert` → `renderSuperadminGrant` (and new `renderOwnershipTransfer`); `OWNER_GRANT_NOTE` → `SUPERADMIN_GRANT_NOTE`; `ownerAlerts` may supply either method.
+- `listPeople` needs `people.read` (every admin role) instead of `people.manage`, so view-only and content-only admins see the list; every action still checks its own capability. `data.delete` is held by the owner and Super admins.
+- The role picker is radio buttons with descriptions instead of a `<select>`; the invite form defaults to Member. An invite as Admin – content & people or Super admin needs a reason.
+- Dev personas: one per new role (`defaultPersonas`), and `parsePersonas` refuses more than one owner persona.
+- No screen says "record": People-page copy says "item", and the last sign-in gap reads "— not tracked".
+
+### Migration
+
+Map `superadmin` → `superadmin` (and pick one person as the owner), `admin` → `admin-content-people`, `editor` → `admin-content`, `viewer` → `admin-view`. Write down each old group's members before deploying (the deploy deletes `admin`, `editor`, and `viewer`), deploy, add one person to `owner` in the Cognito console (the only break-glass step), then re-grant the rest from the People page. Update the site's capability file, `personas.json`, and the renamed exports above. [ADR 0020](docs/decisions/0020-site-wide-roles.md#migration-from-superadmin--admin--editor--viewer) has the steps.
+
 ## [0.1.4-alpha] - 2026-10-18
 
 The invite-expiry sweep keeps the site's last owner. Pre-release.

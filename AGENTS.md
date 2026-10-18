@@ -32,7 +32,7 @@ npm run test:e2e   # after build: the fixture app on real Next.js (test/e2e; CI 
 - `src/client` sign-in screens, the authenticator gate, and My account (React client components on Amplify JS v6; ADR 0008); `parity.ts` keeps the screens the same for every address until a factor is proven (ADR 0018): never show Cognito's per-account answer to a first-factor request
 - `src/admin` People actions, the audit log, and the invite-expiry sweep (`sweep.ts`, kept free of Next.js and React because `invite-expiry-handler.ts` is bundled into a Lambda); `cdk.ts` holds `AuditLogTable` and `InviteExpirySweep` (ADR 0019)
 - `src/dev` the localhost kit (`auth-kit/dev`, `auth-kit/dev/menu`, `auth-kit/ribbon`, the `auth-kit` command; see `docs/localhost.md`). Only `ribbon.tsx` and `ribbon-model.ts` may reach a production build: never import the marker or other dev modules from them
-- `src/shared/policy.ts` every concrete setting (lifetimes, limits, roles, capabilities); `src/shared/matrix-protocol.ts` the proxy ↔ matrix handler-pass contract
+- `src/shared/policy.ts` every concrete setting (lifetimes, limits, the site-wide roles and their labels, descriptions, capabilities, and `ROLE_MATRIX`; ADR 0020); `src/shared/matrix-protocol.ts` the proxy ↔ matrix handler-pass contract
 - `tsup.lambda.config.ts` the self-contained Lambda bundles (`dist/lambda/*`, AWS SDK included) that `auth-kit/admin/cdk` deploys; `npm run build` runs it after the main build, and the CDK tests build it if it's missing
 - `scripts/check-tarball.mjs` release tarball check (CI)
 - `test/e2e` a plain-JS Next fixture app and the e2e test that builds, runs, and matrix-tests it (`AUTH_KIT_E2E=1`)

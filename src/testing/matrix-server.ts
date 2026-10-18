@@ -27,7 +27,7 @@
  */
 import type { CognitoIdentityProviderClient, UserType } from '@aws-sdk/client-cognito-identity-provider';
 import { AuditEventInvalidError, type AuditLogStore, AuditRowExistsError, createMemoryAuditLog } from '../admin/audit.js';
-import type { InviteMailer, OwnerAlertNotifier } from '../admin/mailer.js';
+import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier } from '../admin/mailer.js';
 import { MATRIX_SERVER_MARKER } from '../dev/marker.js';
 import type { CognitoGateway, LiveUserState, UserAuthFactors } from '../server/cognito.js';
 import { UnauthenticatedError } from '../server/errors.js';
@@ -54,7 +54,7 @@ export interface MatrixServerOverrides {
   /** `createPeopleActions({ cognito })`: lists the fixture's people and their live groups; refuses every change. */
   readonly peopleCognito: CognitoIdentityProviderClient;
   /** `createPeopleActions({ mailer })` (it also serves as `ownerAlerts`): refuses to send anything. */
-  readonly mailer: InviteMailer & OwnerAlertNotifier;
+  readonly mailer: InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier;
   /** `createPeopleActions({ auditLog })` and the Activity page: in memory, one log per server process. */
   readonly auditLog: AuditLogStore;
   /** The fixture's people. */
@@ -207,7 +207,12 @@ function build(fixture: MatrixFixture): MatrixServerOverrides {
       cognito: scriptedGateway(new Map(fixture.users.map((u) => [u.username, u]))),
     }),
     peopleCognito: readOnlyPeopleClient(fixture.users),
-    mailer: Object.freeze({ sendInvite: refuse('invite'), superadminGranted: refuse('Super admin alert'), ownershipTransferred: refuse('ownership alert') }),
+    mailer: Object.freeze({
+      sendInvite: refuse('invite'),
+      superadminGranted: refuse('Super admin alert'),
+      ownershipTransferred: refuse('ownership alert'),
+      ownerInviteUnused: refuse('owner warning'),
+    }),
     auditLog: bundleAuditLog(shared('auth-kit:audit-log', () => createMemoryAuditLog())),
     users: Object.freeze([...fixture.users]),
     shared,
