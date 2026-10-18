@@ -14,8 +14,12 @@
  * **Request access** files a request (name, email, an optional reason) in the app's DynamoDB, never
  * as a Cognito user, or emails an address that already has an account. The same answer every time.
  *
- * Both answer only same-origin POSTs with a JSON body, and sit behind the optional WAF rules
- * (`accountCreationWafRules`): a silent challenge and a per-IP limit.
+ * Both answer only same-origin POSTs with a JSON body, and sit behind the WAF rules
+ * (`accountCreationWafRules`: a silent challenge and a per-IP limit), required in `open` mode.
+ *
+ * **Every answer takes at least `minimumResponseMs`**, refusals and failures included, from the HTTP
+ * handlers and from `handleSignUp`/`handleRequestAccess` alike, and the work behind an answer is the
+ * same size whatever the queue holds: the request store's `create` is one conditional write.
  */
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { InputError, emailOf, record, text } from '../admin/action-kit.js';
@@ -35,6 +39,7 @@ import {
   mayCreateOwnAccount,
   notOnListMessage,
   normalizeAccountCreation,
+  rateLimitAddress,
   takesAccessRequests,
 } from '../shared/account-creation.js';
 import { existingAccountEmail } from '../shared/emails.js';
@@ -65,15 +70,23 @@ export interface AccountCreationRoutesConfig {
   /** Origins allowed to POST. Default: the sign-in URL's origin. */
   allowedOrigins?: readonly string[];
   /**
-   * The client's IP for the per-IP limit. Default: the first `X-Forwarded-For` entry, else
-   * `X-Real-IP`. A client can forge those, so the WAF rule (which sees the real address) is the
-   * per-IP limit that can't be dodged; this one is the second layer.
+   * The client's IP, for the per-IP limit and the audit row. Required, because only the site knows
+   * which proxies sit in front of it. Behind Amplify Hosting (CloudFront), use
+   * `forwardedForClientIp()`: the last `X-Forwarded-For` entry, the one the proxy appended. Never the
+   * first: the client writes it. Behind more proxies, `forwardedForClientIp({ trustedProxies: n })`.
+   * The WAF rule (which sees the real address) is still the per-IP limit that can't be dodged.
    */
-  clientIp?: (request: Request) => string | undefined;
+  clientIp: (request: Request) => string | undefined;
+  /**
+   * `open` mode only: refuse sign-ups that didn't pass the WAF challenge (no `aws-waf-token` cookie),
+   * with the same answer for every address. Default `true` in `open` mode, where the challenge is
+   * required (ADR 0023); pass `false` only for local development, which has no WAF in front.
+   */
+  requireWafToken?: boolean;
   /** Every answer takes at least this long. Default 800 ms (`ACCOUNT_CREATION_POLICY`). */
   minimumResponseMs?: number;
   /** Override the limits (`ACCOUNT_CREATION_POLICY.rateLimits`). */
-  rateLimitRules?: Partial<Record<'signUpPerAddress' | 'signUpPerIp' | 'requestPerAddress' | 'requestPerIp', RateLimitRule>>;
+  rateLimitRules?: Partial<Record<'signUpPerAddress' | 'signUpPerIp' | 'signUpSite' | 'requestPerAddress' | 'requestPerIp' | 'requestSite', RateLimitRule>>;
   /** Inject a Cognito client (tests). */
   cognito?: CognitoIdentityProviderClient;
   quota?: QuotaLimiterOptions;
@@ -108,7 +121,7 @@ export interface AccountCreationRoutes {
   signUp(request: Request): Promise<Response>;
   /** `POST` handler for the request-access route. */
   requestAccess(request: Request): Promise<Response>;
-  /** The same logic without HTTP (tests, or a server action), with no response-time floor. */
+  /** The same logic without HTTP (tests, or a server action). Floored too: every answer takes at least `minimumResponseMs`. */
   handleSignUp(input: unknown, facts?: RequestFacts): Promise<AccountCreationResult>;
   handleRequestAccess(input: unknown, facts?: RequestFacts): Promise<AccountCreationResult>;
   readonly settings: NormalizedAccountCreation;
@@ -116,9 +129,40 @@ export interface AccountCreationRoutes {
 
 const MAX_BODY_BYTES = 4096;
 
-function defaultClientIp(request: Request): string | undefined {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return forwarded || request.headers.get('x-real-ip')?.trim() || undefined;
+/** An IPv4 or IPv6 address as it appears in a forwarded header (no ports, no junk). */
+const IP_RE = /^(?:\d{1,3}(?:\.\d{1,3}){3}|(?=[0-9a-f.]*:)[0-9a-f:.]{2,45}(?:%[0-9a-z]{1,16})?)$/i;
+
+/**
+ * The client IP behind trusted proxies: the `trustedProxies`-th `X-Forwarded-For` entry from the right
+ * (default 1, the entry the nearest proxy appended: Amplify Hosting's CloudFront). Entries to its left
+ * were written by the client and are ignored. Anything that isn't an IP address reads as unknown.
+ */
+export function forwardedForClientIp(options: { trustedProxies?: number } = {}): (request: Request) => string | undefined {
+  const hops = options.trustedProxies ?? 1;
+  if (!Number.isInteger(hops) || hops < 1 || hops > 10) throw new Error('auth-kit: forwardedForClientIp trustedProxies must be a whole number from 1 to 10.');
+  return (request) => {
+    const entries = (request.headers.get('x-forwarded-for') ?? '').split(',').map((e) => e.trim()).filter((e) => e !== '');
+    const entry = entries[entries.length - hops];
+    return entry !== undefined && IP_RE.test(entry) ? entry.toLowerCase() : undefined;
+  };
+}
+
+/** A request ID header worth keeping (printable ASCII, at most 128 characters), else none. */
+function cleanRequestId(value: string | null): string | undefined {
+  return value !== null && /^[\x21-\x7e]{1,128}$/.test(value) ? value : undefined;
+}
+
+/** A user agent for the audit row: control characters removed, at most 256 characters. */
+function cleanUserAgent(value: string | null): string | undefined {
+  if (value === null) return undefined;
+  // eslint-disable-next-line no-control-regex
+  const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 256);
+  return cleaned === '' ? undefined : cleaned;
+}
+
+/** The `aws-waf-token` cookie AWS WAF's challenge sets once the browser has solved it. */
+function hasWafToken(request: Request): boolean {
+  return (request.headers.get('cookie') ?? '').split(';').some((part) => /^\s*aws-waf-token=\S/.test(part));
 }
 
 const ok = (): AccountCreationResult => ({ status: 200, body: { ok: true } });
@@ -137,6 +181,12 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
   if (settings.mode === 'invite') throw new Error("auth-kit: accountCreation mode 'invite' has no sign-up or request routes.");
   if (takesAccessRequests(settings) && !config.requests) throw new Error('auth-kit: this site takes access requests: pass requests (createDynamoAccessRequestStore).');
   if (typeof config.help !== 'string' && typeof config.help?.effective !== 'function') throw new Error('auth-kit: createAccountCreationRoutes needs help (the help address, or createSignInHelp).');
+  if (typeof config.clientIp !== 'function') {
+    throw new Error(
+      'auth-kit: createAccountCreationRoutes needs clientIp. Behind Amplify Hosting, pass forwardedForClientIp() (the last X-Forwarded-For entry, which the proxy appended; the first is written by the client).',
+    );
+  }
+  const requireWafToken = settings.mode === 'open' && config.requireWafToken !== false;
   let signInUrl: URL;
   try {
     signInUrl = new URL(config.signInUrl);
@@ -172,22 +222,50 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     return { ok: false, code: 'invalid', field: 'email', error: empty ? 'Enter your email address' : `Enter an email address like ${theme.emailHint}` };
   }
 
-  /** Both limits; the first that's over wins. A store that can't count is a refusal (fail closed). */
+  /**
+   * The limits, decided before anything looks the address up, so they can't depend on whether it has
+   * an account: per mailbox (`rateLimitAddress`), per IP, and site-wide (the breaker, and for requests
+   * the queue cap). The first that's over wins. A store that can't count is a refusal (fail closed).
+   */
   async function limited(route: 'sign-up' | 'request', email: string, ip: string | undefined): Promise<AccountCreationResult | null> {
     const at = new Date(now());
     const perAddress = route === 'sign-up' ? rules.signUpPerAddress : rules.requestPerAddress;
     const perIp = route === 'sign-up' ? rules.signUpPerIp : rules.requestPerIp;
+    const site = route === 'sign-up' ? rules.signUpSite : rules.requestSite;
     try {
-      const checks = [config.rateLimits.hit(rateLimitKey(`${route}:address`, email), perAddress, at)];
-      if (ip) checks.push(config.rateLimits.hit(rateLimitKey(`${route}:ip`, ip), perIp, at));
-      const results = await Promise.all(checks);
-      const over = results.find((r) => !r.allowed);
+      const [address, perIpResult, siteResult] = await Promise.all([
+        config.rateLimits.hit(rateLimitKey(`${route}:address`, rateLimitAddress(email)), perAddress, at),
+        ip ? config.rateLimits.hit(rateLimitKey(`${route}:ip`, ip), perIp, at) : Promise.resolve(null),
+        config.rateLimits.hit(rateLimitKey(`${route}:site`, 'all'), site, at),
+      ]);
+      const over = [address, perIpResult].find((r) => r !== null && !r.allowed);
       if (over) return refuse(429, { ok: false, code: 'rate_limited', error: waitMessage(over.retryAfterSeconds), retryAfterSeconds: over.retryAfterSeconds });
+      if (!siteResult.allowed) {
+        report(new Error(`${route}: the site-wide limit (${site.limit} per ${site.windowMinutes} minutes) was reached; every address gets "try again later" until the window turns`), `${route}: site-wide limit`);
+        return refuse(503, { ok: false, code: 'unavailable', error: route === 'sign-up' ? 'Sign-ups are paused for a while. Try again later.' : 'Requests are paused for a while. Try again later.', retryAfterSeconds: siteResult.retryAfterSeconds });
+      }
       return null;
     } catch (error) {
       report(error, `${route}: rate limit`);
       return refuse(503, { ok: false, code: 'unavailable', error: 'We couldn’t check this request just now. Try again in a few minutes.' });
     }
+  }
+
+  /**
+   * Runs one handler under the response-time floor: every answer, a thrown error included (as a 503),
+   * takes at least `floor` ms from `started`.
+   */
+  async function floored(route: 'sign-up' | 'request', started: number, work: () => Promise<AccountCreationResult>): Promise<AccountCreationResult> {
+    let result: AccountCreationResult;
+    try {
+      result = await work();
+    } catch (error) {
+      report(error, `${route}: unexpected error`);
+      result = refuse(503, { ok: false, code: 'unavailable', error: route === 'sign-up' ? 'We couldn’t create your account just now. Try again in a few minutes.' : 'We couldn’t send your request just now. Try again in a few minutes.' });
+    }
+    const wait = floor - (now() - started);
+    if (wait > 0) await sleep(wait);
+    return result;
   }
 
   async function tellExisting(email: string, via: 'sign-up' | 'request'): Promise<void> {
@@ -204,7 +282,7 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     else await task;
   }
 
-  async function handleSignUp(input: unknown, facts: RequestFacts = {}): Promise<AccountCreationResult> {
+  async function signUpUnfloored(input: unknown, facts: RequestFacts): Promise<AccountCreationResult> {
     if (!allowsSelfSignUp(settings)) return refuse(404, { ok: false, code: 'not_available', error: `${config.siteName} doesn’t take sign-ups.` });
     let email: string;
     let raw: Record<string, unknown> = {};
@@ -267,7 +345,7 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     return refuse(503, { ok: false, code: 'unavailable', error: 'We couldn’t create your account just now. Try again in a few minutes.' });
   }
 
-  async function handleRequestAccess(input: unknown, facts: RequestFacts = {}): Promise<AccountCreationResult> {
+  async function requestUnfloored(input: unknown, facts: RequestFacts): Promise<AccountCreationResult> {
     if (!takesAccessRequests(settings) || !config.requests) return refuse(404, { ok: false, code: 'not_available', error: `${config.siteName} doesn’t take access requests.` });
     let raw: Record<string, unknown>;
     let name: string | undefined, reason: string | undefined;
@@ -309,39 +387,59 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     return ok();
   }
 
-  async function serve(request: Request, handle: (input: unknown, facts: RequestFacts) => Promise<AccountCreationResult>): Promise<Response> {
+  const handleSignUp = (input: unknown, facts: RequestFacts = {}) => floored('sign-up', now(), () => signUpUnfloored(input, facts));
+  const handleRequestAccess = (input: unknown, facts: RequestFacts = {}) => floored('request', now(), () => requestUnfloored(input, facts));
+
+  async function serve(route: 'sign-up' | 'request', request: Request, handle: (input: unknown, facts: RequestFacts) => Promise<AccountCreationResult>): Promise<Response> {
     const started = now();
-    const respond = async (result: AccountCreationResult): Promise<Response> => {
-      // The floor applies to every answer past the origin check, so a new address and one with an account (an email instead of an account) take as long.
-      const wait = floor - (now() - started);
-      if (wait > 0) await sleep(wait);
-      return Response.json(result.body, { status: result.status, headers: { 'cache-control': 'no-store', ...(result.status === 429 && result.body.ok === false && result.body.retryAfterSeconds !== undefined && { 'retry-after': String(result.body.retryAfterSeconds) }) } });
+    const headers = (result: AccountCreationResult, extra: Record<string, string> = {}) => ({
+      'cache-control': 'no-store',
+      ...extra,
+      ...((result.status === 429 || result.status === 503) && result.body.ok === false && result.body.retryAfterSeconds !== undefined && { 'retry-after': String(result.body.retryAfterSeconds) }),
+    });
+    // Every answer takes at least the floor, the early refusals included.
+    const early = async (result: AccountCreationResult, extra: Record<string, string> = {}): Promise<Response> => {
+      const done = await floored(route, started, () => Promise.resolve(result));
+      return Response.json(done.body, { status: done.status, headers: headers(done, extra) });
     };
-    if (request.method !== 'POST') return Response.json({ ok: false, code: 'invalid', error: 'Use POST.' }, { status: 405, headers: { allow: 'POST', 'cache-control': 'no-store' } });
+    if (request.method !== 'POST') return early(refuse(405, { ok: false, code: 'invalid', error: 'Use POST.' }), { allow: 'POST' });
     const origin = request.headers.get('origin');
-    if (!origin || !allowedOrigins.has(origin)) return Response.json({ ok: false, code: 'origin', error: 'This form only works on the site itself.' }, { status: 403, headers: { 'cache-control': 'no-store' } });
-    if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return respond(refuse(415, { ok: false, code: 'invalid', error: 'Send the form as JSON.' }));
+    if (!origin || !allowedOrigins.has(origin)) return early(refuse(403, { ok: false, code: 'origin', error: 'This form only works on the site itself.' }));
+    if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return early(refuse(415, { ok: false, code: 'invalid', error: 'Send the form as JSON.' }));
     const declared = Number(request.headers.get('content-length') ?? '0');
-    if (declared > MAX_BODY_BYTES) return respond(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
+    if (declared > MAX_BODY_BYTES) return early(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
     let input: unknown;
     try {
       const body = await request.text();
       // Bytes, not UTF-16 code units: a body of multi-byte characters is up to three times its length.
-      if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return respond(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
+      if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return early(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
       input = JSON.parse(body);
     } catch {
-      return respond(refuse(400, { ok: false, code: 'invalid', error: 'That request is invalid.' }));
+      return early(refuse(400, { ok: false, code: 'invalid', error: 'That request is invalid.' }));
     }
-    const ip = (config.clientIp ?? defaultClientIp)(request);
-    const userAgent = request.headers.get('user-agent') ?? undefined;
-    const requestId = request.headers.get('x-amzn-trace-id') ?? request.headers.get('x-request-id') ?? globalThis.crypto.randomUUID();
-    return respond(await handle(input, { ...(ip !== undefined && { ip }), ...(userAgent !== undefined && { userAgent }), requestId }));
+    if (route === 'sign-up' && requireWafToken && !hasWafToken(request)) {
+      // Open sign-up must sit behind the WAF challenge (ADR 0023). No token means it didn't: the site's
+      // web ACL isn't associated, or the page doesn't load AWS WAF's script. The same answer for everyone.
+      report(new Error('sign-up: no aws-waf-token cookie. Open sign-up needs the site web ACL (createSiteWebAcl) associated with the app and AWS WAF’s script on the page.'), 'sign-up: WAF token');
+      return early(refuse(503, { ok: false, code: 'unavailable', error: 'We couldn’t create your account just now. Try again in a few minutes.' }));
+    }
+    let ip: string | undefined;
+    try {
+      ip = config.clientIp(request);
+    } catch (error) {
+      report(error, `${route}: clientIp`);
+    }
+    const userAgent = cleanUserAgent(request.headers.get('user-agent'));
+    const requestId = cleanRequestId(request.headers.get('x-amzn-trace-id')) ?? cleanRequestId(request.headers.get('x-request-id')) ?? globalThis.crypto.randomUUID();
+    const facts: RequestFacts = { ...(ip !== undefined && { ip }), ...(userAgent !== undefined && { userAgent }), requestId };
+    const result = await floored(route, started, () => handle(input, facts));
+    return Response.json(result.body, { status: result.status, headers: headers(result) });
   }
 
   return {
     settings,
-    signUp: (request) => serve(request, handleSignUp),
-    requestAccess: (request) => serve(request, handleRequestAccess),
+    signUp: (request) => serve('sign-up', request, signUpUnfloored),
+    requestAccess: (request) => serve('request', request, requestUnfloored),
     handleSignUp,
     handleRequestAccess,
   };

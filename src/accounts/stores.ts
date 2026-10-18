@@ -84,9 +84,9 @@ export class AccessRequestConflictError extends Error {
 export interface AccessRequestStore {
   /**
    * Files a request, unless the address already has a pending one (then `created` is false and the
-   * existing one is returned: one request per address at a time). Best effort on DynamoDB: two
-   * requests for one address in the same instant can both be filed (the per-address rate limit bounds
-   * it, and an admin sees both); it's a convenience, not a security rule.
+   * existing one is returned, when it can still be read: one request per address at a time). Constant
+   * work whatever the queue holds: on DynamoDB, one conditional write of a per-address marker
+   * (`pending#<sha256>`) and one of the request, so two requests for one address can't both be filed.
    */
   create(input: { email: string; name?: string; reason?: string; now: Date }): Promise<{ request: AccessRequest; created: boolean }>;
   /** Requests still kept, newest first: pending ones, and with `includeSettled` the decided and expired ones too. */
@@ -142,15 +142,27 @@ function settled(request: AccessRequest, input: { status: 'approved' | 'declined
   return { ...request, status: input.status, settledAt, settledBy: { ...input.by }, deleteAt: deleteAtFor(input.status, request.expiresAt, settledAt) };
 }
 
-/** The request queue in memory (tests, the auth matrix, local development). */
+/** The marker's key part for an address: a hash, so the marker holds no address. */
+export function requestMarkerKey(email: string): string {
+  return createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
+}
+
+/** The request queue in memory (tests, the auth matrix, local development). Same marker rule as DynamoDB's. */
 export function createMemoryAccessRequestStore(): AccessRequestStore & { readonly all: () => AccessRequest[] } {
   const rows = new Map<string, AccessRequest>();
+  const markers = new Map<string, { requestId: string; open: boolean; expiresAt: string }>();
   return {
     all: () => [...rows.values()].map((r) => ({ ...r })),
     create(input) {
-      const pending = [...rows.values()].map((r) => asOf(r, input.now)).find((r) => r?.status === 'pending' && r.email === input.email);
-      if (pending) return Promise.resolve({ request: { ...pending }, created: false });
+      const key = requestMarkerKey(input.email);
+      const marker = markers.get(key);
+      if (marker && marker.open && Date.parse(marker.expiresAt) > input.now.getTime()) {
+        const existing = rows.get(marker.requestId);
+        const visible = existing ? asOf(existing, input.now) : null;
+        if (visible) return Promise.resolve({ request: { ...visible }, created: false });
+      }
       const request = newRequest(input);
+      markers.set(key, { requestId: request.id, open: true, expiresAt: request.expiresAt });
       rows.set(request.id, request);
       return Promise.resolve({ request: { ...request }, created: true });
     },
@@ -172,6 +184,8 @@ export function createMemoryAccessRequestStore(): AccessRequestStore & { readonl
       if (!now || now.status !== 'pending') return Promise.reject(new AccessRequestConflictError());
       const next = settled(now, input);
       rows.set(id, next);
+      const marker = markers.get(requestMarkerKey(next.email));
+      if (marker?.requestId === id) marker.open = false;
       return Promise.resolve({ ...next });
     },
     purge(now) {
@@ -283,13 +297,49 @@ export function createDynamoAccessRequestStore(options: DynamoOptions): AccessRe
     return toRequest(res.Item);
   }
 
+  const markerKey = (email: string): Item => ({ [R.partitionKey]: S(R.partition), [R.sortKey]: S(`${R.markerPrefix}${requestMarkerKey(email)}`) });
+  const markerItem = (request: AccessRequest, open: boolean): Item => ({
+    ...markerKey(request.email),
+    requestId: S(request.id),
+    open: { BOOL: open },
+    expiresAt: S(request.expiresAt),
+    // The digest's purge deletes it with the requests; DynamoDB's TTL too.
+    deleteAt: S(request.expiresAt),
+    [R.ttlAttribute]: N(epochSeconds(Date.parse(request.expiresAt))),
+    fv: N(R.formatVersion),
+  });
+
   return {
     async create(input) {
-      const { items } = await queryAll(input.now, 10_000);
-      const pending = items.find((r) => r.status === 'pending' && r.email === input.email);
-      if (pending) return { request: pending, created: false };
       const request = newRequest(input);
-      await write(() => db().send(new PutItemCommand({ TableName, Item: requestItem(request), ConditionExpression: 'attribute_not_exists(#sk)', ExpressionAttributeNames: { '#sk': R.sortKey } })));
+      try {
+        // One pending request per address: the marker is free, closed, or expired, or this is refused.
+        await write(() =>
+          db().send(
+            new PutItemCommand({
+              TableName,
+              Item: markerItem(request, true),
+              ConditionExpression: 'attribute_not_exists(#sk) OR #open = :closed OR #expiresAt <= :now',
+              ExpressionAttributeNames: { '#sk': R.sortKey, '#open': 'open', '#expiresAt': 'expiresAt' },
+              ExpressionAttributeValues: { ':closed': { BOOL: false }, ':now': S(input.now.toISOString()) },
+              ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+            }),
+          ),
+        );
+      } catch (error) {
+        if (!isConditionFailed(error)) throw error;
+        const existingId = str((error as { Item?: Item }).Item, 'requestId');
+        const existing = existingId && isRequestId(existingId) ? await getRaw(existingId) : null;
+        const visible = existing ? asOf(existing, input.now) : null;
+        return { request: visible ?? request, created: false };
+      }
+      try {
+        await write(() => db().send(new PutItemCommand({ TableName, Item: requestItem(request), ConditionExpression: 'attribute_not_exists(#sk)', ExpressionAttributeNames: { '#sk': R.sortKey } })));
+      } catch (error) {
+        // Release the marker so the address isn't blocked by a request that was never filed.
+        await write(() => db().send(new PutItemCommand({ TableName, Item: markerItem(request, false) }))).catch(() => undefined);
+        throw error;
+      }
       return { request, created: true };
     },
     async list(now, opts = {}) {
@@ -326,6 +376,19 @@ export function createDynamoAccessRequestStore(options: DynamoOptions): AccessRe
         if (isConditionFailed(error)) throw new AccessRequestConflictError();
         throw error;
       }
+      // Close this request's marker so the address can ask again. Best effort: a marker left open
+      // still closes when the request would have expired.
+      await write(() =>
+        db().send(
+          new PutItemCommand({
+            TableName,
+            Item: markerItem(next, false),
+            ConditionExpression: '#requestId = :id',
+            ExpressionAttributeNames: { '#requestId': 'requestId' },
+            ExpressionAttributeValues: { ':id': S(next.id) },
+          }),
+        ),
+      ).catch(() => undefined);
       return next;
     },
     async purge(now) {
@@ -349,7 +412,8 @@ export function createDynamoAccessRequestStore(options: DynamoOptions): AccessRe
           const due = deleteAt !== undefined ? Date.parse(deleteAt) <= now.getTime() : ttl !== undefined && ttl * 1000 <= now.getTime();
           if (!due) continue;
           await write(() => db().send(new DeleteItemCommand({ TableName, Key: { [R.partitionKey]: item[R.partitionKey]!, [R.sortKey]: item[R.sortKey]! } })));
-          n++;
+          // Expired markers go too, but only requests are counted.
+          if (str(item, R.sortKey)?.startsWith(R.requestPrefix)) n++;
         }
         if (!res.LastEvaluatedKey) break;
         start = res.LastEvaluatedKey;

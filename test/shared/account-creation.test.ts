@@ -7,7 +7,10 @@ import {
   mayCreateOwnAccount,
   normalizeAccountCreation,
   takesAccessRequests,
+  rateLimitAddress,
 } from '../../src/shared/account-creation.js';
+import { emailOf } from '../../src/admin/action-kit.js';
+import { isPlainEmail } from '../../src/amplify/pre-sign-up.js';
 
 describe('accountCreation (register D1)', () => {
   it('defaults to invite only', () => {
@@ -59,5 +62,56 @@ describe('accountCreation (register D1)', () => {
     expect(listInWords(['nc.gov', 'unc.edu'])).toBe('nc.gov or unc.edu');
     expect(listInWords(['a', 'b', 'c'])).toBe('a, b, or c');
     expect(listInWords(['a', 'b', 'c'], 'and')).toBe('a, b, and c');
+  });
+});
+
+describe('rateLimitAddress: the mailbox an address reaches, for rate limits only (M4)', () => {
+  it('drops a +tag and lowercases, for every provider', () => {
+    expect(rateLimitAddress('Victim+1@Example.org')).toBe('victim@example.org');
+    expect(rateLimitAddress('victim+a+b@example.org')).toBe('victim@example.org');
+    expect(rateLimitAddress('victim@example.org')).toBe('victim@example.org');
+  });
+
+  it('drops dots only where the provider ignores them (Gmail), and folds googlemail.com into gmail.com', () => {
+    expect(rateLimitAddress('Jane.Doe@gmail.com')).toBe('janedoe@gmail.com');
+    expect(rateLimitAddress('j.a.n.e.doe+x@googlemail.com')).toBe('janedoe@gmail.com');
+    expect(rateLimitAddress('jane.doe@example.org')).toBe('jane.doe@example.org');
+  });
+
+  it('leaves a leading + alone (it isn’t a tag) and never empties the local part', () => {
+    expect(rateLimitAddress('+tag@example.org')).toBe('+tag@example.org');
+    expect(rateLimitAddress('...@gmail.com')).toBe('@gmail.com');
+  });
+});
+
+describe('the domain list against hostile addresses (review question 3)', () => {
+  const nc = normalizeAccountCreation({ mode: 'domains', domains: ['nc.gov'] });
+  it('a trailing dot, a lookalike, and a suffix without a label boundary are refused', () => {
+    for (const email of ['user@nc.gov.', 'user@evilnc.gov', 'user@nc.gov.evil.example', 'user@nc-gov.example']) expect(mayCreateOwnAccount(email, nc), email).toBe(false);
+  });
+
+  it('non-ASCII domains never equal an ASCII entry, and the preSignUp trigger refuses them too', () => {
+    // Cyrillic "с" in place of the Latin "c".
+    expect(mayCreateOwnAccount('user@nс.gov', nc)).toBe(false);
+    expect(isPlainEmail('user@nс.gov')).toBe(false);
+  });
+
+  it('a Kelvin sign case-folds to the legitimate ASCII address, not an attacker’s', () => {
+    // emailOf lowercases first: U+212A KELVIN SIGN lowercases to an ASCII "k".
+    const folded = (() => {
+      try {
+        return emailOf('\u212Aate@nc.gov');
+      } catch {
+        return null;
+      }
+    })();
+    if (folded !== null) {
+      expect(folded).toBe('kate@nc.gov');
+      expect(mayCreateOwnAccount(folded, nc)).toBe(true);
+    }
+  });
+
+  it('plus-addressed addresses on the list are allowed (the list is about the domain)', () => {
+    expect(mayCreateOwnAccount('kate+reports@osbm.nc.gov', nc)).toBe(true);
   });
 });

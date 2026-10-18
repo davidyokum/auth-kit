@@ -409,13 +409,30 @@ export const ACCOUNT_CREATION_POLICY = {
   requestExpiryDays: 30,
   /** A settled request (approved, declined, or expired) is deleted this many days later: the typed name and reason go with it. */
   requestRetentionDays: 30,
-  /** Per-address and per-IP limits on each route. The WAF rules in front of them are the first line. */
+  /**
+   * Per-address, per-IP, and site-wide limits on each route. The WAF rules in front of them are the
+   * first line. Addresses are counted by the mailbox they reach (`rateLimitAddress`: no `+tag`, Gmail
+   * without dots), so `victim+1@` and `victim+2@` share one limit.
+   */
   rateLimits: {
     signUpPerAddress: { limit: 5, windowMinutes: 60 },
     signUpPerIp: { limit: 30, windowMinutes: 60 },
+    /**
+     * The site-wide breaker: past this many sign-up attempts an hour, every address gets the same "try
+     * again later" until the window turns. It bounds what an anonymous sender can cost (accounts, audit
+     * rows, code emails) when addresses and IPs are free; the price is that a flood pauses real sign-ups too.
+     */
+    signUpSite: { limit: 300, windowMinutes: 60 },
     requestPerAddress: { limit: 3, windowMinutes: 24 * 60 },
     requestPerIp: { limit: 20, windowMinutes: 60 },
+    /**
+     * The queue cap: new requests a day, site-wide. Requests expire after 30 days, so the pending queue
+     * never holds more than 30 times this; past it, every address gets the same "try again later".
+     */
+    requestSite: { limit: 100, windowMinutes: 24 * 60 },
     emailChangePerAccount: { limit: 5, windowMinutes: 60 },
+    /** Codes sent to one new address an hour, whichever accounts ask (one inbox can't be flooded by many accounts). */
+    emailChangePerTarget: { limit: 5, windowMinutes: 60 },
   } satisfies Record<string, RateLimitRule>,
   /**
    * Every answer from the sign-up and request routes takes at least this long, so a new address and

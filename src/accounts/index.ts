@@ -17,6 +17,7 @@
  */
 export {
   createAccountCreationRoutes,
+  forwardedForClientIp,
   notOnListMessage,
   type AccountCreationRoutes,
   type AccountCreationRoutesConfig,

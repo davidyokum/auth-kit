@@ -111,6 +111,31 @@ export function emailDomainAllowed(email: string, domains: readonly string[]): b
   return domains.some((entry) => domain === entry || domain.endsWith(`.${entry}`));
 }
 
+/** Providers that ignore dots in the local part (one mailbox for `a.b@` and `ab@`). */
+const DOTLESS_DOMAINS: Readonly<Record<string, string>> = Object.freeze({ 'gmail.com': 'gmail.com', 'googlemail.com': 'gmail.com' });
+
+/**
+ * The mailbox an address reaches, for rate limits only (never stored, never used to sign in): lowercase,
+ * without a `+tag` (`ada+1@` and `ada+2@` are one inbox at most providers), and without dots for
+ * providers that ignore them (Gmail). Conservative: it can only put more addresses under one limit,
+ * never fewer, so `victim+1@`, `victim+2@`, and `v.ictim@gmail.com` share the per-address limit
+ * instead of each getting their own (register D3: no email-bombing through the rate limits).
+ */
+export function rateLimitAddress(email: string): string {
+  const at = email.lastIndexOf('@');
+  if (at <= 0) return email.trim().toLowerCase();
+  let local = email.slice(0, at).trim().toLowerCase();
+  let domain = email.slice(at + 1).trim().toLowerCase();
+  const plus = local.indexOf('+');
+  if (plus > 0) local = local.slice(0, plus);
+  const dotless = DOTLESS_DOMAINS[domain];
+  if (dotless !== undefined) {
+    local = local.replace(/\./g, '');
+    domain = dotless;
+  }
+  return `${local}@${domain}`;
+}
+
 /** True when people can create their own account (`domains` or `open`). */
 export function allowsSelfSignUp(settings: NormalizedAccountCreation): boolean {
   return settings.mode === 'domains' || settings.mode === 'open';

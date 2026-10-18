@@ -8,6 +8,11 @@
  * | `pk` | `sk` | Holds |
  * |---|---|---|
  * | `requests` | `request#<id>` | `email`, `name`, `reason` (as typed), `status`, `createdAt`, `expiresAt`, `settledAt`, `settledBy`, and `ttl` |
+ * | `requests` | `pending#<sha256 of the address>` | `requestId`, `open`, `expiresAt`, and `ttl`: the one-pending-request-per-address marker |
+ *
+ * Filing a request is one conditional write of the marker and one of the request, whatever the queue
+ * holds, so its cost (and how long it takes) can't grow with the queue. The marker holds no name,
+ * reason, or address, only the hash; it closes when the request is settled and goes when it expires.
  *
  * `<id>` starts with the creation time (zero-padded milliseconds), so the partition reads newest
  * first. `ttl` (epoch seconds) is when the whole item goes: 30 days after the request is settled,
@@ -25,6 +30,7 @@ export const ACCESS_REQUEST_TABLE_SCHEMA = {
   sortKey: 'sk',
   partition: 'requests',
   requestPrefix: 'request#',
+  markerPrefix: 'pending#',
   ttlAttribute: 'ttl',
   formatVersion: 1,
 } as const;

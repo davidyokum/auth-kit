@@ -8,6 +8,7 @@ import {
   createAccountCreationRoutes,
   createMemoryAccessRequestStore,
   createMemoryRateLimitStore,
+  forwardedForClientIp,
   notOnListMessage,
 } from '../../src/accounts/index.js';
 import { type AuditEvent, type AuditLogStore, type EmailSender, createMemoryAuditLog } from '../../src/admin/index.js';
@@ -34,6 +35,10 @@ interface RoutesOptions {
   background?: AccountCreationRoutesConfig['background'];
   /** Emails wait for this before they "send". */
   mailGate?: Promise<void>;
+  clientIp?: AccountCreationRoutesConfig['clientIp'];
+  requireWafToken?: boolean;
+  /** Lookups by email throw this (an unexpected failure inside the handler). */
+  lookupThrows?: Error;
 }
 
 /**
@@ -83,6 +88,8 @@ function setupRoutes(options: RoutesOptions = {}) {
     ...(options.requests !== false && { requests }),
     ...(options.rateLimitRules !== undefined && { rateLimitRules: options.rateLimitRules }),
     ...(options.background !== undefined && { background: options.background }),
+    clientIp: options.clientIp ?? forwardedForClientIp(),
+    ...(options.requireWafToken !== undefined && { requireWafToken: options.requireWafToken }),
     cognito: pool.client,
     now: () => clock.t,
     sleep: (ms) => {
@@ -108,9 +115,12 @@ function setupRoutes(options: RoutesOptions = {}) {
 const BASE_HEADERS = {
   origin: ORIGIN,
   'content-type': 'application/json',
-  'x-forwarded-for': '203.0.113.7, 10.0.0.1',
+  // The last entry is the one Amplify Hosting's CloudFront appended: the client.
+  'x-forwarded-for': '10.9.9.9, 203.0.113.7',
   'user-agent': 'Test Browser',
   'x-request-id': 'req-1',
+  // The browser solved AWS WAF's challenge (required in open mode).
+  cookie: 'theme=dark; aws-waf-token=test-token',
 };
 
 /** A browser's POST to one of the routes; `headers` replaces the defaults (null drops one). */
@@ -234,7 +244,7 @@ describe('sign-up: a self-invite', () => {
     expect(t.emails).toHaveLength(1);
   });
 
-  it('the floor never shortens a slow answer, and the handlers without HTTP have no floor', async () => {
+  it('the floor never shortens a slow answer, and the handlers without HTTP are floored too (L11)', async () => {
     const t = setupRoutes({ mailMs: 1200 });
     t.pool.add({ sub: 'u-1', email: 'existing@example.org' });
     const started = t.clock.t;
@@ -242,8 +252,37 @@ describe('sign-up: a self-invite', () => {
     expect(t.sleeps).toEqual([]);
     expect(t.clock.t - started).toBe(1200);
 
+    const handlerStarted = t.clock.t;
     expect(await t.routes.handleSignUp({ email: 'another@example.org' })).toEqual({ status: 200, body: { ok: true } });
-    expect(t.sleeps).toEqual([]);
+    expect(t.clock.t - handlerStarted).toBe(FLOOR);
+    const requestStarted = t.clock.t;
+    expect((await t.routes.handleSignUp({ email: '' })).status).toBe(400);
+    expect(t.clock.t - requestStarted).toBe(FLOOR);
+  });
+
+  it('every answer takes the floor: each refusal, an early HTTP refusal, and an unexpected error (M5)', async () => {
+    const t = setupRoutes({ accountCreation: { mode: 'domains', domains: ['nc.gov'], requestsAlso: true }, rateLimitRules: { signUpPerAddress: { limit: 1, windowMinutes: 60 } } });
+    const timed = async (request: Request) => {
+      const started = t.clock.t;
+      const response = await t.routes.signUp(request);
+      return { status: response.status, elapsed: t.clock.t - started };
+    };
+    expect(await timed(new Request(`${ORIGIN}/api/auth/sign-up`, { method: 'GET', headers: { origin: ORIGIN } }))).toEqual({ status: 405, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'a@nc.gov' }, { origin: 'https://evil.example' }))).toEqual({ status: 403, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'a@nc.gov' }, { 'content-type': 'text/plain' }))).toEqual({ status: 415, elapsed: FLOOR });
+    expect(await timed(post('sign-up', '{'))).toEqual({ status: 400, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'not-an-address' }))).toEqual({ status: 400, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'a@example.org' }))).toEqual({ status: 403, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'b@nc.gov' }))).toEqual({ status: 200, elapsed: FLOOR });
+    expect(await timed(post('sign-up', { email: 'b@nc.gov' }))).toEqual({ status: 429, elapsed: FLOOR });
+
+    // A handler that throws is a 503 in the same time, and the error hook hears of it.
+    const broken = setupRoutes();
+    broken.pool.mock.rejectsOnce(new TypeError('unexpected'));
+    const started = broken.clock.t;
+    const response = await broken.routes.signUp(post('sign-up', { email: 'c@example.org' }));
+    expect(response.status).toBe(503);
+    expect(broken.clock.t - started).toBe(FLOOR);
   });
 
   it('domains mode: the list decides on a label boundary, in words generated from the list', async () => {
@@ -302,18 +341,72 @@ describe('rate limits', () => {
     expect(createInputs(t).map((c) => c.Username)).toEqual(['ann@example.org', 'bea@example.org']);
   });
 
-  it('per IP: different addresses from one X-Forwarded-For client hit one limit', async () => {
+  it('per IP: the client is the last X-Forwarded-For entry (the proxy’s); entries the client writes can’t dodge the limit (M1)', async () => {
     const t = setupRoutes({ rateLimitRules: { signUpPerIp: { limit: 2, windowMinutes: 60 } } });
-    const from = { 'x-forwarded-for': '198.51.100.9, 10.0.0.1' };
-    expect((await t.routes.signUp(post('sign-up', { email: 'a@example.org' }, from))).status).toBe(200);
-    expect((await t.routes.signUp(post('sign-up', { email: 'b@example.org' }, from))).status).toBe(200);
-    const limited = await t.routes.signUp(post('sign-up', { email: 'c@example.org' }, from));
+    // The sender rotates the part of the header it controls; CloudFront appends the real address.
+    const from = (forged: string) => ({ 'x-forwarded-for': `${forged}, 198.51.100.9` });
+    expect((await t.routes.signUp(post('sign-up', { email: 'a@example.org' }, from('1.1.1.1')))).status).toBe(200);
+    expect((await t.routes.signUp(post('sign-up', { email: 'b@example.org' }, from('2.2.2.2, 3.3.3.3')))).status).toBe(200);
+    const limited = await t.routes.signUp(post('sign-up', { email: 'c@example.org' }, from('4.4.4.4')));
     expect(limited.status).toBe(429);
     expect(await json(limited)).toMatchObject({ ok: false, code: 'rate_limited' });
     expect(limited.headers.get('retry-after')).toMatch(/^\d+$/);
     // Another client is counted separately.
     expect((await t.routes.signUp(post('sign-up', { email: 'c@example.org' }, { 'x-forwarded-for': '198.51.100.10' }))).status).toBe(200);
     expect(createInputs(t).map((c) => c.Username)).toEqual(['a@example.org', 'b@example.org', 'c@example.org']);
+    // The audit row records the proxy-appended address, not the forged one.
+    expect(t.auditLog.rows.filter((r) => r.phase === 'intent').map((r) => r.context?.ip)).toEqual(['198.51.100.9', '198.51.100.9', '198.51.100.10']);
+  });
+
+  it('forwardedForClientIp: the nth entry from the right, and anything that isn’t an address reads as unknown', () => {
+    const req = (xff: string | null) => new Request(ORIGIN, { headers: xff === null ? {} : { 'x-forwarded-for': xff } });
+    const last = forwardedForClientIp();
+    expect(last(req('198.51.100.9'))).toBe('198.51.100.9');
+    expect(last(req('6.6.6.6, 198.51.100.9'))).toBe('198.51.100.9');
+    expect(last(req('6.6.6.6, 2001:DB8::1'))).toBe('2001:db8::1');
+    expect(last(req('6.6.6.6, ::ffff:198.51.100.9'))).toBe('::ffff:198.51.100.9');
+    expect(last(req(null))).toBeUndefined();
+    expect(last(req('198.51.100.9, <script>'))).toBeUndefined();
+    expect(last(req('198.51.100.9, ' + 'a'.repeat(5000)))).toBeUndefined();
+    expect(forwardedForClientIp({ trustedProxies: 2 })(req('6.6.6.6, 198.51.100.9, 10.0.0.1'))).toBe('198.51.100.9');
+    expect(forwardedForClientIp({ trustedProxies: 2 })(req('10.0.0.1'))).toBeUndefined();
+    expect(() => forwardedForClientIp({ trustedProxies: 0 })).toThrow(/trustedProxies/);
+  });
+
+  it('clientIp is required: the routes refuse to start without a decision about proxies', () => {
+    const base = { accountCreation: { mode: 'open' as const }, siteName: SITE, signInUrl: SIGN_IN_URL, help: HELP, pool: { userPoolId: 'us-east-1_TestPool1' }, auditLog: createMemoryAuditLog(), mailer: { sendEmail: () => Promise.resolve() }, rateLimits: createMemoryRateLimitStore() };
+    expect(() => createAccountCreationRoutes(base as unknown as AccountCreationRoutesConfig)).toThrow(/needs clientIp.*forwardedForClientIp/);
+  });
+
+  it('per address: plus-addressing and Gmail’s dots reach one inbox, so they share one limit (M4)', async () => {
+    const t = setupRoutes({ rateLimitRules: { signUpPerAddress: { limit: 2, windowMinutes: 60 } } });
+    expect((await t.routes.signUp(post('sign-up', { email: 'victim+1@example.org' }, { 'x-forwarded-for': '198.51.100.1' }))).status).toBe(200);
+    expect((await t.routes.signUp(post('sign-up', { email: 'Victim+2@example.org' }, { 'x-forwarded-for': '198.51.100.2' }))).status).toBe(200);
+    expect((await t.routes.signUp(post('sign-up', { email: 'victim@example.org' }, { 'x-forwarded-for': '198.51.100.3' }))).status).toBe(429);
+    const g = setupRoutes({ rateLimitRules: { signUpPerAddress: { limit: 1, windowMinutes: 60 } } });
+    expect((await g.routes.signUp(post('sign-up', { email: 'jane.doe@gmail.com' }))).status).toBe(200);
+    expect((await g.routes.signUp(post('sign-up', { email: 'janedoe+x@googlemail.com' }, { 'x-forwarded-for': '198.51.100.4' }))).status).toBe(429);
+    // The accounts themselves keep the addresses as typed.
+    expect(createInputs(t).map((c) => c.Username)).toEqual(['victim+1@example.org', 'victim+2@example.org']);
+  });
+
+  it('the site-wide breaker: past the hourly limit every address gets the same 503, decided before any lookup (M4)', async () => {
+    const t = setupRoutes({ rateLimitRules: { signUpSite: { limit: 2, windowMinutes: 60 } } });
+    t.pool.add({ sub: 'u-1', email: 'existing@example.org' });
+    expect((await t.routes.signUp(post('sign-up', { email: 'a@example.org' }, { 'x-forwarded-for': '198.51.100.1' }))).status).toBe(200);
+    expect((await t.routes.signUp(post('sign-up', { email: 'b@example.org' }, { 'x-forwarded-for': '198.51.100.2' }))).status).toBe(200);
+    const lookupsBefore = t.pool.mock.calls().length;
+    const answers = [];
+    for (const [email, ip] of [['c@example.org', '198.51.100.3'], ['existing@example.org', '198.51.100.4']] as const) {
+      const response = await t.routes.signUp(post('sign-up', { email }, { 'x-forwarded-for': ip }));
+      const { retryAfterSeconds, ...body } = (await response.json()) as { retryAfterSeconds?: number };
+      answers.push({ status: response.status, body, retry: response.headers.get('retry-after') === String(retryAfterSeconds) });
+    }
+    // The same answer (the seconds left only differ by the clock between the two requests).
+    expect(answers[0]).toEqual(answers[1]);
+    expect(answers[0]).toEqual({ status: 503, body: { ok: false, code: 'unavailable', error: 'Sign-ups are paused for a while. Try again later.' }, retry: true });
+    expect(t.pool.mock.calls().length).toBe(lookupsBefore);
+    expect(t.errors.map((e) => e.context)).toContain('sign-up: site-wide limit');
   });
 
   it('a counter store that fails is a 503, never a pass (fail closed)', async () => {
@@ -531,5 +624,65 @@ describe('the existing-account email off the response path', () => {
     release();
     await Promise.all(tasks);
     expect(t.emails.map((e) => e.email.subject)).toEqual([`You already have a ${SITE} account`]);
+  });
+});
+
+describe('open sign-up needs the WAF challenge (M4)', () => {
+  it('without an aws-waf-token cookie every address gets the same 503 and nothing is looked up or created', async () => {
+    const t = setupRoutes();
+    t.pool.add({ sub: 'u-1', email: 'existing@example.org' });
+    const answers = [];
+    for (const email of ['new@example.org', 'existing@example.org']) {
+      const response = await t.routes.signUp(post('sign-up', { email }, { cookie: 'theme=dark' }));
+      answers.push({ status: response.status, body: await response.text() });
+    }
+    expect(answers[0]).toEqual(answers[1]);
+    expect(answers[0]!.status).toBe(503);
+    expect(t.pool.mock.calls()).toHaveLength(0);
+    expect(t.errors.map((e) => e.context)).toEqual(['sign-up: WAF token', 'sign-up: WAF token']);
+    // A cookie that merely contains the name doesn't count.
+    expect((await t.routes.signUp(post('sign-up', { email: 'new@example.org' }, { cookie: 'not-aws-waf-token=x' }))).status).toBe(503);
+  });
+
+  it('domains mode doesn’t need it, and requireWafToken: false turns it off (local development)', async () => {
+    const domains = setupRoutes({ accountCreation: { mode: 'domains', domains: ['example.org'] } });
+    expect((await domains.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
+    const local = setupRoutes({ requireWafToken: false });
+    expect((await local.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
+  });
+});
+
+describe('what the audit row keeps from the request (L2)', () => {
+  it('a request ID longer than 128 characters or with spaces is replaced; the user agent loses control characters and stops at 256', async () => {
+    const t = setupRoutes();
+    await t.routes.signUp(post('sign-up', { email: 'a@example.org' }, { 'x-request-id': 'x'.repeat(16_000), 'user-agent': `Evil\u0007Agent ${'y'.repeat(1000)}` }));
+    await t.routes.signUp(post('sign-up', { email: 'b@example.org' }, { 'x-request-id': 'has spaces in it' }));
+    await t.routes.signUp(post('sign-up', { email: 'c@example.org' }, { 'x-request-id': 'Root=1-67891233-abcdef012345678912345678' }));
+    const intents = t.auditLog.rows.filter((r) => r.phase === 'intent');
+    expect(intents[0]!.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(intents[0]!.context?.userAgent).toHaveLength(256);
+    expect(intents[0]!.context?.userAgent).toMatch(/^EvilAgent y+$/);
+    expect(intents[1]!.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(intents[2]!.requestId).toBe('Root=1-67891233-abcdef012345678912345678');
+  });
+});
+
+describe('the request queue cap (M5)', () => {
+  it('past the daily site-wide limit every address gets the same 503, and nothing is filed', async () => {
+    const t = setupRoutes({ accountCreation: { mode: 'request' }, rateLimitRules: { requestSite: { limit: 2, windowMinutes: 24 * 60 } } });
+    t.pool.add({ sub: 'u-1', email: 'existing@example.org' });
+    for (const [i, email] of ['a@example.org', 'b@example.org'].entries()) {
+      expect((await t.routes.requestAccess(post('request-access', { email, name: 'N' }, { 'x-forwarded-for': `198.51.100.${i + 1}` }))).status).toBe(200);
+    }
+    const answers = [];
+    for (const [email, ip] of [['c@example.org', '198.51.100.3'], ['existing@example.org', '198.51.100.4']] as const) {
+      const response = await t.routes.requestAccess(post('request-access', { email, name: 'N' }, { 'x-forwarded-for': ip }));
+      const { retryAfterSeconds: _seconds, ...body } = (await response.json()) as { retryAfterSeconds?: number };
+      answers.push({ status: response.status, body });
+    }
+    expect(answers[0]).toEqual(answers[1]);
+    expect(answers[0]).toEqual({ status: 503, body: { ok: false, code: 'unavailable', error: 'Requests are paused for a while. Try again later.' } });
+    expect(t.requests.all().map((r) => r.email)).toEqual(['a@example.org', 'b@example.org']);
+    expect(t.emails).toHaveLength(0);
   });
 });

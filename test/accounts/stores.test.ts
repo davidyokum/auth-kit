@@ -35,6 +35,7 @@ import {
   isRequestId,
   newRequestId,
   rateLimitKey,
+  requestMarkerKey,
 } from '../../src/accounts/stores.js';
 import { ACCOUNT_CREATION_POLICY } from '../../src/shared/policy.js';
 
@@ -62,6 +63,7 @@ function fakeTable(options: { pageSize?: number } = {}) {
   const keyOf = (key: Item) => `${key.pk?.S ?? ''}|${key.sk?.S ?? ''}`;
   const failures = new Map<string, Error[]>();
   let beforeNextPut: (() => void) | undefined;
+  const putFailures: { match: (item: Item) => boolean; error: Error }[] = [];
 
   const injected = (command: string) => {
     const error = failures.get(command)?.shift();
@@ -79,6 +81,17 @@ function fakeTable(options: { pageSize?: number } = {}) {
       if (names['#status'] !== 'status' || names['#expiresAt'] !== 'expiresAt') throw new Error('fake-table: bad names for the settle condition');
       // ISO 8601 strings in one format compare in time order, as DynamoDB compares strings.
       if (!existing || existing.status?.S !== values[':pending']?.S || !((existing.expiresAt?.S ?? '') > (values[':now']?.S ?? ''))) throw conditionFailed();
+      return;
+    }
+    if (condition === 'attribute_not_exists(#sk) OR #open = :closed OR #expiresAt <= :now') {
+      // The request marker: free, closed, or expired.
+      if (names['#sk'] !== 'sk' || names['#open'] !== 'open' || names['#expiresAt'] !== 'expiresAt') throw new Error('fake-table: bad names for the marker condition');
+      if (existing && existing.open?.BOOL !== values[':closed']?.BOOL && !((existing.expiresAt?.S ?? '') <= (values[':now']?.S ?? ''))) throw conditionFailed();
+      return;
+    }
+    if (condition === '#requestId = :id') {
+      if (names['#requestId'] !== 'requestId') throw new Error('fake-table: #requestId must name requestId');
+      if (!existing || existing.requestId?.S !== values[':id']?.S) throw conditionFailed();
       return;
     }
     if (condition === '#v = :v') {
@@ -124,8 +137,17 @@ function fakeTable(options: { pageSize?: number } = {}) {
     beforeNextPut?.();
     beforeNextPut = undefined;
     injected('PutItem');
+    const failure = putFailures.findIndex((f) => f.match(input.Item!));
+    if (failure >= 0) throw putFailures.splice(failure, 1)[0]!.error;
     const key = keyOf(input.Item!);
-    check(input.ConditionExpression, input.ExpressionAttributeNames ?? {}, input.ExpressionAttributeValues ?? {}, items.get(key));
+    try {
+      check(input.ConditionExpression, input.ExpressionAttributeNames ?? {}, input.ExpressionAttributeValues ?? {}, items.get(key));
+    } catch (error) {
+      // DynamoDB returns the item that failed the condition when asked (ReturnValuesOnConditionCheckFailure).
+      const old = items.get(key);
+      if (input.ReturnValuesOnConditionCheckFailure === 'ALL_OLD' && old) Object.assign(error as object, { Item: structuredClone(old) });
+      throw error;
+    }
     items.set(key, structuredClone(input.Item!));
     return {};
   });
@@ -161,6 +183,8 @@ function fakeTable(options: { pageSize?: number } = {}) {
       list.push(error);
       failures.set(command, list);
     },
+    /** Fails the next PutItem whose item matches, once. */
+    failPutWhere: (match: (item: Item) => boolean, error: Error) => void putFailures.push({ match, error }),
     /** Runs `fn` just before the next PutItem is evaluated: another writer getting there first. */
     beforeNextPut: (fn: () => void) => {
       beforeNextPut = fn;
@@ -191,7 +215,8 @@ const requestStores: [string, () => RequestHarness][] = [
     'dynamo',
     () => {
       const table = fakeTable({ pageSize: 2 });
-      return { store: createDynamoAccessRequestStore({ tableName: 'access-requests', client: table.client, sleep: noSleep }), stored: () => table.items.size };
+      // Requests only: the per-address markers aren't requests.
+      return { store: createDynamoAccessRequestStore({ tableName: 'access-requests', client: table.client, sleep: noSleep }), stored: () => [...table.items.keys()].filter((k) => k.startsWith('requests|request#')).length };
     },
   ],
 ];
@@ -373,12 +398,31 @@ describe('the DynamoDB access-request store', () => {
     expect(() => createDynamoAccessRequestStore({ tableName: '' })).toThrow(/needs a tableName/);
   });
 
-  it('files with a PutItem conditioned on attribute_not_exists; the item carries ttl (epoch seconds of deleteAt)', async () => {
+  it('files with a marker write then a PutItem conditioned on attribute_not_exists; the item carries ttl (epoch seconds of deleteAt)', async () => {
     const { table, store } = setup();
     const { request } = await store.create({ email: 'nia@example.com', name: 'Nia', reason: 'Reports', now: at(0) });
     const puts = table.inputsOf(PutItemCommand);
-    expect(puts).toHaveLength(1);
+    expect(puts).toHaveLength(2);
+    // The one-pending-per-address marker: a hash, no address, name, or reason.
     expect(puts[0]).toEqual({
+      TableName: 'access-requests',
+      ConditionExpression: 'attribute_not_exists(#sk) OR #open = :closed OR #expiresAt <= :now',
+      ExpressionAttributeNames: { '#sk': 'sk', '#open': 'open', '#expiresAt': 'expiresAt' },
+      ExpressionAttributeValues: { ':closed': { BOOL: false }, ':now': { S: iso(0) } },
+      ReturnValuesOnConditionCheckFailure: 'ALL_OLD',
+      Item: {
+        pk: { S: 'requests' },
+        sk: { S: `pending#${requestMarkerKey('nia@example.com')}` },
+        requestId: { S: request.id },
+        open: { BOOL: true },
+        expiresAt: { S: iso(30 * DAY) },
+        deleteAt: { S: iso(30 * DAY) },
+        ttl: { N: String(Math.floor((NOW + 30 * DAY) / 1000)) },
+        fv: { N: '1' },
+      },
+    });
+    expect(JSON.stringify(puts[0])).not.toMatch(/nia@|Nia|Reports/);
+    expect(puts[1]).toEqual({
       TableName: 'access-requests',
       ConditionExpression: 'attribute_not_exists(#sk)',
       ExpressionAttributeNames: { '#sk': 'sk' },
@@ -397,7 +441,10 @@ describe('the DynamoDB access-request store', () => {
         fv: { N: '1' },
       },
     });
+    // Filing reads nothing from the queue.
+    expect(table.inputsOf(QueryCommand)).toHaveLength(0);
     // Reads are consistent, newest first, within the request prefix.
+    await store.list(at(MIN));
     const query = table.inputsOf(QueryCommand)[0]!;
     expect(query).toMatchObject({
       TableName: 'access-requests',
@@ -425,7 +472,7 @@ describe('the DynamoDB access-request store', () => {
     const declined = (await store.create({ email: 'raj@example.com', now: at(32 * DAY) })).request;
     await store.settle(declined.id, { status: 'declined', by: { sub: 'admin-2' }, now: at(33 * DAY) });
 
-    const items = [...table.items.values()];
+    const items = [...table.items.values()].filter((i) => i.sk?.S?.startsWith('request#'));
     expect(items.map((i) => i.status?.S).sort()).toEqual(['approved', 'declined', 'pending']);
     for (const item of table.inputsOf(PutItemCommand).map((p) => p.Item!)) expect(item.status?.S).not.toBe('expired');
     const stale = table.items.get(`requests|request#${lapsed.id}`)!;
@@ -448,7 +495,7 @@ describe('the DynamoDB access-request store', () => {
     const { table, store } = setup();
     const { request } = await store.create({ email: 'nia@example.com', now: at(0) });
     await store.settle(request.id, { status: 'approved', by: ADMIN, now: at(DAY) });
-    const put = table.inputsOf(PutItemCommand).at(-1)!;
+    const put = table.inputsOf(PutItemCommand).find((p) => p.Item?.sk?.S === `request#${request.id}` && p.ConditionExpression !== 'attribute_not_exists(#sk)')!;
     expect(put).toMatchObject({
       TableName: 'access-requests',
       ConditionExpression: '#status = :pending AND #expiresAt > :now',
@@ -496,6 +543,53 @@ describe('the DynamoDB access-request store', () => {
     expect(table.inputsOf(GetItemCommand)).toHaveLength(0);
   });
 
+  it('filing is constant work: the same DynamoDB calls with an empty queue and with 2,000 pending (M5)', async () => {
+    const callsToFile = async (queued: number) => {
+      const { table, store } = setup(100);
+      for (let i = 0; i < queued; i++) {
+        const r = newRequestId(at(-i * MIN));
+        table.seed({ pk: { S: 'requests' }, sk: { S: `request#${r}` }, id: { S: r }, email: { S: `q${i}@example.com` }, status: { S: 'pending' }, createdAt: { S: iso(-i * MIN) }, expiresAt: { S: iso(30 * DAY) }, deleteAt: { S: iso(60 * DAY) } });
+      }
+      table.mock.resetHistory();
+      await store.create({ email: 'new@example.com', name: 'New', now: at(0) });
+      return table.mock.calls().map((c) => (c.args[0] as { constructor: { name: string } }).constructor.name);
+    };
+    const empty = await callsToFile(0);
+    const full = await callsToFile(2000);
+    expect(full).toEqual(empty);
+    expect(empty).toEqual(['PutItemCommand', 'PutItemCommand']);
+  });
+
+  it('a second request for an address while one is pending is refused by the marker, with the same constant work, and closes on settle', async () => {
+    const { table, store } = setup();
+    const first = await store.create({ email: 'nia@example.com', name: 'Nia', now: at(0) });
+    table.mock.resetHistory();
+    const again = await store.create({ email: 'nia@example.com', name: 'Someone else', now: at(MIN) });
+    expect(again).toEqual({ request: first.request, created: false });
+    // The refused marker write, then one read of the request it names: no queue read.
+    expect(table.mock.calls().map((c) => (c.args[0] as { constructor: { name: string } }).constructor.name)).toEqual(['PutItemCommand', 'GetItemCommand']);
+    expect([...table.items.keys()].filter((k) => k.startsWith('requests|request#'))).toHaveLength(1);
+    // Settled, the marker closes: the address may ask again.
+    await store.settle(first.request.id, { status: 'declined', by: ADMIN, now: at(DAY) });
+    expect(table.items.get(`requests|pending#${requestMarkerKey('nia@example.com')}`)?.open).toEqual({ BOOL: false });
+    expect((await store.create({ email: 'nia@example.com', now: at(2 * DAY) })).created).toBe(true);
+  });
+
+  it('two requests for one address racing: the marker lets exactly one through', async () => {
+    const { table, store } = setup();
+    const [a, b] = await Promise.all([store.create({ email: 'nia@example.com', now: at(0) }), store.create({ email: 'NIA@example.com', now: at(0) })]);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    expect([...table.items.keys()].filter((k) => k.startsWith('requests|request#'))).toHaveLength(1);
+  });
+
+  it('a request write that fails releases the marker, so the address isn’t blocked', async () => {
+    const { table, store } = setup();
+    table.failPutWhere((item) => item.sk?.S?.startsWith('request#') === true, awsError('InternalServerError'));
+    await expect(store.create({ email: 'nia@example.com', now: at(0) })).rejects.toThrow(/InternalServerError/);
+    expect(table.items.get(`requests|pending#${requestMarkerKey('nia@example.com')}`)?.open).toEqual({ BOOL: false });
+    expect((await store.create({ email: 'nia@example.com', now: at(MIN) })).created).toBe(true);
+  });
+
   it('purge issues DeleteItem only for due items, across pages, by their keys', async () => {
     const { table, store } = setup(2);
     const due = (await store.create({ email: 'a@example.com', now: at(0) })).request;
@@ -507,16 +601,17 @@ describe('the DynamoDB access-request store', () => {
     table.seed({ pk: { S: 'requests' }, sk: { S: 'request#no-dates' } });
     table.mock.resetHistory();
 
+    // Two requests are counted; the due request's expired marker goes with them, uncounted.
     expect(await store.purge(at(31 * DAY))).toBe(2);
     const deletes = table.inputsOf(DeleteItemCommand);
-    expect(deletes.map((d) => d.Key!.sk!.S).sort()).toEqual([`request#${due.id}`, 'request#ttl-only'].sort());
+    expect(deletes.map((d) => d.Key!.sk!.S).sort()).toEqual([`request#${due.id}`, 'request#ttl-only', `pending#${requestMarkerKey('a@example.com')}`].sort());
     for (const d of deletes) {
       expect(d.TableName).toBe('access-requests');
       expect(Object.keys(d.Key!).sort()).toEqual(['pk', 'sk']);
       expect(d.ConditionExpression).toBeUndefined();
     }
     expect(table.inputsOf(QueryCommand).length).toBeGreaterThan(1); // it paged
-    expect(table.items.size).toBe(5);
+    expect([...table.items.keys()].filter((k) => k.startsWith('requests|request#'))).toHaveLength(5);
     expect(table.items.has('requests|request#no-dates')).toBe(true);
     for (const r of kept) expect(table.items.has(`requests|request#${r.id}`)).toBe(true);
   });
