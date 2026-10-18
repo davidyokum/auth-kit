@@ -67,6 +67,7 @@ export {
   ACCOUNT_CREATION_ROUTES,
   accountCreationWafRules,
   createSiteWebAcl,
+  siteWebAclRuleProblems,
   type AuthWebAcl,
   type AuthWebAclProps,
   type SharedAuthWebAclProps,
