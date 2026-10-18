@@ -84,7 +84,9 @@ export class AccessRequestConflictError extends Error {
 export interface AccessRequestStore {
   /**
    * Files a request, unless the address already has a pending one (then `created` is false and the
-   * existing one is returned: one request per address at a time).
+   * existing one is returned: one request per address at a time). Best effort on DynamoDB: two
+   * requests for one address in the same instant can both be filed (the per-address rate limit bounds
+   * it, and an admin sees both); it's a convenience, not a security rule.
    */
   create(input: { email: string; name?: string; reason?: string; now: Date }): Promise<{ request: AccessRequest; created: boolean }>;
   /** Requests still kept, newest first: pending ones, and with `includeSettled` the decided and expired ones too. */
@@ -461,8 +463,9 @@ export function createMemorySiteSettingsStore(): SiteSettingsStore {
       return Promise.resolve(structuredClone(next));
     },
     remove(name, expectedVersion) {
-      const current = rows.get(name)?.version ?? 0;
-      if (current !== expectedVersion) return Promise.reject(new SettingConflictError());
+      // Like DynamoDB's condition: there must be a stored setting at that version.
+      const current = rows.get(name)?.version;
+      if (current === undefined || current !== expectedVersion) return Promise.reject(new SettingConflictError());
       rows.delete(name);
       return Promise.resolve();
     },

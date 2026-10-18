@@ -31,8 +31,8 @@ import {
   type NormalizedAccountCreation,
   SIGN_UP_ORIGIN_VALUE,
   allowsSelfSignUp,
-  listInWords,
   mayCreateOwnAccount,
+  notOnListMessage,
   normalizeAccountCreation,
   takesAccessRequests,
 } from '../shared/account-creation.js';
@@ -78,6 +78,13 @@ export interface AccountCreationRoutesConfig {
   quota?: QuotaLimiterOptions;
   now?: () => number;
   sleep?: Sleep;
+  /**
+   * Hand the existing-account email to the platform to finish after the answer (`after` from
+   * `next/server`, or a Lambda's `waitUntil`), so a slow SES call can't make an address with an account
+   * answer later than a new one. Without it, the email is sent before answering, inside the
+   * response-time floor (which covers SES's usual speed).
+   */
+  background?: (task: Promise<unknown>) => void;
   /** Failures the routes don't show (an email that couldn't be sent to an existing account, a store that failed). */
   onError?: (error: unknown, context: string) => void;
 }
@@ -128,11 +135,7 @@ function defaultClientIp(request: Request): string | undefined {
 const ok = (): AccountCreationResult => ({ status: 200, body: { ok: true } });
 const refuse = (status: AccountCreationResult['status'], body: Extract<AccountCreationBody, { ok: false }>): AccountCreationResult => ({ status, body });
 
-/** The words for an address outside the list (Card Studio's sign-up error, generated from the list). */
-export function notOnListMessage(siteName: string, domains: readonly string[], requestsAlso: boolean): string {
-  const list = listInWords(domains.map((d) => (d.includes('.') ? d : `.${d}`)));
-  return `${siteName} accounts are for addresses ending in ${list}. Use one of those${requestsAlso ? ', or ask for access' : ', or ask the person who runs it to add you'}.`;
-}
+export { notOnListMessage };
 
 function waitMessage(seconds: number): string {
   const minutes = Math.max(1, Math.ceil(seconds / 60));
@@ -199,13 +202,17 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
   }
 
   async function tellExisting(email: string, via: 'sign-up' | 'request'): Promise<void> {
-    try {
-      const s = await site();
-      await config.mailer.sendEmail({ to: [email], email: existingAccountEmail(s, { email, via }), replyTo: [s.helpEmail] });
-    } catch (error) {
-      // The answer is the same either way (D3); the failure goes to the site's error hook.
-      report(error, `${via}: the existing-account email`);
-    }
+    const task = (async () => {
+      try {
+        const s = await site();
+        await config.mailer.sendEmail({ to: [email], email: existingAccountEmail(s, { email, via }), replyTo: [s.helpEmail] });
+      } catch (error) {
+        // The answer is the same either way (D3); the failure goes to the site's error hook.
+        report(error, `${via}: the existing-account email`);
+      }
+    })();
+    if (config.background) config.background(task);
+    else await task;
   }
 
   async function handleSignUp(input: unknown, facts: RequestFacts = {}): Promise<AccountCreationResult> {
@@ -330,7 +337,8 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     let input: unknown;
     try {
       const body = await request.text();
-      if (body.length > MAX_BODY_BYTES) return respond(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
+      // Bytes, not UTF-16 code units: a body of multi-byte characters is up to three times its length.
+      if (new TextEncoder().encode(body).byteLength > MAX_BODY_BYTES) return respond(refuse(413, { ok: false, code: 'invalid', error: 'That request is too large.' }));
       input = JSON.parse(body);
     } catch {
       return respond(refuse(400, { ok: false, code: 'invalid', error: 'That request is invalid.' }));

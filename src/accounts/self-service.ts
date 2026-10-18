@@ -29,7 +29,7 @@ import { type AccountCreationSettings, allowsSelfSignUp, mayCreateOwnAccount, no
 import { type EmailSite, accountDeletedEmail, emailChangedEmail } from '../shared/emails.js';
 import { ACCOUNT_CREATION_POLICY, OWNER_GROUP } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
-import { notOnListMessage } from './routes.js';
+import { notOnListMessage } from '../shared/account-creation.js';
 import { type SignInHelpSource, helpAddressOf } from './sign-in-help.js';
 import { type RateLimitStore, rateLimitKey } from './stores.js';
 
@@ -45,8 +45,14 @@ export interface SelfServiceConfig<G extends string = string, C extends string =
   help: SignInHelpSource;
   /** Sends the "account deleted" and "email changed" notices. */
   mailer: EmailSender;
-  /** Limits email-change requests per account (`ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount`). */
-  rateLimits?: RateLimitStore;
+  /** Limits email-change requests per account (`ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount`; `RateLimitTable`). */
+  rateLimits: RateLimitStore;
+  /**
+   * An email-change request takes at least this long, so an address another account uses (nothing to
+   * change) and a free one (a Cognito update and two audit rows) answer alike. Default 800 ms.
+   */
+  minimumResponseMs?: number;
+  sleep?: (ms: number) => Promise<void>;
   /** Removes the person's item access before the account goes (`createResourceActions(…).removeResourceMemberships`). */
   removeResourceMemberships?: (person: { sub: string; username: string; email: string }) => Promise<unknown>;
   /** What happens to a deleted person's items on this site, in one sentence, for the screen and the email (§5.2m). */
@@ -94,6 +100,7 @@ export function createSelfServiceActions<G extends string, C extends string>(con
   };
   const site = async (): Promise<EmailSite> => ({ siteName: config.siteName, theme, signInUrl: config.signInUrl, helpEmail: await helpAddressOf(config.help) });
   const NOT_HERE = `On ${config.siteName}, the people who run the site change accounts. Ask them.`;
+  if (enabled && typeof config.rateLimits?.hit !== 'function') throw new Error('auth-kit: createSelfServiceActions needs rateLimits (createDynamoRateLimitStore) on a sign-up site.');
 
   /** The signed-in person, live: enabled, their groups, and their account as Cognito has it now. */
   async function me(options: { recent: boolean }): Promise<Me | Fail> {
@@ -192,6 +199,14 @@ export function createSelfServiceActions<G extends string, C extends string>(con
   // ---- Change my email address --------------------------------------------------------------------
 
   async function requestEmailChange(input: unknown): Promise<ActionResult> {
+    const started = now();
+    const result = await requestEmailChangeNow(input);
+    const wait = (config.minimumResponseMs ?? ACCOUNT_CREATION_POLICY.minimumResponseMs) - (now() - started);
+    if (wait > 0) await (config.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))))(wait);
+    return result;
+  }
+
+  async function requestEmailChangeNow(input: unknown): Promise<ActionResult> {
     const who = await me({ recent: true });
     if ('ok' in who) return who;
     let newEmail: string;
@@ -202,14 +217,12 @@ export function createSelfServiceActions<G extends string, C extends string>(con
     }
     if (newEmail === who.person.email.toLowerCase()) return fail('invalid', 'That’s already your email address.');
     if (!mayCreateOwnAccount(newEmail, settings)) return fail('refused', notOnListMessage(config.siteName, settings.domains, false), { guardrail: 'domain' });
-    if (config.rateLimits) {
-      try {
-        const hit = await config.rateLimits.hit(rateLimitKey('email-change:account', who.user.sub), ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount, new Date(now()));
-        if (!hit.allowed) return fail('refused', `Too many attempts. Wait ${Math.max(1, Math.ceil(hit.retryAfterSeconds / 60))} minutes, then try again.`, { guardrail: 'rate_limited' });
-      } catch (error) {
-        report(error, 'email change: rate limit');
-        return fail('unavailable', 'We couldn’t check this request just now. Try again in a few minutes. Nothing was changed.');
-      }
+    try {
+      const hit = await config.rateLimits.hit(rateLimitKey('email-change:account', who.user.sub), ACCOUNT_CREATION_POLICY.rateLimits.emailChangePerAccount, new Date(now()));
+      if (!hit.allowed) return fail('refused', `Too many attempts. Wait ${Math.max(1, Math.ceil(hit.retryAfterSeconds / 60))} minutes, then try again.`, { guardrail: 'rate_limited' });
+    } catch (error) {
+      report(error, 'email change: rate limit');
+      return fail('unavailable', 'We couldn’t check this request just now. Try again in a few minutes. Nothing was changed.');
     }
     const sent = `We’ve emailed a code to ${newEmail}. Enter it to finish. Your email address changes only after you do.`;
     let taken: CognitoPerson | null;
@@ -236,7 +249,9 @@ export function createSelfServiceActions<G extends string, C extends string>(con
         return { value: undefined };
       },
     });
-    return finished(run, () => sent, (error) => fail('failed', `${describeAwsError(error)} Nothing was changed.`));
+    const result = finished(run, () => sent, (error) => fail('failed', `${describeAwsError(error)} Nothing was changed.`));
+    // No audit ID on the screen: an address another account uses gets this exact answer, with none.
+    return result.ok ? { ok: true, message: sent } : result;
   }
 
   async function confirmEmailChange(input: unknown): Promise<ActionResult> {

@@ -6,7 +6,7 @@
  */
 import { createSesInviteMailer } from '../admin/mailer.js';
 import { regionOfUserPool } from '../admin/sweep.js';
-import { isThemeFamily, type ThemeFamily } from '../themes/index.js';
+import { helpAddressProblems, isThemeFamily, type ThemeFamily } from '../themes/index.js';
 import { type AccessRequestDigestOptions, type AccessRequestDigestResult, createAccessRequestDigest } from './digest.js';
 import { ACCESS_REQUEST_DIGEST_ENV as E } from './jobs-env.js';
 import { createSignInHelp } from './sign-in-help.js';
@@ -46,7 +46,8 @@ export function accessRequestDigestConfig(env: Readonly<Record<string, string | 
   if (!isThemeFamily(family)) problems.push(`${E.family} must be osbm, unc, or personal`);
   for (const key of [E.signInUrl, E.peopleUrl] as const) if (!/^https:\/\/[^\s]+$/.test(value(key) ?? '')) problems.push(`${key} must be an https URL`);
   const helpEmail = value(E.helpEmail) ?? '';
-  if (!/^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(helpEmail)) problems.push(`${E.helpEmail} must be the help address`);
+  const helpProblems = helpAddressProblems(helpEmail);
+  if (helpProblems.length > 0) problems.push(`${E.helpEmail} must be the help mailbox (${helpProblems.join(' ')})`);
   const mailFrom = value(E.mailFrom) ?? '';
   if (!mailFrom.includes('@') || /[\r\n]/.test(mailFrom)) problems.push(`${E.mailFrom} must be a sender address`);
   const groups = value(E.recipientGroups)?.split(',').map((g) => g.trim()).filter(Boolean);

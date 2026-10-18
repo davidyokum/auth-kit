@@ -136,6 +136,20 @@ export function listInWords(items: readonly string[], conjunction: 'and' | 'or' 
   return `${items.slice(0, -1).join(', ')}, ${conjunction} ${items[items.length - 1]}`;
 }
 
+/** The domain list as people read it: `nc.gov`, and a bare top-level domain as `.edu`. */
+export function domainsInWords(domains: readonly string[]): string {
+  return listInWords(domains.map((d) => (d.includes('.') ? d : `.${d}`)));
+}
+
+/**
+ * The words for an address outside the list (Card Studio's sign-up error, from the list): "Example
+ * Reports accounts are for nc.gov addresses. Use one of those, or ask for access." The list is public,
+ * so this says nothing about who has an account.
+ */
+export function notOnListMessage(siteName: string, domains: readonly string[], requestsAlso: boolean): string {
+  return `${siteName} accounts are for ${domainsInWords(domains)} addresses. Use one of those${requestsAlso ? ', or ask for access' : ', or ask the person who runs it to add you'}.`;
+}
+
 /** The custom attribute a sign-up account carries, set once by the server (immutable). */
 export const SIGN_UP_ORIGIN_ATTRIBUTE = 'custom:authkit_origin';
 /** Its value on accounts the sign-up route created. Admin invites don't carry the attribute. */

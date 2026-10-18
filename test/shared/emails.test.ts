@@ -103,6 +103,11 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
     expect(email.html).toContain('{####}');
   });
 
+  it('says "an" before a site name that starts with a vowel', () => {
+    expect(existingAccountEmail({ ...OSBM, siteName: 'OSBM Reports' }, { email: 'a@example.org', via: 'sign-up' }).subject).toBe('You already have an OSBM Reports account');
+    expect(existingAccountEmail({ ...OSBM, siteName: 'OSBM Reports' }, { email: 'a@example.org', via: 'sign-up' }).text).toContain('tried to create an OSBM Reports account');
+  });
+
   it('the existing-account email says nothing was made and how to sign in', () => {
     const email = existingAccountEmail(OSBM, { email: 'sam@example.org', via: 'sign-up' });
     expect(email.subject).toBe('You already have an Example Reports account');

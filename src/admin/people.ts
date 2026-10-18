@@ -609,6 +609,20 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     } catch (error) {
       report(error, 'help address');
     }
+    // The email names who sent it, and replies go to them: read them from Cognito when the session
+    // carried no ID token (a bearer token), so the invite never says "Someone".
+    let invitedBy: { name?: string; email?: string } = {
+      ...(acting_.user.profile?.name !== undefined && { name: acting_.user.profile.name }),
+      ...(acting_.actor.email !== undefined && { email: acting_.actor.email }),
+    };
+    if (invitedBy.email === undefined) {
+      try {
+        const me = await cognito().findBySub(acting_.user.sub);
+        if (me) invitedBy = { ...(me.name !== undefined && { name: me.name }), ...(me.email && { email: me.email }) };
+      } catch (error) {
+        report(error, 'invite: the inviter’s name');
+      }
+    }
     const plannedExpiry = inviteExpiresAt(new Date(now()));
     const run = await runAudited(
       auditLog,
@@ -660,7 +674,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               expiresAt,
               ...(config.theme !== undefined && { theme: config.theme }),
               ...(helpEmail !== undefined && { helpEmail }),
-              invitedBy: { ...(acting_.user.profile?.name !== undefined && { name: acting_.user.profile.name }), ...(acting_.actor.email !== undefined && { email: acting_.actor.email }) },
+              invitedBy,
               roleLabel: roleLabel(role),
               ...(opts.approved && { approved: true }),
             });

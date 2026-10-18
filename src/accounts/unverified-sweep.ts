@@ -57,8 +57,8 @@ export interface UnverifiedSweepOptions {
 export function unverifiedSignUpDue(person: CognitoPerson, nowMs: number, olderThanHours: number = ACCOUNT_CREATION_POLICY.unverifiedAccountHours): boolean {
   if (person.origin !== SIGN_UP_ORIGIN_VALUE || person.emailVerified) return false;
   const created = person.createdAt.getTime();
-  // An unreadable creation date isn't proof of age: leave it (the next run tries again).
-  return Number.isFinite(created) && nowMs - created >= olderThanHours * 60 * 60 * 1000;
+  // An unreadable or missing creation date (read as the epoch) isn't proof of age: leave it.
+  return Number.isFinite(created) && created > 0 && nowMs - created >= olderThanHours * 60 * 60 * 1000;
 }
 
 export function createUnverifiedAccountSweep(options: UnverifiedSweepOptions): () => Promise<UnverifiedSweepResult> {

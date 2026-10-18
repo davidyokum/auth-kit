@@ -444,17 +444,17 @@ function senderAddress(from: string): string | undefined {
   return EMAIL_RE.test(address) ? address : undefined;
 }
 
-/** Checks the warning settings; returns the SES identity to grant. Tokens are taken as given. */
-function checkOwnerWarnings(w: InviteExpiryOwnerWarnings): string {
+/** Checks a sender's settings; returns the SES identity to grant. Tokens are taken as given. `label` names them in errors. */
+function checkOwnerWarnings(w: InviteExpiryOwnerWarnings, label = 'ownerWarnings'): string {
   const literal = (v: string | undefined) => v !== undefined && !Token.isUnresolved(v);
-  if (literal(w.siteName) && !w.siteName.trim()) throw new Error('auth-kit: ownerWarnings.siteName is required.');
+  if (literal(w.siteName) && !w.siteName.trim()) throw new Error(`auth-kit: ${label}.siteName is required.`);
   if (literal(w.from) && (/[\r\n]/.test(w.from) || !senderAddress(w.from))) {
-    throw new Error(`auth-kit: ownerWarnings.from "${w.from}" must be a sender, like "Example Reports <noreply@example.org>".`);
+    throw new Error(`auth-kit: ${label}.from "${w.from}" must be a sender, like "Example Reports <noreply@example.org>".`);
   }
-  if (literal(w.signInUrl) && !/^https:\/\/[^\s]+$/.test(w.signInUrl!)) throw new Error('auth-kit: ownerWarnings.signInUrl must be an absolute https URL.');
-  if (literal(w.fallbackEmail) && !EMAIL_RE.test(w.fallbackEmail!)) throw new Error(`auth-kit: ownerWarnings.fallbackEmail "${w.fallbackEmail}" isn't an email address.`);
+  if (literal(w.signInUrl) && !/^https:\/\/[^\s]+$/.test(w.signInUrl!)) throw new Error(`auth-kit: ${label}.signInUrl must be an absolute https URL.`);
+  if (literal(w.fallbackEmail) && !EMAIL_RE.test(w.fallbackEmail!)) throw new Error(`auth-kit: ${label}.fallbackEmail "${w.fallbackEmail}" isn't an email address.`);
   if (w.sesIdentity !== undefined) return w.sesIdentity;
-  if (!literal(w.from)) throw new Error('auth-kit: ownerWarnings.sesIdentity is required when from is a token.');
+  if (!literal(w.from)) throw new Error(`auth-kit: ${label}.sesIdentity is required when from is a token.`);
   return senderAddress(w.from)!.split('@')[1]!.toLowerCase();
 }
 
@@ -885,7 +885,7 @@ export class AccessRequestDigest extends Construct {
       const problems = helpAddressProblems(props.helpEmail);
       if (problems.length > 0) throw new Error(`auth-kit: AccessRequestDigest helpEmail: ${problems.join(' ')}`);
     }
-    const sesIdentity = checkOwnerWarnings({ siteName: props.siteName, from: props.from, ...(props.sesIdentity !== undefined && { sesIdentity: props.sesIdentity }) });
+    const sesIdentity = checkOwnerWarnings({ siteName: props.siteName, from: props.from, ...(props.sesIdentity !== undefined && { sesIdentity: props.sesIdentity }) }, 'AccessRequestDigest');
     const job = createScheduledJob(this, {
       bundle: lambdaBundle(ACCESS_REQUEST_DIGEST_BUNDLE_PATH, 'access-request-digest'),
       ...(props.logRetention !== undefined && { logRetention: props.logRetention }),

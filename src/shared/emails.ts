@@ -68,6 +68,11 @@ export function clockDate(date: Date, site: Pick<EmailSite, 'timeZone'> = {}): s
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: site.timeZone ?? 'America/New_York' }).format(date);
 }
 
+/** "a" or "an" before a word, by its first letter: "an OSBM Reports account", "an Example Reports account". */
+export function article(word: string): 'a' | 'an' {
+  return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a';
+}
+
 /** "n•••@example.com": enough to recognize, not enough to read. */
 export function maskEmail(email: string): string {
   const at = email.lastIndexOf('@');
@@ -385,13 +390,13 @@ export function existingAccountEmail(site: EmailSite, input: { email: string; vi
   const signUp = input.via === 'sign-up';
   return renderEmail({
     site,
-    subject: `You already have a ${site.siteName} account`,
+    subject: `You already have ${article(site.siteName)} ${site.siteName} account`,
     preheader: 'Sign in with this address instead.',
     blocks: [
       { kind: 'heading', text: 'You already have an account' },
       p(
         signUp
-          ? `Someone, probably you, tried to create a ${site.siteName} account with this address. There’s already an account for it, so there’s nothing new to create.`
+          ? `Someone, probably you, tried to create ${article(site.siteName)} ${site.siteName} account with this address. There’s already an account for it, so there’s nothing new to create.`
           : `Someone, probably you, asked for access to ${site.siteName} with this address. There’s already an account for it, so there’s nothing to ask for.`,
       ),
       p('To get in, go to ', link(site.signInUrl), ' and sign in with ', strong(input.email), '.'),
