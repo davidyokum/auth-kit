@@ -2,6 +2,50 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.8-alpha] - 2026-10-18
+
+Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the sign-in card in the approved words with the families as themes ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)): auth-kit brought in line with the passwords-flow decisions register (A1, A3, A4–A7, D1–D4, E1, E2, E4, E4d, E5, P8, and David's 2026-10-18 decisions on emails, the help route, and the passkey icon). Pre-release. Breaking: see Migration.
+
+### Security
+
+- **Cognito's own `SignUp` is always off**, in every mode, and synthesis fails if anything turns it back on (the rendered pool is checked, overrides included). Sign-up is a server route that creates the account like an invite, so nobody can skip the domain list, the rate limits, or the bot check by calling Cognito directly, and Cognito can no longer be asked who's registered.
+- **Sign-up and request access answer every address alike**, in at least 800 ms; an address with an account gets an email instead of a different screen. Per-address and per-IP rate limits fail closed; an optional CLOUDFRONT web ACL adds a silent challenge and a per-IP limit (`accountCreationWafRules`, `createSiteWebAcl`).
+- **The preSignUp trigger re-checks the domain list** on every account the sign-up route makes (marked with the immutable `custom:authkit_origin`), and refuses Cognito's `SignUp`.
+- **Never-verified sign-ups are deleted after 24 hours** (`UnverifiedAccountSweep`): only marked accounts, never one with a role, never the owner, never an admin's invite (those keep the 7-day disable).
+- **The first credential is required**: no "Not now" after an invite's or a sign-up's first code, so no account is left on emailed codes alone (A1).
+- **Self-service on sign-up sites** needs a recent sign-in: delete my account (never the owner) and change my email (verified before it takes effect; the old address told; the same answer whether or not another account uses the new address).
+- **The help address is required and role-based**: synthesis fails while `email.replyTo` is missing, a placeholder, or a person's own address. A Super admin's override (Settings → "Sign-in help") needs `settings.security` and a recent sign-in, is audited, alerts the owner, and is undone if the alert can't be sent.
+- **Access requests' typed names and reasons** stay out of the append-only audit log and are deleted 30 days after the request is settled.
+
+### Added
+
+- `accountCreation: { mode: 'invite' | 'request' | 'domains' | 'open', domains?, requestsAlso? }` on the preset (and `normalizeAccountCreation`, `emailDomainAllowed`, `takesAccessRequests`, … from `auth-kit/amplify` and `auth-kit/accounts`); `codeLifetimeMinutes` (default 3; A7) on the preset, the screens, and the custom message trigger.
+- `auth-kit/accounts`: `createAccountCreationRoutes` (the sign-up and request routes), `createSelfServiceActions`, `createSignInHelp` and `createSignInHelpActions`, the request, rate-limit, and settings stores (memory and DynamoDB), and the jobs' logic.
+- `auth-kit/admin/cdk`: `AccessRequestTable`, `RateLimitTable`, `SiteSettingsTable`, `UnverifiedAccountSweep`, `AccessRequestDigest` (bundled Lambdas, least-privilege roles, alarms). `auth-kit/admin`: `people.listAccessRequests`, `approveRequest` (the ordinary invite), `declineRequest` (silent unless `notifyOnDecline`); `accountCreationAppPolicy`, `siteSettingsAppPolicy`; `renderSignInHelpChangedEmail`; the SES mailer's `sendEmail` and `signInHelpChanged`; every auth email's renderer (`inviteEmail`, `existingAccountEmail`, `requestDeclinedEmail`, `accessRequestDigestEmail`, `emailChangedEmail`, `accountDeletedEmail`, and the code emails).
+- `auth-kit/admin/ui`: `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`, `SignInHelpSettings`.
+- `auth-kit/amplify/pre-sign-up`: `preSignUpForAccountCreation`. `auth-kit/amplify/custom-message`: `customMessageHandler`.
+- `auth-kit/themes`: the families as themes (`FAMILY_THEMES`, `authTheme`, `senderDisplayName`, `themeCssVariables`), the computed card edge (`cardEdge: 'defined' | 'soft'`, `definedCardEdge`, `checkCardEdge`), and `helpAddressProblems`.
+- `auth-kit/client`: `SignUp`, `RequestAccess`, `SignedOutEverywhere`; `MyAccount`'s `selfService`; the copy deck (`SIGN_IN`, `FIRST_VISIT`, `TROUBLE`, `ERRORS`, `helpScreen`, …); `saveName`; `wafAwareFetch`; `AuthCard`; `Icon`.
+- `auth-kit/testing`: `NEW_MEMBER` and `FRESH_SIGN_UP_MEMBER`, and `assertAuthMatrix({ signUpSite: true })`, which runs a freshly signed-up Member against every route.
+- ADR 0023 and ADR 0024; `THIRD_PARTY_NOTICES.md` (Lucide's icons, ISC).
+
+### Changed
+
+- **`SignIn` is the whole card, in the approved words** (Card Studio v4): email first; separate "Use your passkey" (no final button) and "Enter your password" ("for {email} · Change") screens; Continue on the email and password steps and Sign in on the authenticator and emailed-code steps (A6); an error summary that takes focus; "Trouble signing in?" and six help screens (`troubleLink`); the account-creation line (`inviteLine`); the family's footer line, nothing above the heading, no line on top (E4); the fingerprint passkey icon in the family accent and a password-field glyph (E4d). New required prop `help`; new props `theme`, `accountCreation`, `codeLifetimeMinutes`, `securityNotices`, `signUpHref`, `requestAccessHref`. ADR 0018's same screens hold throughout.
+- **`ChooseFirstCredential`** is required: `onSkip` is gone; `onDone` receives `'passkey'` or `'password'`. `AuthenticatorSetup` reads "Add an authenticator app" with Continue.
+- **Messages** use the approved words (`describeAuthError` takes `{ siteName, codeLifetimeMinutes, helpAddress }`).
+- **Emails match the card** (David, 2026-10-18): no letterhead; the footer is the card's identity sentence and "Help: {address}." The invite names the inviter and the role and gives the expiry as an Eastern clock time; it replies to the inviter.
+- **`email.replyTo` is required** in the preset (it's the help address).
+- `InviteExpirySweep` shares the scheduled-job helper with the new jobs (its template is unchanged). ADRs 0019 and 0020 say "the owner" (one owner); 0001 and 0002 record that admins keep a password-plus-authenticator route (A3); 0021 drops the owner line.
+
+### Migration
+
+- **`selfSignUp` and `preSignUpAllowlist` throw.** Use `accountCreation` and `preSignUpForAccountCreation`; mount `createAccountCreationRoutes`' handlers at `/api/auth/sign-up` and `/api/auth/request-access`; deploy the tables and jobs your mode needs (README section 11).
+- **Set `email.replyTo`** to the family's help mailbox (or the site's own).
+- **`SignIn` needs `help={{ address, owner }}`** (read the address in effect on the server with `createSignInHelp(…).effective()`), and renders its own card: drop the site's card wrapper, owner line, footer, and accent rule, and pass `theme`.
+- **`ChooseFirstCredential`**: remove `onSkip`.
+- Pass the same `codeLifetimeMinutes` to the preset and the screens if you change it from 3.
+
 ## [0.1.7-alpha.1] - 2026-10-18
 
 Screens name items by the app's noun and the item's name, never by ID (register rule C5; [ADR 0022, amendment](docs/decisions/0022-resource-roles.md#amendment-2026-10-18-items-by-noun-and-name-never-by-id)). A revision of 0.1.7-alpha: 0.1.8 is the next feature release.

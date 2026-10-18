@@ -2,22 +2,25 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.7-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), and resource roles (`auth-kit/resources`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.8-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
 | Subpath | What it gives a site | Phase 1 |
 |---|---|---|
-| `auth-kit/amplify` | A Gen 2 auth preset: one pool per app, invite-only, passkey first, password + authenticator second, emailed code as the backstop, standard token lifetimes, deletion protection, SES from a verified domain, standard groups, a WAF rate rule, sandbox detection | **Implemented** |
-| `auth-kit/amplify/pre-sign-up` | The one sanctioned exception to invite-only: a preSignUp Lambda that allows self-registration from listed email domains | **Implemented** |
+| `auth-kit/amplify` | A Gen 2 auth preset: one pool per app, Cognito's own sign-up always off (accounts are made on the server: `accountCreation`), passkey first, password + authenticator second, emailed code as the backstop, standard token lifetimes, deletion protection, SES from a verified domain, standard groups, a WAF rate rule, sandbox detection | **Implemented** |
+| `auth-kit/amplify/pre-sign-up` | The preSignUp trigger for `accountCreation`: refuses Cognito's own sign-up, and re-checks the domain list on accounts the sign-up route makes ([ADR 0023](docs/decisions/0023-account-creation.md)) | **Implemented** |
+| `auth-kit/amplify/custom-message` | Cognito's custom message trigger: its code emails (sign-in code, the first code of a sign-up, password reset, new address) in the standard's words and the family's theme ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) | **Implemented** |
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, `requireResourceRole` (resource roles; 404 for anyone who can't see the item), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
-| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
+| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, a second member on record routes, and a freshly signed-up Member on sign-up sites), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
 | `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
-| `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
+| `auth-kit/client` | The sign-in card in the approved words (email first; passkey, password + TOTP, emailed code; "Trouble signing in?" and its help screens), the required first-credential choice, sign-up, request access, the authenticator gate, My account (with change email and delete my account on sign-up sites) | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions (including Transfer ownership) and an append-only audit log, on the site-wide roles ([below](#site-wide-roles)) | **Implemented** (phase 2) |
-| `auth-kit/admin/ui` | People table, invite form, role picker (each role's can/can't, "Compare roles"), role-change and Transfer ownership dialogs, Activity log (React client components) | **Implemented** (phase 2) |
-| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the last owner's); `ResourceAccessTable`: the resource roles' membership table | **Implemented** (phase 2) |
+| `auth-kit/admin/ui` | People table, invite form, role picker (each role's can/can't, "Compare roles"), role-change and Transfer ownership dialogs, Activity log, the "Pending requests" tab and badge, Settings → "Sign-in help" (React client components) | **Implemented** (phase 2) |
+| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the owner's); `ResourceAccessTable`: the resource roles' membership table; `AccessRequestTable`, `RateLimitTable`, `UnverifiedAccountSweep`, `AccessRequestDigest`: account creation; `SiteSettingsTable`: settings such as a Super admin's help address | **Implemented** (phase 2) |
+| `auth-kit/accounts` | Account creation ([below](#11-account-creation-auth-kitaccounts)): the sign-up route (a self-invite) and the request-access route, with the same answer for every address and rate limits; members' own email change and delete on sign-up sites; the sign-in help address and its Super admin override; the stores and the scheduled jobs | **Implemented** |
+| `auth-kit/themes` | The families as themes ([below](#12-families-as-themes-and-the-help-address-auth-kitthemes)): accent colors, sender name, footer identity line, email hint, help route, the computed 3:1 card edge. Pure | **Implemented** |
 | `auth-kit/resources` | Resource roles ([below](#10-resource-roles-auth-kitresources)): Manager, Contributor, Reader on one item, combined with the site role; the membership store; audited access changes, a Manager's invite with an alert to the admins, item creation with its first Manager, the disable hook | **Implemented** |
 | `auth-kit/resources/ui` | "Who has access to this {noun}": role chips, add, invite, remove, leave, the last-Manager messages; the resource roles summary for the site role picker (React client components) | **Implemented** |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
@@ -32,10 +35,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.7-alpha.1/auth-kit-0.1.7-alpha.1.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.8-alpha/auth-kit-0.1.8-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.7-alpha.1.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.8-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -52,10 +55,19 @@ export const authOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports' },
+  email: {
+    fromAddress: 'sign-in@example.org',
+    fromName: 'Example Reports (NC OSBM)', // senderDisplayName(site, family) from auth-kit/themes
+    // The help address: the family's role-based mailbox, or the site's own. Required (synthesis fails
+    // while it's missing or a placeholder); it's the Reply-To on Cognito's auth emails.
+    replyTo: 'apps-help@replace-me.invalid',
+  },
   // Switch passkeys on once the final custom domain is live:
   // passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
+  // How accounts get created (invite only by default; section 11), and how long an emailed code works:
+  // accountCreation: { mode: 'domains', domains: ['example.org'], requestsAlso: true },
+  // codeLifetimeMinutes: 3,
 } satisfies AuthStandardOptions;
 
 export const auth = defineAuth(standardAuthProps(authOptions));
@@ -70,6 +82,8 @@ import { auth, authOptions } from './auth/resource';
 const backend = defineBackend({ auth });
 applyAuthStandard(backend.auth, authOptions);
 ```
+
+The help address above is the template's placeholder, `apps-help@replace-me.invalid`, which synthesis refuses until you set the real one.
 
 Why two calls: Amplify fails synthesis unless `defineAuth` is called directly from `amplify/auth/resource.ts`, so the preset returns props for your own `defineAuth` call. Settings `defineAuth` can't express are applied in `backend.ts` as CDK overrides ([ADR 0006](docs/decisions/0006-preset-props-plus-l1-overrides.md)).
 
@@ -339,10 +353,25 @@ export function AmplifyClient() { return null; }
 ```tsx
 // app/sign-in/page.tsx (a public route)
 import { SignIn } from 'auth-kit/client';
+import { signInHelp } from '@/lib/accounts'; // createSignInHelp: the configured address, or a Super admin's override
+
+export const dynamic = 'force-dynamic'; // reads the help address in effect on every request
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; reauth?: string }> }) {
   const { next, reauth } = await searchParams;
-  return <SignIn siteName="Example Reports" passkeysEnabled={false} next={next} reauth={reauth === '1'} />;
+  const help = await signInHelp.effective();
+  return (
+    <SignIn
+      siteName="Example Reports"
+      theme="osbm" // or authTheme('osbm', { emailHint: 'name@nc.gov' })
+      help={{ address: help.address, owner: 'Jordan Lee' }}
+      passkeysEnabled={false}
+      accountCreation={{ mode: 'invite' }} // the same setting as the preset's
+      codeLifetimeMinutes={3} // the same as the preset's
+      next={next}
+      reauth={reauth === '1'}
+    />
+  );
 }
 ```
 
@@ -366,17 +395,22 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 
 | Export | What it does |
 |---|---|
-| `SignIn` | Passkey first (`USER_AUTH` + `WEB_AUTHN`); "Use a password instead" (password, then the TOTP code); "Email me a code instead". Handles every step Cognito returns for these pools: emailed code, TOTP, a temporary password's new password, required TOTP setup, an MFA choice (answered with TOTP), and a required reset. Then: authenticator setup for password users, the first credential after an invite, a one-time "Save a passkey". Redirects through `safeRedirect`; `reauth` for step-up. |
-| `ChooseFirstCredential` | After an invite's emailed code: "Save a passkey", or "Set a password" (15+ characters) followed by the authenticator, which isn't optional. |
-| `AuthenticatorSetup` | Setup link, setup key, an optional QR code (`renderQrCode`, so the package stays dependency-free), then one code. |
+| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" (or, with passkeys off, "Enter your password" with "for {email} · Change"); "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button. Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes`, `emailHint`, `securityNotices`, `signUpHref`, `requestAccessHref`. Redirects through `safeRedirect`; `reauth` for step-up. |
+| `SignUp` | "Create your account" ([section 11](#11-account-creation-auth-kitaccounts)): the address (and the domain list), the privacy notice (`privacyNoticeUrl`, required), the sign-up route, the emailed code ("Verify"), "Your name", the required first credential, "You're set up" as a Member. |
+| `RequestAccess` | "Request access to {Site}": name, email, an optional reason, then "Request sent", the same for every address. |
+| `SignedOutEverywhere` | "You're signed out everywhere", where My account's sign-out lands. |
+| `ChooseFirstCredential` | "Choose how you'll sign in next time" (required, no "Not now"): "Create a passkey", or "Create a password" (15+ characters, Show) followed by "Add an authenticator app", which isn't optional. |
+| `AuthenticatorSetup` | "Add an authenticator app": an optional QR code (`renderQrCode`, so the package stays dependency-free), the setup key with Copy, a same-device setup link, then one code. |
 | `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. Its children are always server-rendered (hidden until the check passes), so it never changes the page's status. Use it inside a page, after the page's guard, with `serverChecked`. Without `serverChecked`, if the check can't run, the app stays hidden and the reason is shown with a retry. |
-| `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. |
+| `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. On sign-up sites (`selfService`, the server actions from `createSelfServiceActions`): change email (a code to the new address) and delete my account. |
 | Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
 
 - **The same screens for every address** until someone proves a factor ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)). Cognito's answer to "a passkey" or "a code" depends on the account (an unused invite has only emailed codes; an unknown address gets a random set), so the screens never show it: an account without a passkey still gets a passkey prompt that finds nothing (`decoyPasskeyPrompt`), an account without a password gets "don't match", and "Check your email" always follows a code request, naming the typed address ("If … has an account here"), with nothing sent when there's nothing to send. There's no method chooser. Cognito's responses still differ on the wire (the network panel, direct API calls); the WAF sign-in rule limits how fast anyone can ask. Sites building their own screens: `isFirstFactorUnavailable`, `decoyPasskeyPrompt`, `answerSimulatedCode`.
-- **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, and a disabled account read the same; a reset request looks the same either way). Rate limits, including WAF's, say to wait.
-- **Accessibility:** every field has a label; errors are announced (`role="alert"`) and linked to the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading.
-- **Styling:** unstyled markup. Each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `error`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS to copy into a stylesheet.
+- **The words** are the approved copy deck (Card Studio v4), all in `copy.ts` and exported (`SIGN_IN`, `FIRST_VISIT`, `TROUBLE`, `ERRORS`, `helpScreen`, …) for sites building their own screens. Oxford commas throughout; a test lints for them.
+- **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, and a disabled account read the same; a reset request looks the same either way). Rate limits, including WAF's, say to wait. A closed passkey prompt gets a calm note, not red.
+- **Accessibility:** every field has a label; errors go in a summary that takes focus and links to the field, and again by the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading; Show on password fields; icons are hidden from assistive technology.
+- **The card** is themed (the family's colors and the computed 3:1 edge as `--ak-*` custom properties), carries `data-backdrop-card` for `<Backdrop>`, and has nothing above the heading and no colored line on top (E4). The passkey icon is a fingerprint in the family accent; password rows use a password-field glyph.
+- **Styling:** each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `card`, `summary`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS, drawn from the design studio, to copy into a stylesheet.
 - **CSP:** `connect-src` needs `https://cognito-idp.<region>.amazonaws.com` (Amplify needs it too) and `https://api.pwnedpasswords.com` for the breached-password check (`checkBreachedPassword={false}` turns it off on Plus-plan pools).
 
 #### Where Amplify v6 differs from the standard
@@ -495,7 +529,7 @@ The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResour
 
 **Invite expiry.** An invite is a live account until it's used, so `InviteExpirySweep` disables every invite still unused after 7 days, within the hour ([ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)). EventBridge Scheduler runs a Lambda function with the package's own bundle (`createInviteExpirySweep` as the `system:invite-expiry` actor; each disable is an audit intent, the Cognito calls, then a result, shown as "Scheduled job" on the Activity page). Its role may call only `ListUsers`, `AdminListGroupsForUser`, `ListUsersInGroup`, `AdminDisableUser`, and `AdminRemoveUserFromGroup` on that pool, `PutItem` on the audit table, `ses:SendEmail` from the warning's identity, and write its own log; the scheduler's role may only invoke it. Options: `schedule` (a `rate` from 10 minutes to a day, or a `cron`), `inviteMode`, `ownerWarnings`, `alarmTopic`, `maxPeople` (a run fails, and alarms, rather than silently skip accounts past it), `logRetention`. For a role defined outside CDK, `inviteExpirySweepPolicy({ userPoolArn, auditTableArn, sesResourceArns })` is the same policy as JSON. An admin can also run the sweep from the People page (`people.expireStaleInvites()`).
 
-**The last owner is never disabled.** Each site keeps at least one owner, so the sweep disables an expired owner invite only while another enabled holder of the owner role (`OWNER_GROUP` in the shared policy: `owner`, of which a site has exactly one) remains (read live; two owners with one unused invite: the unused one goes). The last owner, even one who never signed in, keeps their account and role: the run logs a refusal ("skipped: last owner") and emails them "Your owner invite to {Site} hasn't been used", plus a separate copy to `fallbackEmail`, on the first run after the invite expired and then once a day. If the owner count can't be read, the owner is skipped too and the run fails, so the alarm says so. Without `ownerWarnings`, a run that skips a last owner fails instead of emailing. With a `cron` schedule every skipping run warns, so use a daily `cron` or a `rate`. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner) has the details.
+**The owner is never disabled.** A site has exactly one owner (`OWNER_GROUP` in the shared policy: `owner`), and the sweep never disables them or removes their role, even if they've never signed in. (Only if two people hold the role at once, mid-transfer or after a console edit, may an unused extra go: the sweep reads the owners live and always leaves one.) The owner keeps their account and role: the run logs a refusal ("skipped: last owner") and emails them "Your owner invite to {Site} hasn't been used", plus a separate copy to `fallbackEmail`, on the first run after the invite expired and then once a day. If the owner count can't be read, the owner is skipped too and the run fails, so the alarm says so. Without `ownerWarnings`, a run that skips the owner fails instead of emailing. With a `cron` schedule every skipping run warns, so use a daily `cron` or a `rate`. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-owner) has the details.
 
 ### 9. Backdrops: `auth-kit/backdrops`
 
@@ -652,6 +686,82 @@ import { ResourceRolesSummary } from 'auth-kit/resources/ui';
 
 **Moving from `requireRecordAccess`** (kept, deprecated, for one release): deploy the table, give each record's owner a Manager membership (a one-time script through `create`), replace each check with `requireResourceRole`, and drop `coveredBy` (the site floor covers admins). `removeRecordMemberships` is now `removeResourceMemberships`. [ADR 0022](docs/decisions/0022-resource-roles.md#migration) has the details, and a path to Amazon Verified Permissions (Cedar) later without changing apps.
 
+### 11. Account creation: `auth-kit/accounts`
+
+Each site picks one way to create accounts (register D1, [ADR 0023](docs/decisions/0023-account-creation.md)): **invite only** (the default), **request access**, **sign-up for approved domains**, or **open sign-up**. Cognito's own `SignUp` stays off in every mode; sign-up is a server route that does what an invite does. One setting, passed to the preset, the trigger, the routes, and the screens:
+
+```ts
+// site.config.ts
+export const accountCreation = { mode: 'domains', domains: ['example.org'], requestsAlso: true } as const;
+```
+
+**The pool** (section 1): `accountCreation` and `codeLifetimeMinutes` in the preset. Sign-up sites get the immutable `custom:authkit_origin` attribute on their pool (it marks the accounts the route makes). In `domains` mode the preSignUp trigger is required, and synthesis fails without it; the custom message trigger words the first code "Your code to create an account":
+
+```ts
+// amplify/auth/pre-sign-up/handler.ts
+import { preSignUpForAccountCreation } from 'auth-kit/amplify/pre-sign-up';
+export const handler = preSignUpForAccountCreation({ accountCreation });
+
+// amplify/auth/custom-message/handler.ts
+import { customMessageHandler } from 'auth-kit/amplify/custom-message';
+export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 3 });
+
+// amplify/auth/resource.ts
+export const auth = defineAuth(standardAuthProps(authOptions, { triggers: { preSignUp, customMessage } }));
+```
+
+**The tables and jobs** (`amplify/backend.ts`):
+
+```ts
+import { AccessRequestDigest, AccessRequestTable, RateLimitTable, SiteSettingsTable, UnverifiedAccountSweep } from 'auth-kit/admin/cdk';
+const rateLimits = new RateLimitTable(admin, 'RateLimits');           // sign-up and request limits, email changes
+const requests = new AccessRequestTable(admin, 'AccessRequests');    // where the site takes requests
+const settings = new SiteSettingsTable(admin, 'SiteSettings');       // the Super admin's help address (section 12)
+new UnverifiedAccountSweep(admin, 'UnverifiedSweep', { userPool: backend.auth.resources.userPool, auditLog }); // sign-up sites
+new AccessRequestDigest(admin, 'RequestDigest', {
+  userPool: backend.auth.resources.userPool, requests, settings,
+  siteName: 'Example Reports', family: 'osbm', from: 'Example Reports (NC OSBM) <sign-in@example.org>',
+  signInUrl: 'https://reports.example.org/sign-in', peopleUrl: 'https://reports.example.org/admin/people',
+  helpEmail: 'apps-help@replace-me.invalid',
+});
+```
+
+The server role needs `accountCreationAppPolicy({ userPoolArn, rateLimitTableArn, accessRequestTableArn, selfSignUp, sesResourceArns })` and `siteSettingsAppPolicy(tableArn)` (plain JSON for Amplify Hosting's compute role; in CDK, each table's `grantApp`).
+
+**The routes:**
+
+```ts
+// lib/accounts.ts (server-only)
+import { createAccountCreationRoutes, createDynamoAccessRequestStore, createDynamoRateLimitStore, createDynamoSiteSettingsStore, createSelfServiceActions, createSignInHelp } from 'auth-kit/accounts';
+export const signInHelp = createSignInHelp({ configured: 'apps-help@replace-me.invalid', store: createDynamoSiteSettingsStore({ tableName: outputs.custom.siteSettingsTable }) });
+const rateLimits = createDynamoRateLimitStore({ tableName: outputs.custom.rateLimitTable });
+export const requests = createDynamoAccessRequestStore({ tableName: outputs.custom.accessRequestTable });
+export const accountRoutes = createAccountCreationRoutes({
+  accountCreation, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in',
+  help: signInHelp, pool: { userPoolId: outputs.auth.user_pool_id }, auditLog, mailer, rateLimits, requests,
+  background: (task) => after(() => task), // from next/server: the existing-account email goes out after the answer
+});
+export const selfService = createSelfServiceActions({ auth, auditLog, accountCreation, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', help: signInHelp, mailer, rateLimits });
+
+// app/api/auth/sign-up/route.ts and app/api/auth/request-access/route.ts (public routes)
+export const POST = (request: Request) => accountRoutes.signUp(request);
+export const POST = (request: Request) => accountRoutes.requestAccess(request);
+```
+
+- **Sign-up** checks the address (and the list), rate-limits per address and per IP, and either creates the account with invite-core (no password, no group: Member) or emails "You already have an account". Both get the identical answer, in at least 800 ms. `SignUp` then runs the invite's emailed-code sign-in, "Your name", and the required "Choose how you'll sign in next time". A sign-up whose address is never verified is deleted after 24 hours (`UnverifiedAccountSweep`: only marked accounts, never one with a role, never the owner, never an admin's invite).
+- **Request access** stores the request in DynamoDB (never as a Cognito user), or emails an address that already has an account; the same answer either way. Admins with `people.manage` approve (the ordinary invite) or decline (silent unless `notifyOnDecline`) on the People page's "Pending requests" tab (`createPeopleActions({ accessRequests: requests, help: signInHelp, theme })`, `people.listAccessRequests()`, `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`), and get a daily digest instead of one email per request. Requests expire after 30 days, and each is deleted, with its typed name and reason, 30 days after it's settled.
+- **The silent WAF check** (optional): `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`.
+- **Members on sign-up sites** delete their own account (a recent sign-in, the address typed; never the owner) and change their own email (a recent sign-in; verified before it takes effect; the old address told) through `MyAccount`'s `selfService` prop. Cognito itself still lets a signed-in person start an email change through its public API (every app client can write required attributes); that change waits for the new address's code ([ADR 0023](docs/decisions/0023-account-creation.md) says what that leaves open).
+- **The matrix:** pass `signUpSite: true` and a `newMember` persona (`FRESH_SIGN_UP_MEMBER`) to `assertAuthMatrix`; it runs against every route, held to a member's expectations.
+
+### 12. Families as themes and the help address: `auth-kit/themes`
+
+One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) carries the accent colors, the sender's display name (`senderDisplayName`: "{Site} (NC OSBM)"), the footer identity line ("This site is managed by the NC Office of State Budget and Management", "This site is managed by UNC-Chapel Hill", none on personal sites), the email field's example, the help route, and an OSBM authorized-use line (off by default). `authTheme(family, overrides)` takes a site's own email hint (A9), `helpAddress`, `helpNamed`, `showAuthorizedUse`, and `cardEdge`. The screens and the emails take the theme; emails match the card: no letterhead, and the footer reads "{identity line}. Help: {address}."
+
+- **The card edge:** `cardEdge: 'defined'` (default) computes the lightest line in the family ink that reaches 3:1 against every backdrop color (`definedCardEdge`, `checkCardEdge`); `'soft'` is a hairline. `themeCssVariables(theme)` gives the card's `--ak-*` custom properties.
+- **The help route:** the site helps only with the person's account on this site; for their email, device, or app, the help screens point to the theme's IT desk. OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal sites say "the {Site} team".
+- **The help address** is one role-based mailbox per family by default, with a per-site override in site config, and it's required: nothing ships by default, and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, and the digest refuse a missing, placeholder (`apps-help@replace-me.invalid`), or personal address (`helpAddressProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner is alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -715,10 +825,11 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
 | Essentials plan + SES | `UserPoolTier`, `EmailConfiguration` with the domain identity | Pkg |
 | WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule, each with its own mode), or one [shared ACL](#waf-one-web-acl-for-all-your-sites) per account and Region; off only with `acknowledgeNoRateLimit` | Pkg ([count first](#count-first-then-block-the-sign-in-rule)) |
-| `AuthSessionValidity` 3 minutes | Preset | Pkg |
+| `AuthSessionValidity` 3 minutes (the emailed code's lifetime) | Preset `codeLifetimeMinutes` (default 3; A7), the same value on every screen and email that says it | Pkg |
 | Passkeys: user verification, count as MFA, final-domain RP ID | `WebAuthnUserVerification`, `WebAuthnFactorConfiguration`, RP ID validation | Pkg |
 | `PreventUserExistenceErrors` | Preset; the sign-in screens are the same for every address until a factor is proven ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)) | Pkg (on-the-wire caveat in the ADR) |
-| Invites with no password and no `email_verified` | `people.invite` (`MessageAction: SUPPRESS` + SES) | Pkg |
+| Invites with no password and no `email_verified` | `people.invite` (`MessageAction: SUPPRESS` + SES); the first-credential choice afterwards is required (no "Not now") | Pkg |
+| Sign-in screens in the approved words, email first, help one link away | `SignIn` and `copy.ts` (Card Studio v4), "Trouble signing in?" and its help screens ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) | Pkg |
 | **Sessions** | | |
 | Access/ID 60 min; refresh 30 days (Tier 2) or ≤ 1 day (Tier 3) | Preset (ceilings enforced; admin pools ≤ 1 day) | Pkg |
 | Token revocation on | Preset | Pkg |
@@ -741,10 +852,15 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
 | Access to one item: Manager, Contributor, Reader, on top of the site role | `defineResourceTypes`, `requireResourceRole`, `createResourceActions` (every change audited; every item keeps a Manager), `ResourceAccessTable` ([ADR 0022](docs/decisions/0022-resource-roles.md)) | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
-| Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
-| Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)); never the last owner's, who is warned instead | Pkg |
+| How accounts get created is one per-site setting; the card says which | `accountCreation` (invite, request, domains, open); `SignIn`'s account-creation line ([ADR 0023](docs/decisions/0023-account-creation.md)) | Pkg |
+| Self-created accounts follow the invite's path; Cognito's `SignUp` stays off; `preSignUp` re-checks the list | `AllowAdminCreateUserOnly` always (synthesis fails otherwise); the sign-up route uses invite-core; `preSignUpForAccountCreation` | Pkg |
+| Sign-up and request screens the same for every address; WAF check; rate limits; unverified accounts deleted after 24 hours | `createAccountCreationRoutes` (identical answers, 800 ms floor, per-address and per-IP limits); `accountCreationWafRules`; `UnverifiedAccountSweep` | Pkg (WAF association: Ops) |
+| Requests wait 30 days; a badge and a daily digest; name and reason deleted 30 days after settled | `AccessRequestTable`, `people.listAccessRequests` / `approveRequest` / `declineRequest`, `PendingRequestsTable`, `AccessRequestDigest` | Pkg |
+| Self-created accounts start as Member; no check treats "signed in" as trusted | No group at sign-up; the matrix's `newMember` persona on `signUpSite` | Pkg + App |
+| Sign-up sites: privacy notice; members delete their account and change their email | `SignUp`'s required `privacyNoticeUrl`; `createSelfServiceActions` and `MyAccount`'s `selfService` (recent sign-in; verified before it takes effect; old address told; never the owner) | Pkg |
+| Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)); never the owner's, who is warned instead | Pkg |
 | Recovery defined | Email recovery (everyday), admin-only (admin pool); admin MFA reset P2 | Partial |
-| Email changes admin-only | Can't be enforced in the pool ([why](#what-the-pool-cant-enforce)) | Gap |
+| Email changes admin-only (self-service on sign-up sites) | On sign-up sites `createSelfServiceActions` changes it after a recent sign-in and tells the old address; an admin's email change isn't built yet. The pool can't stop a direct change through Cognito's API ([why](#what-the-pool-cant-enforce)) | Pkg / Gap |
 | First admin bootstrapped once at deploy | Not built | P2 |
 | **Admin area** | | |
 | Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, `roleOptions`, run live by every action: one owner, never granted, moved only by `transferOwnership`; only the owner grants Super admin; the invite-expiry sweep keeps the owner too | Pkg |
@@ -823,10 +939,10 @@ Still to check on a live pool (each needs a real person or a deploy approved by 
 
 ## What the pool can't enforce
 
-- **Sign-up enumeration with the self-signup exception.** With `selfSignUp` on, Cognito's `SignUp` answers `UsernameExistsException` for an address that already has an account (`PreventUserExistenceErrors` doesn't cover `SignUp`), so anyone can test whether an allowed-domain address is registered.
+- **What Cognito reveals on the wire.** Cognito's own `SignUp` is off, so it can no longer be asked who's registered; the sign-up and request routes answer every address alike. Cognito's sign-in responses still differ on the wire ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)).
 - **Untrusted sibling subdomains.** Amplify's cookie names can't use the `__Host-` prefix, so an app on a sibling subdomain of a custom domain can set cookies for the parent domain and plant a session. auth-kit reads duplicate cookies the way Next does (the last one wins) so every layer agrees, but don't host an app you don't trust under the same parent domain.
-- **Email changes admin-only.** Cognito requires app clients to be able to write required attributes, and email is required, so a signed-in person can start an email change. The pool keeps the old address active until the new one is verified with a code (Amplify's `keepOriginal`). The admin-only rule has to live in the app.
-- **A strictly passkey-only admin pool.** Cognito won't let someone register a passkey before they've signed in once, and in a pool without emailed codes `AdminCreateUser` needs a temporary password. So an admin pool keeps `PASSWORD` as a first factor: a new admin signs in with a one-time password, sets a password and an authenticator (MFA is required), then saves a passkey. Recovery is admin-only. Phase 2 decides how to neutralize the password afterwards.
+- **Email changes only through the app.** Every app client can write the pool's required attributes, and email is required, so a signed-in person can start an email change through Cognito's public API, skipping the app's recent sign-in and its notice to the old address. The pool keeps the old address active until the new one is verified with a code (`AttributesRequireVerificationBeforeUpdate`). The admin-only rule (and, on sign-up sites, the self-service path's checks) live in the app.
+- **A strictly passkey-only admin pool.** Cognito won't let someone register a passkey before they've signed in once, and in a pool without emailed codes `AdminCreateUser` needs a temporary password. So an admin pool keeps `PASSWORD` as a first factor: a new admin signs in with a one-time password, sets a password and an authenticator (MFA is required), then saves a passkey. Admins use the passkey day to day and keep the password plus authenticator as a second way in; it isn't neutralized afterwards (register A3, [ADR 0001](docs/decisions/0001-passkey-first.md#amendment-2026-10-18-admins-keep-a-password-plus-authenticator-route-register-a3)). Recovery is admin-only.
 
 ## Development
 
@@ -835,7 +951,11 @@ npm ci
 npm run check   # typecheck, lint, test, build
 ```
 
-Tests make no AWS calls: tokens come from a local test issuer, Cognito is faked, and the preset is checked by CDK synthesis and assertions. Decisions are recorded in [docs/decisions](docs/decisions). Agents: read [AGENTS.md](AGENTS.md).
+Tests make no AWS calls: tokens come from a local test issuer, Cognito is faked, and the preset is checked by CDK synthesis and assertions. Agents: read [AGENTS.md](AGENTS.md).
+
+## Decisions
+
+Decisions are recorded as ADRs here, in [docs/decisions](docs/decisions): what was decided, why, and what it costs. The newest are [0023](docs/decisions/0023-account-creation.md) (account creation) and [0024](docs/decisions/0024-sign-in-copy-and-family-themes.md) (sign-in copy, families as themes, the card edge, the help route, and emails).
 
 ## License
 

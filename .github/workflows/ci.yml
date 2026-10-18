@@ -38,7 +38,7 @@ jobs:
       - run: npm run build
       - name: Every subpath loads from the build
         run: |
-          for s in amplify amplify/pre-sign-up server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk backdrops backdrops/react backdrops/picker; do
+          for s in amplify amplify/pre-sign-up amplify/custom-message server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk accounts resources resources/ui themes backdrops backdrops/react backdrops/picker; do
             node --input-type=module -e "await import('auth-kit/$s')"
           done
       - name: The auth-kit command runs from the build
