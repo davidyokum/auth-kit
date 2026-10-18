@@ -58,6 +58,8 @@ describe('BackdropPicker', () => {
     expect(renderCard).toHaveBeenCalledWith('osbm');
     expect(screen.getByRole('heading', { name: 'Choose a backdrop for Example Site' })).toBeTruthy();
     expect(screen.getByText('Not locked')).toBeTruthy();
+    // Previews hold the real card (with its own buttons), so no preview may sit inside a button.
+    expect(container.querySelector('button button, button form, button input')).toBeNull();
   });
 
   it('shuffles to nine new seeds, and goes back to the previous nine', async () => {
@@ -112,7 +114,7 @@ describe('BackdropPicker', () => {
     setup({ current: { style: 'ripples', seed: 'locked1', styleVersion: 1, locked: true } });
     await waitFor(() => expect(tiles()).toHaveLength(9));
     expect(screen.getByText('Locked')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Ripples v1 · locked1/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Ripples v1 · locked1\. Open it large/ }));
     expect(screen.getByText('This is the site’s backdrop')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Use this one' })).toBeNull();
   });

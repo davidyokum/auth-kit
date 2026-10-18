@@ -243,7 +243,7 @@ export function BackdropPicker(props: BackdropPickerProps) {
   }
 
   const view = PREVIEW_FRAMES[frame];
-  const stageHeight = typeof window === 'undefined' ? 600 : Math.max(240, window.innerHeight - 260);
+  const stageHeight = typeof window === 'undefined' ? 600 : Math.max(240, window.innerHeight - 340);
   const stageDisplay = Math.max(0, Math.min(stageWidth, Math.round((stageHeight * view.width) / view.height)));
 
   return (
@@ -263,13 +263,15 @@ export function BackdropPicker(props: BackdropPickerProps) {
             <span className={`akp-badge ${locked ? 'akp-badge-ok' : 'akp-badge-warn'}`}>{locked ? 'Locked' : 'Not locked'}</span>
           </div>
           {shown ? (
-            <button type="button" className="akp-current-open" onClick={() => open({ list: [shown], index: 0, kind: 'current' })}>
+            // A div with a covering button: the preview holds the real card, whose own buttons can't sit inside a button.
+            <div className="akp-current-open">
               <span className="akp-current-thumb">{mounted ? <Scene choice={shown} family={siteFamily} frame="desktop" displayWidth={152} renderCard={renderCard} maxFps={15} paused={viewing !== null} /> : null}</span>
               <span className="akp-current-text">
                 {describeChoice(shown)}
                 <span className="akp-current-sub">{locked ? `${labels(siteFamily)} · open` : 'Proposed from the site’s name'}</span>
               </span>
-            </button>
+              <button type="button" className="akp-open" onClick={() => open({ list: [shown], index: 0, kind: 'current' })} aria-label={`${describeChoice(shown)}. Open it large.`} />
+            </div>
           ) : (
             <p className="akp-current-sub">Nothing chosen yet.</p>
           )}
@@ -410,8 +412,7 @@ const PICKER_CSS = `
 .akp-current { flex: 0 1 360px; background: var(--akp-surface); border: 1px solid var(--akp-line); border-radius: 14px; padding: 12px 14px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
 .akp-current-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
 .akp-current-label { font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--akp-muted); }
-.akp-current-open { display: flex; gap: 12px; align-items: center; width: 100%; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
-.akp-current-open:focus-visible { outline: 3px solid #3892e1; outline-offset: 3px; }
+.akp-current-open { position: relative; display: flex; gap: 12px; align-items: center; width: 100%; border-radius: 8px; }
 .akp-current-thumb { flex: none; width: 152px; height: 95px; border-radius: 8px; overflow: hidden; background: #e9ecf0; box-shadow: 0 0 0 1px rgba(16,24,40,.08); }
 .akp-current-text { display: grid; gap: 2px; font-weight: 600; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
 .akp-current-sub { font-weight: 400; color: var(--akp-muted); font-size: 13px; margin: 0; }
