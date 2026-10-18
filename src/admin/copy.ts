@@ -209,11 +209,11 @@ const DONE: Readonly<Record<string, string>> = {
   'people.signOutEverywhere': 'signed out everywhere',
   'people.delete': 'deleted',
   'people.expireInvite': 'disabled the unused invite for',
-  'resources.create': 'created an item managed by',
+  'resources.create': 'created',
   'resources.add': 'gave access to',
   'resources.changeRole': 'changed the access of',
   'resources.remove': 'removed the access of',
-  'resources.invite': 'invited, with access to one item,',
+  'resources.invite': 'invited',
   'resources.delete': 'removed all access to',
 };
 
@@ -227,11 +227,11 @@ const TRIED: Readonly<Record<string, string>> = {
   'people.signOutEverywhere': 'tried to sign out',
   'people.delete': 'tried to delete',
   'people.expireInvite': 'tried to disable the unused invite for',
-  'resources.create': 'tried to create an item managed by',
+  'resources.create': 'tried to create',
   'resources.add': 'tried to give access to',
   'resources.changeRole': 'tried to change the access of',
   'resources.remove': 'tried to remove the access of',
-  'resources.invite': 'tried to invite, with access to one item,',
+  'resources.invite': 'tried to invite',
   'resources.delete': 'tried to remove all access to',
 };
 
@@ -270,19 +270,84 @@ function summarize(value: unknown): string | undefined {
   return undefined;
 }
 
-/** Plain-language wording for one Activity entry. */
-export function describeActivity(entry: ActivityEntry, names: (sub: string) => string | undefined = () => undefined): ActivityLine {
+/** An item as screens name it: the app's noun and, when known, the item's name. Never its ID. */
+export interface ActivityItem {
+  /** The app's word for it ("project"). */
+  noun: string;
+  /** Its name ("Roads 2027"), when it could be read. */
+  name?: string;
+}
+
+export interface DescribeActivityOptions {
+  /**
+   * The current noun and name of the item a row names (`target.recordId`, `type:id`), from the app's
+   * own store. Without it (or when it returns nothing), the noun and name recorded on the row are
+   * used, then the type; an item is never shown by its ID.
+   */
+  items?: (recordId: string) => ActivityItem | undefined;
+}
+
+const NO_EMAIL = 'an account with no email on file';
+
+function article(noun: string): string {
+  return /^[aeiou]/i.test(noun) ? 'an' : 'a';
+}
+
+/** "the project “Roads 2027”", or "a project" when the name can't be read. */
+export function itemPhrase(item: ActivityItem): string {
+  return item.name ? `the ${item.noun} “${item.name}”` : `${article(item.noun)} ${item.noun}`;
+}
+
+/** The item a row names: the app's current noun and name, else the row's snapshot, else its type. */
+function activityItem(e: AuditEvent, items: DescribeActivityOptions['items']): ActivityItem | undefined {
+  const recordId = e.target?.recordId;
+  if (recordId === undefined) return undefined;
+  const snapshot = [e.after, e.before]
+    .map((v) => (typeof v === 'object' && v !== null ? (v as { item?: unknown }).item : undefined))
+    .find((v): v is { noun?: unknown; name?: unknown } => typeof v === 'object' && v !== null);
+  let resolved: ActivityItem | undefined;
+  try {
+    resolved = items?.(recordId);
+  } catch {
+    resolved = undefined;
+  }
+  const colon = recordId.indexOf(':');
+  const type = colon > 0 ? recordId.slice(0, colon) : '';
+  const typeNoun = /^[a-z][a-z0-9-]{0,39}$/.test(type) ? type.replace(/-/g, ' ') : 'item';
+  const noun = resolved?.noun ?? (typeof snapshot?.noun === 'string' ? snapshot.noun : typeNoun);
+  const name = resolved?.name ?? (typeof snapshot?.name === 'string' && snapshot.name !== '' ? snapshot.name : undefined);
+  return { noun, ...(name !== undefined && { name }) };
+}
+
+/** Plain-language wording for one Activity entry. People are named by name or email, items by noun and name: never by an ID. */
+export function describeActivity(
+  entry: ActivityEntry,
+  names: (sub: string) => string | undefined = () => undefined,
+  options: DescribeActivityOptions = {},
+): ActivityLine {
   const e: AuditEvent = entry.event;
-  const actor = e.actor.kind === 'system' ? 'Scheduled job' : (names(e.actor.sub) ?? e.actor.email ?? e.actor.sub);
+  const actor = e.actor.kind === 'system' ? 'Scheduled job' : (names(e.actor.sub) ?? e.actor.email ?? NO_EMAIL);
   const failed = entry.status === 'failed' || entry.status === 'refused' || entry.status === 'unknown';
   const verb = (failed ? TRIED[e.action] : DONE[e.action]) ?? e.action;
-  const person = e.target ? ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? e.target.sub) : undefined;
-  // An access change names the person and the item (`project:abc`).
-  const target = e.target
-    ? e.action.startsWith('resources.') && e.target.recordId !== undefined
-      ? [person, e.target.recordId].filter(Boolean).join(' · ')
-      : ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? e.target.recordId ?? e.target.sub ?? '')
-    : '';
+  const person = e.target && (e.target.sub ?? e.target.email) !== undefined ? ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? NO_EMAIL) : undefined;
+  const item = activityItem(e, options.items);
+  const what = item ? itemPhrase(item) : undefined;
+  let target: string;
+  switch (e.action) {
+    case 'resources.create':
+      target = [what, person && `with ${person} as its Manager`].filter(Boolean).join(', ');
+      break;
+    case 'resources.invite':
+      target = [person, what && `with access to ${what} only`].filter(Boolean).join(', ');
+      break;
+    case 'resources.add':
+    case 'resources.changeRole':
+    case 'resources.remove':
+      target = [person, what && `on ${what}`].filter(Boolean).join(', ');
+      break;
+    default:
+      target = person ?? what ?? '';
+  }
   const before = summarize(e.before);
   const after = summarize(e.after);
   const change = before !== undefined || after !== undefined ? `${before ?? '—'} → ${after ?? '—'}` : undefined;

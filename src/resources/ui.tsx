@@ -122,7 +122,7 @@ function MemberRow(props: MemberRowProps): ReactNode {
   return (
     <li className="ak-access-member">
       <div className="ak-access-who">
-        <strong>{m.name ?? m.email ?? m.sub}</strong>
+        <strong>{m.name ?? m.email ?? 'An account with no email on file'}</strong>
         {you ? <span className="ak-you"> (you)</span> : null}
         {m.name && m.email ? <small className="ak-email">{m.email}</small> : null}
         <ResourceRoleChip role={m.role} />

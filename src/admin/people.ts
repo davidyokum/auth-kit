@@ -36,7 +36,7 @@ import {
   isStandardGroup,
   roleRank,
 } from './guardrails.js';
-import { InviteMisconfiguredError, createInvitedAccount, sendInviteEmail } from './invite-core.js';
+import { InviteMisconfiguredError, createInvitedAccount, removeInvitedAccount, sendInviteEmail } from './invite-core.js';
 import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
@@ -574,7 +574,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               await steps.call(`AdminAddUserToGroup ${role}`, () => cognito().addToGroup(created.username, role));
             } catch (error) {
               // A half-made invite is worse than none: it was created seconds ago and never used.
-              await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+              await removeInvitedAccount(steps, cognito(), created);
               throw error;
             }
           }
@@ -583,7 +583,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
             try {
               ownerAlert = await alertOwnerOfGrant(steps, acting_, { sub: created.sub, email, ...(name !== undefined && { name }) }, 'invite', reason);
             } catch (error) {
-              const undone = await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+              const undone = await removeInvitedAccount(steps, cognito(), created);
               throw new OwnerAlertFailedError(error, undone, 'grant');
             }
           }
@@ -900,16 +900,21 @@ export function createPeopleActions<G extends string, C extends string>(config: 
             )
           : undefined;
         return {
-          value: undefined,
+          value: memberships,
           after: { enabled: false, adminRole: null, groups: appRoles, ...(memberships !== undefined && { resourceMemberships: memberships }) },
         };
       },
     });
+    // The membership hook may say what it removed, in the app's words (`removeResourceMemberships` does).
+    const hookSays = (value: unknown) => {
+      const message = typeof value === 'object' && value !== null ? (value as { message?: unknown }).message : undefined;
+      return typeof message === 'string' && message !== '' ? ` ${message.slice(0, 600)}` : '';
+    };
     return finish(run, {
-      ok: () =>
+      ok: (value) =>
         revokingInvite
-          ? `The invite for ${target.person.email} is revoked. Nobody ever signed in with it.`
-          : `${who(target)} is disabled. ${details.disable.says}`,
+          ? `The invite for ${target.person.email} is revoked. Nobody ever signed in with it.${hookSays(value)}`
+          : `${who(target)} is disabled. ${details.disable.says}${hookSays(value)}`,
       partial: (error) =>
         `${who(target)} is disabled (sign-in and refresh stop now), but cleaning up didn't finish: ${describeAwsError(error)} The audit log shows which steps succeeded.`,
     });

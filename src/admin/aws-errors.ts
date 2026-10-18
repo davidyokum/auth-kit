@@ -9,6 +9,9 @@ function errorName(error: unknown): string {
 
 /** Says why AWS refused, in words an admin can act on. Never a stack trace. */
 export function describeAwsError(error: unknown): string {
+  // An error auth-kit raised with words already written for the screen (it names items by noun and name).
+  const userMessage = typeof error === 'object' && error !== null ? (error as { userMessage?: unknown }).userMessage : undefined;
+  if (typeof userMessage === 'string' && userMessage !== '') return userMessage;
   const name = errorName(error);
   switch (name) {
     case 'TooManyRequestsException':

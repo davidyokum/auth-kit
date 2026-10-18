@@ -29,7 +29,7 @@ import { type AuditLogStore, type AuditedRun, type ChangeSteps, runAudited } fro
 import { describeAwsError } from '../admin/aws-errors.js';
 import { CognitoAdmin, type CognitoPerson } from '../admin/cognito-admin.js';
 import { type InviteMode, inviteExpiresAt } from '../admin/guardrails.js';
-import { InviteMisconfiguredError, createInvitedAccount, sendInviteEmail } from '../admin/invite-core.js';
+import { INVITE_CALLS, InviteMisconfiguredError, createInvitedAccount, removeInvitedAccount, sendInviteEmail } from '../admin/invite-core.js';
 import type { InviteMailer, ResourceInviteAlert, ResourceInviteNotifier } from '../admin/mailer.js';
 import { ADMIN_POLICY } from '../admin/policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from '../admin/quota.js';
@@ -45,7 +45,6 @@ import {
   isResourceId,
   isResourceRole,
   isResourceType,
-  resourceAccessCopy,
   resourceLabel,
   resourceRoleOptions,
 } from './policy.js';
@@ -168,11 +167,34 @@ export type CreateResourceResult<T> =
 
 /** What the People page's disable hook removed. */
 export interface RemovedMemberships {
-  removed: { type: string; id: string; role: ResourceRole }[];
+  /** Each item's noun and name (when the app's store could say) ride along, for the audit row and screens. */
+  removed: { type: string; id: string; role: ResourceRole; item: { noun: string; name?: string } }[];
   /** Items left with no Manager: a site admin who manages people should make someone their Manager. */
-  leftWithoutManager: { type: string; id: string }[];
+  leftWithoutManager: { type: string; id: string; item: { noun: string; name?: string } }[];
   /** The list stopped at `RESOURCE_POLICY.maxResourcesPerPerson` (run it again for the rest). */
   truncated: boolean;
+  /**
+   * What happened, in the app's words, for the People page to show after "is disabled": "Their roles
+   * on 2 projects were removed. The project “Roads 2027” has no Manager now: …". Never an item's ID.
+   */
+  message: string;
+}
+
+/** "2 projects", "1 plan": counted by each type's noun. */
+function countedNouns(items: readonly { type: string }[], types: { get(type: string): ResourceTypeConfig }): string {
+  const counts = new Map<string, number>();
+  for (const i of items) counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
+  return [...counts]
+    .map(([type, n]) => {
+      const c = types.get(type);
+      return `${n} ${n === 1 ? c.noun : c.nounPlural}`;
+    })
+    .join(' and ');
+}
+
+/** "the project “Roads 2027”", or "a project" when the name couldn't be read (out of the item's own context). */
+function anItem(item: { noun: string; name?: string }): string {
+  return item.name ? `the ${item.noun} “${item.name}”` : `${/^[aeiou]/i.test(item.noun) ? 'an' : 'a'} ${item.noun}`;
 }
 
 export interface ResourceFormActions {
@@ -223,9 +245,22 @@ export interface ResourceActions {
 // ---- Errors raised inside a run ---------------------------------------------------------------
 
 class StaleAccessError extends Error {
-  constructor() {
-    super('Who has access to this item changed since the page loaded. Reload and try again.');
+  constructor(noun: string) {
+    super(`Who has access to this ${noun} changed since the page loaded. Reload and try again.`);
     this.name = 'StaleAccessError';
+  }
+}
+
+/**
+ * Some of a disabled person's memberships couldn't be removed. Its `userMessage` names the items by
+ * noun and name, which the People page shows (`describeAwsError`).
+ */
+class AccessCleanupError extends Error {
+  readonly userMessage: string;
+  constructor(userMessage: string) {
+    super(userMessage);
+    this.name = 'AccessCleanupError';
+    this.userMessage = userMessage;
   }
 }
 
@@ -247,14 +282,30 @@ class InviteUndoneError extends Error {
 interface Acting<C extends string> {
   access: ResourceAccess<C>;
   config: ResourceTypeConfig;
+  /** The item as screens name it: the type's noun and, when the app's store could say, its name. */
+  item: ItemWords;
   actor: AuditActor;
   request: AuditRequestContext;
 }
 
-const ACCESS_CALL = 'TransactWriteItems resource access';
+/** An item in words: the app's noun and its name. Screens never show an item's ID. */
+interface ItemWords {
+  noun: string;
+  name?: string;
+}
+
+/** "the project “Roads 2027”", or "this project" when the name couldn't be read. */
+function thisItem(item: ItemWords): string {
+  return item.name ? `the ${item.noun} “${item.name}”` : `this ${item.noun}`;
+}
+
+/** The call label the audit trail shows for one access transaction: "TransactWriteItems project access". */
+const accessCall = (noun: string) => `TransactWriteItems ${noun} access`;
 
 /** Who the access record says made the change when the People page's disable removes memberships. */
 const DISABLE_ACTOR = 'system:people-disable';
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** Steps that just run: for a commit made inside another step (an undo) or outside any audited change. */
 const directSteps = (): ChangeSteps => ({ call: (_label, fn) => fn(), rollback: () => Promise.resolve(true), changed: [] });
@@ -327,14 +378,13 @@ export function createResourceActions<G extends string, C extends string>(config
     ));
 
   const iso = () => new Date(now()).toISOString();
-  const copyFor = (c: ResourceTypeConfig) => resourceAccessCopy(c.noun, c.nounPlural);
 
   // ---- shared steps ---------------------------------------------------------------------------
 
   /** Parses the item named by untrusted input. */
   function refOf(raw: Record<string, unknown>): ResourceRef {
     if (!isResourceType(raw.type) || !types.has(raw.type)) throw new InputError('That kind of item isn’t on this site.');
-    if (!isResourceId(raw.id)) throw new InputError('That item ID is invalid.');
+    if (!isResourceId(raw.id)) throw new InputError(`That ${types.get(raw.type).noun} can’t be found.`);
     return { type: raw.type, id: raw.id };
   }
 
@@ -350,6 +400,19 @@ export function createResourceActions<G extends string, C extends string>(config
 
   const actorOf = (user: AuthUser<C>): AuditActor => ({ sub: user.sub, ...(user.profile?.email !== undefined && { email: user.profile.email }) });
 
+  /** The item in words: the type's noun, and its name from the app's store when it can be read (best effort). */
+  async function wordsFor(ref: ResourceRef): Promise<ItemWords> {
+    const noun = types.get(ref.type).noun;
+    let name: string | undefined;
+    try {
+      const found = await config.resourceName?.(ref);
+      name = typeof found === 'string' && found.trim() !== '' ? found.trim().slice(0, 200) : undefined;
+    } catch (error) {
+      report(error, 'resources: resourceName');
+    }
+    return { noun, ...(name !== undefined && { name }) };
+  }
+
   /**
    * The acting person and their access to the item, read live. No `view`: "not found". `view` but not
    * `need`: "forbidden" (logged). `need` null: any access that can see it.
@@ -363,7 +426,7 @@ export function createResourceActions<G extends string, C extends string>(config
     }
     const typeConfig = types.get(ref.type);
     if (!access.can('view')) return fail('not_found', 'Not found.');
-    const who: Acting<C> = { access, config: typeConfig, actor: actorOf(access.user), request: await requestOf() };
+    const who: Acting<C> = { access, config: typeConfig, item: await wordsFor(ref), actor: actorOf(access.user), request: await requestOf() };
     if (need !== null && !access.can(need)) {
       const message =
         need === 'invite'
@@ -375,12 +438,12 @@ export function createResourceActions<G extends string, C extends string>(config
     return who;
   }
 
-  async function readAccess(ref: ResourceRef): Promise<ResourceAccessRecord | Fail> {
+  async function readAccess(ref: ResourceRef, item: ItemWords): Promise<ResourceAccessRecord | Fail> {
     try {
       return await store.getAccess(ref);
     } catch (error) {
       report(error, 'resources: getAccess');
-      return fail('unavailable', `Couldn’t read who has access: ${describeAwsError(error)} Nothing was changed.`);
+      return fail('unavailable', `Couldn’t read who has access to ${thisItem(item)}: ${describeAwsError(error)} Nothing was changed.`);
     }
   }
 
@@ -407,7 +470,8 @@ export function createResourceActions<G extends string, C extends string>(config
         actor: who.actor,
         action,
         target: { ...(target?.sub !== undefined && { sub: target.sub }), ...(target?.email !== undefined && { email: target.email }), recordId: resourceLabel(ref) },
-        ...(after !== undefined && { after }),
+        // The item's noun and name as of now, so the Activity page never has to show its ID.
+        after: { ...(typeof after === 'object' && after !== null ? after : {}), item: who.item },
         error: `${guardrail}: ${message}`,
         ...contextOf(who.request),
       });
@@ -452,11 +516,12 @@ export function createResourceActions<G extends string, C extends string>(config
     change: { put?: ResourceMembership[]; delete?: string[] },
     actorSub: string,
   ): Promise<ResourceAccessRecord> {
+    const noun = types.get(ref.type).noun;
     const gone = new Set([...(change.delete ?? []), ...(change.put ?? []).map((m) => m.sub)]);
     const members = [...current.members.filter((m) => !gone.has(m.sub)), ...(change.put ?? [])];
     const meta = nextMeta(ref, current, members, actorSub);
     try {
-      await steps.call(ACCESS_CALL, () =>
+      await steps.call(accessCall(noun), () =>
         store.commit(ref, {
           expectedVersion: current.meta?.version ?? null,
           meta,
@@ -465,7 +530,7 @@ export function createResourceActions<G extends string, C extends string>(config
         }),
       );
     } catch (error) {
-      if (isResourceConflict(error)) throw new StaleAccessError();
+      if (isResourceConflict(error)) throw new StaleAccessError(noun);
       throw error;
     }
     return { meta, members };
@@ -513,7 +578,8 @@ export function createResourceActions<G extends string, C extends string>(config
     }
   }
 
-  const who_ = (m: { email?: string; name?: string; sub: string }) => m.name ?? m.email ?? m.sub;
+  // People by name or email; never by their ID.
+  const who_ = (m: { email?: string; name?: string; sub: string }) => m.name ?? m.email ?? 'an account with no email on file';
   const runOptions = config.sleep ? { sleep: config.sleep } : {};
 
   /** The replacement Manager for a last-Manager change: an existing member promoted, or an account added. */
@@ -601,7 +667,7 @@ export function createResourceActions<G extends string, C extends string>(config
       };
     } catch (error) {
       report(error, 'resources: listAccess');
-      return { state: 'unavailable', reason: `Couldn’t load who has access: ${describeAwsError(error)} This isn’t an empty list.` };
+      return { state: 'unavailable', reason: `Couldn’t load who has access to this ${typeConfig.noun}: ${describeAwsError(error)} This isn’t an empty list.` };
     }
   }
 
@@ -620,12 +686,11 @@ export function createResourceActions<G extends string, C extends string>(config
     }
     const who = await actingOn(ref, 'manage-access', action);
     if ('ok' in who) return who;
-    const copy = copyFor(who.config);
-    const current = await readAccess(ref);
+    const current = await readAccess(ref, who.item);
     if ('ok' in current) return current;
     const person = await findPerson(email);
     if (person !== null && 'ok' in person) return person;
-    if (!person) return fail('refused', copy.noAccount, { guardrail: 'no_account' });
+    if (!person) return fail('refused', `No account uses that address. Invite them to ${thisItem(who.item)} instead.`, { guardrail: 'no_account' });
     if (!person.enabled) return refuse(who, action, ref, { sub: person.sub, email }, 'disabled', 'That account is disabled, so it can’t be given access.');
     const existing = current.members.find((m) => m.sub === person.sub) ?? null;
     if (existing && upsert) {
@@ -643,9 +708,9 @@ export function createResourceActions<G extends string, C extends string>(config
       {
         intent: {
           ...auditBase(who, action, ref, { sub: person.sub, email: person.email }),
-          before: { resource: resourceLabel(ref), resourceRole: null },
-          after: { resource: resourceLabel(ref), resourceRole: role },
-          calls: [ACCESS_CALL],
+          before: { resource: resourceLabel(ref), item: who.item, resourceRole: null },
+          after: { resource: resourceLabel(ref), item: who.item, resourceRole: role },
+          calls: [accessCall(who.item.noun)],
         },
         run: async (steps) => {
           await commitChange(steps, ref, current, { put: [added] }, who.actor.sub);
@@ -654,7 +719,7 @@ export function createResourceActions<G extends string, C extends string>(config
       },
       runOptions,
     );
-    return finish(run, () => `${who_(added)} now has access to this ${who.config.noun} as ${RESOURCE_ROLE_LABEL[role]}.`);
+    return finish(run, () => `${who_(added)} now has access to ${thisItem(who.item)} as ${RESOURCE_ROLE_LABEL[role]}.`);
   }
 
   // ---- change role ----------------------------------------------------------------------------
@@ -683,13 +748,14 @@ export function createResourceActions<G extends string, C extends string>(config
       {
         intent: {
           ...auditBase(who, action, ref, { sub: target.sub, ...(target.email !== undefined && { email: target.email }) }),
-          before: { resource: resourceLabel(ref), resourceRole: target.role },
+          before: { resource: resourceLabel(ref), item: who.item, resourceRole: target.role },
           after: {
             resource: resourceLabel(ref),
+            item: who.item,
             resourceRole: toRole,
             ...(replacement && { newManager: { sub: replacement.person.sub, email: replacement.person.email, before: replacement.existing?.role ?? null } }),
           },
-          calls: [ACCESS_CALL],
+          calls: [accessCall(who.item.noun)],
         },
         run: async (steps) => {
           await commitChange(steps, ref, current, { put }, who.actor.sub);
@@ -701,7 +767,7 @@ export function createResourceActions<G extends string, C extends string>(config
     return finish(
       run,
       () =>
-        `${who_(target)} is now ${RESOURCE_ROLE_LABEL[toRole]} of this ${who.config.noun}.${replacement ? ` ${who_(replacement.person)} is now a Manager.` : ''}`,
+        `${who_(target)} is now ${RESOURCE_ROLE_LABEL[toRole]} of ${thisItem(who.item)}.${replacement ? ` ${who_(replacement.person)} is now a Manager.` : ''}`,
     );
   }
 
@@ -720,10 +786,10 @@ export function createResourceActions<G extends string, C extends string>(config
     }
     const who = await actingOn(ref, 'manage-access', action);
     if ('ok' in who) return who;
-    const current = await readAccess(ref);
+    const current = await readAccess(ref, who.item);
     if ('ok' in current) return current;
     const target = current.members.find((m) => m.sub === sub);
-    if (!target) return fail('not_found', `They don’t have access to this ${who.config.noun} (any more).`);
+    if (!target) return fail('not_found', `They don’t have access to ${thisItem(who.item)} (any more).`);
     if (fromRole !== undefined && fromRole !== target.role) {
       return fail('stale', `Their role changed to ${RESOURCE_ROLE_LABEL[target.role]} since this page loaded. Reload and try again.`);
     }
@@ -746,10 +812,10 @@ export function createResourceActions<G extends string, C extends string>(config
     // Leaving needs no more than seeing the item; the guardrail decides the rest.
     const who = await actingOn(ref, null, action);
     if ('ok' in who) return who;
-    const current = await readAccess(ref);
+    const current = await readAccess(ref, who.item);
     if ('ok' in current) return current;
     const target = current.members.find((m) => m.sub === sub);
-    if (!target) return fail('not_found', `They don’t have access to this ${who.config.noun} (any more).`);
+    if (!target) return fail('not_found', `They don’t have access to ${thisItem(who.item)} (any more).`);
     const replacement = await replacementFor(replaceWithEmail, current);
     if (replacement && 'ok' in replacement) return replacement;
     const g = guard(who, 'remove', { sub: target.sub, role: target.role }, {
@@ -771,14 +837,15 @@ export function createResourceActions<G extends string, C extends string>(config
       {
         intent: {
           ...auditBase(who, action, ref, targetRef),
-          before: { resource: resourceLabel(ref), resourceRole: target.role },
+          before: { resource: resourceLabel(ref), item: who.item, resourceRole: target.role },
           after: {
             resource: resourceLabel(ref),
+            item: who.item,
             resourceRole: null,
             ...(leaving && { left: true }),
             ...(replacement && { newManager: { sub: replacement.person.sub, email: replacement.person.email, before: replacement.existing?.role ?? null } }),
           },
-          calls: [ACCESS_CALL],
+          calls: [accessCall(who.item.noun)],
         },
         run: async (steps) => {
           await commitChange(steps, ref, current, { delete: [target.sub], ...(put && { put }) }, who.actor.sub);
@@ -789,8 +856,8 @@ export function createResourceActions<G extends string, C extends string>(config
     );
     return finish(run, () =>
       leaving
-        ? `You no longer have a role on this ${who.config.noun}.`
-        : `${who_(target)} no longer has access to this ${who.config.noun}.${replacement ? ` ${who_(replacement.person)} is now a Manager.` : ''}`,
+        ? `You no longer have a role on ${thisItem(who.item)}.`
+        : `${who_(target)} no longer has access to ${thisItem(who.item)}.${replacement ? ` ${who_(replacement.person)} is now a Manager.` : ''}`,
     );
   }
 
@@ -843,8 +910,8 @@ export function createResourceActions<G extends string, C extends string>(config
     }
     const existing = await findPerson(email);
     if (existing !== null && 'ok' in existing) return existing;
-    if (existing) return fail('refused', `That address already has an account. Add them to this ${who.config.noun} instead.`, { guardrail: 'exists' });
-    const current = await readAccess(ref);
+    if (existing) return fail('refused', `That address already has an account. Add them to ${thisItem(who.item)} instead.`, { guardrail: 'exists' });
+    const current = await readAccess(ref, who.item);
     if ('ok' in current) return current;
     if (current.members.length >= RESOURCE_POLICY.maxMembersPerResource) {
       return refuse(who, action, ref, { email }, 'too_many', `A ${who.config.noun} can have at most ${RESOURCE_POLICY.maxMembersPerResource} people.`);
@@ -858,12 +925,7 @@ export function createResourceActions<G extends string, C extends string>(config
     if (recipients.length === 0) {
       return refuse(who, action, ref, { email }, 'alert_unavailable', 'Every invite alerts the site’s admins, and none with an email address was found. Nothing changed; ask a site admin.');
     }
-    let itemName: string | undefined;
-    try {
-      itemName = (await config.resourceName?.(ref))?.slice(0, 200);
-    } catch (error) {
-      report(error, 'resources: resourceName');
-    }
+    const itemName = who.item.name;
     // The invite email and the alert say who invited them: from the token's profile, else Cognito.
     let inviterEmail = who.actor.email;
     if (inviterEmail === undefined) {
@@ -886,15 +948,16 @@ export function createResourceActions<G extends string, C extends string>(config
             ...(name !== undefined && { name }),
             role: 'member',
             resource: resourceLabel(ref),
+            item: who.item,
             resourceRole: role,
             status: 'invited',
             expiresAt: plannedExpiry.toISOString(),
           },
           calls: [
-            'AdminCreateUser (no admin role)',
-            ACCESS_CALL,
+            `${INVITE_CALLS.createAccount} (no admin role)`,
+            accessCall(who.item.noun),
             `Invite alert (to the site’s admins, ${recipients.length})`,
-            ...(mode === 'emailed-code' ? ['SES SendEmail'] : []),
+            ...(mode === 'emailed-code' ? [INVITE_CALLS.sendEmail] : []),
           ],
         },
         run: async (steps) => {
@@ -905,14 +968,14 @@ export function createResourceActions<G extends string, C extends string>(config
           try {
             afterAdd = await commitChange(steps, ref, current, { put: [added] }, who.actor.sub);
           } catch (error) {
-            await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
+            await removeInvitedAccount(steps, cognito(), created);
             throw error;
           }
           const undo = async (): Promise<boolean> => {
-            let undone = await steps.rollback(`${ACCESS_CALL} (remove)`, async () => {
+            let undone = await steps.rollback(`${accessCall(who.item.noun)} (remove)`, async () => {
               await commitChange(directSteps(), ref, afterAdd, { delete: [created.sub] }, who.actor.sub);
             });
-            undone = (await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username))) && undone;
+            undone = (await removeInvitedAccount(steps, cognito(), created)) && undone;
             return undone;
           };
           const alert: ResourceInviteAlert = {
@@ -953,6 +1016,7 @@ export function createResourceActions<G extends string, C extends string>(config
               ...(name !== undefined && { name }),
               role: 'member',
               resource: resourceLabel(ref),
+              item: who.item,
               resourceRole: role,
               status: 'invited',
               invitedAt: created.createdAt.toISOString(),
@@ -967,7 +1031,7 @@ export function createResourceActions<G extends string, C extends string>(config
     return finish(
       run,
       ({ expiresAt }) =>
-        `Invite sent to ${email}, with access to this ${who.config.noun} as ${RESOURCE_ROLE_LABEL[role]} and nothing else. The site’s admins were told. The invite expires on ${expiresAt.toISOString().slice(0, 10)} if it isn’t used.`,
+        `Invite sent to ${email}, with access to ${thisItem(who.item)} as ${RESOURCE_ROLE_LABEL[role]} and nothing else. The site’s admins were told. The invite expires on ${expiresAt.toISOString().slice(0, 10)} if it isn’t used.`,
     );
   }
 
@@ -1038,6 +1102,11 @@ export function createResourceActions<G extends string, C extends string>(config
       addedAt: at,
     };
     const meta = { type, id, version: 1, managers: 1, createdAt: at, createdBy: actor.sub, updatedAt: at, updatedBy: actor.sub };
+    const noun = typeConfig.noun;
+    const createCall = `${accessCall(noun)} (access record and first Manager)`;
+    const appCall = `App: create the ${noun}`;
+    const createdAfter = { resource: resourceLabel(ref), resourceRole: 'manager', manager: { sub: manager.sub, ...(manager.email !== undefined && { email: manager.email }) } };
+    let created: ItemWords = { noun };
     const run = await runAudited<T>(
       auditLog,
       {
@@ -1046,23 +1115,25 @@ export function createResourceActions<G extends string, C extends string>(config
           action,
           target: { sub: manager.sub, ...(manager.email !== undefined && { email: manager.email }), recordId: resourceLabel(ref) },
           before: null,
-          after: { resource: resourceLabel(ref), resourceRole: 'manager', manager: { sub: manager.sub, ...(manager.email !== undefined && { email: manager.email }) } },
-          calls: [`${ACCESS_CALL} (access record and first Manager)`, ...(input.run ? ['App: create the item'] : [])],
+          after: { ...createdAfter, item: { noun } },
+          calls: [createCall, ...(input.run ? [appCall] : [])],
           ...contextOf(request),
         },
         run: async (steps) => {
           try {
-            await steps.call(`${ACCESS_CALL} (access record and first Manager)`, () => store.commit(ref, { expectedVersion: null, meta, put: [first] }));
+            await steps.call(createCall, () => store.commit(ref, { expectedVersion: null, meta, put: [first] }));
           } catch (error) {
-            if (isResourceConflict(error)) throw new StaleAccessError();
+            if (isResourceConflict(error)) throw new StaleAccessError(noun);
             throw error;
           }
-          if (!input.run) return { value: undefined as T };
+          if (!input.run) return { value: undefined as T, after: { ...createdAfter, item: (created = await wordsFor(ref)) } };
           try {
-            const value = await steps.call('App: create the item', () => input.run!({ id, manager: { sub: manager.sub, ...(manager.email !== undefined && { email: manager.email }) } }));
-            return { value };
+            const value = await steps.call(appCall, () => input.run!({ id, manager: { sub: manager.sub, ...(manager.email !== undefined && { email: manager.email }) } }));
+            // Its name, now that the app has written it: the result row and the message name it.
+            created = await wordsFor(ref);
+            return { value, after: { ...createdAfter, item: created } };
           } catch (error) {
-            await steps.rollback(`${ACCESS_CALL} (remove)`, () => store.commit(ref, { expectedVersion: 1, meta: null, delete: [manager.sub] }));
+            await steps.rollback(`${accessCall(noun)} (remove)`, () => store.commit(ref, { expectedVersion: 1, meta: null, delete: [manager.sub] }));
             throw error;
           }
         },
@@ -1070,10 +1141,11 @@ export function createResourceActions<G extends string, C extends string>(config
       runOptions,
     );
     const mine = manager.sub === user.sub;
+    const what = created.name ? `the ${noun} “${created.name}”` : `the ${noun}`;
     const result = await finish(run, () =>
       mine
-        ? `Created. You’re its Manager: you can share it from “Who has access”.`
-        : `Created, with ${who_(manager)} as its Manager.`,
+        ? `Created ${what}. You’re its Manager: you can share it from “Who has access”.`
+        : `Created ${what}, with ${who_(manager)} as its Manager.`,
     );
     if (!result.ok) return result;
     return { ok: true, id, value: (run as Extract<AuditedRun<T>, { kind: 'done' }>).value, message: result.message, ...(result.auditId !== undefined && { auditId: result.auditId }) };
@@ -1093,7 +1165,7 @@ export function createResourceActions<G extends string, C extends string>(config
     if (!types.get(ref.type).allActions.includes(need)) throw new Error(`auth-kit: "${need}" isn't an action of resource type "${ref.type}".`);
     const who = await actingOn(ref, need, action);
     if ('ok' in who) return who;
-    const current = await readAccess(ref);
+    const current = await readAccess(ref, who.item);
     if ('ok' in current) return current;
     const subs = current.members.map((m) => m.sub);
     const chunks: string[][] = [];
@@ -1104,16 +1176,16 @@ export function createResourceActions<G extends string, C extends string>(config
       {
         intent: {
           ...auditBase(who, action, ref, {}),
-          before: { resource: resourceLabel(ref), members: current.members.length, managers: countManagers(current.members) },
-          after: { resource: resourceLabel(ref), deleted: true },
-          calls: chunks.map((_, i) => `${ACCESS_CALL} (${i + 1} of ${chunks.length})`),
+          before: { resource: resourceLabel(ref), item: who.item, members: current.members.length, managers: countManagers(current.members) },
+          after: { resource: resourceLabel(ref), item: who.item, deleted: true },
+          calls: chunks.map((_, i) => `${accessCall(who.item.noun)} (${i + 1} of ${chunks.length})`),
         },
         run: async (steps) => {
           let state = current;
           for (let i = 0; i < chunks.length; i++) {
             const last = i === chunks.length - 1;
             const batch = chunks[i]!;
-            const label = `${ACCESS_CALL} (${i + 1} of ${chunks.length})`;
+            const label = `${accessCall(who.item.noun)} (${i + 1} of ${chunks.length})`;
             if (state.meta === null && batch.length > 0 && last) {
               // No access record to lock (an item never created through auth-kit): write one first.
               state = await commitChange(steps, ref, state, {}, who.actor.sub);
@@ -1127,7 +1199,7 @@ export function createResourceActions<G extends string, C extends string>(config
                 }),
               );
             } catch (error) {
-              if (isResourceConflict(error)) throw new StaleAccessError();
+              if (isResourceConflict(error)) throw new StaleAccessError(who.item.noun);
               throw error;
             }
             const members = state.members.filter((m) => !batch.includes(m.sub));
@@ -1138,7 +1210,7 @@ export function createResourceActions<G extends string, C extends string>(config
       },
       runOptions,
     );
-    return finish(run, () => `Nobody has access to this ${who.config.noun} any more (${current.members.length} removed).`);
+    return finish(run, () => `Nobody has access to ${thisItem(who.item)} any more (${current.members.length} removed).`);
   }
 
   // ---- the People page's disable hook ---------------------------------------------------------
@@ -1148,11 +1220,12 @@ export function createResourceActions<G extends string, C extends string>(config
     const listed = await store.listForPerson(person.sub);
     const removed: RemovedMemberships['removed'] = [];
     const leftWithoutManager: RemovedMemberships['leftWithoutManager'] = [];
-    const failures: string[] = [];
+    const failures: { item: ItemWords; why: string }[] = [];
     const steps = directSteps();
     for (const m of listed.memberships) {
       if (!types.has(m.type)) continue;
       const ref = { type: m.type, id: m.id };
+      const item = await wordsFor(ref);
       let done = false;
       // One retry: a concurrent change to the same item is rare, and a fresh read resolves it.
       for (let attempt = 0; attempt < 2 && !done; attempt++) {
@@ -1164,21 +1237,32 @@ export function createResourceActions<G extends string, C extends string>(config
             break;
           }
           const after = await commitChange(steps, ref, current, { delete: [person.sub] }, DISABLE_ACTOR);
-          removed.push({ type: m.type, id: m.id, role: mine.role });
-          if (mine.role === 'manager' && countManagers(after.members) === 0) leftWithoutManager.push(ref);
+          removed.push({ type: m.type, id: m.id, role: mine.role, item });
+          if (mine.role === 'manager' && countManagers(after.members) === 0) leftWithoutManager.push({ ...ref, item });
           done = true;
         } catch (error) {
           if (!(error instanceof StaleAccessError) || attempt === 1) {
-            failures.push(`${resourceLabel(ref)}: ${describeAwsError(error)}`);
+            failures.push({ item, why: describeAwsError(error).replace(/\.$/, '') });
             done = true;
           }
         }
       }
     }
+    const orphaned =
+      leftWithoutManager.length === 0
+        ? ''
+        : ` ${leftWithoutManager.length === 1 ? `${capitalize(anItem(leftWithoutManager[0]!.item))} has` : `${countedNouns(leftWithoutManager, types)} have`} no Manager now: a site admin who manages people can make someone its Manager.`;
     if (failures.length > 0) {
-      throw new Error(`auth-kit: removed ${removed.length} of their item memberships; ${failures.length} couldn’t be removed (${failures.slice(0, 5).join('; ')}).`);
+      const which = failures.slice(0, 3).map((f) => `${anItem(f.item)} (${f.why})`).join('; ');
+      throw new AccessCleanupError(
+        `Their roles on ${countedNouns(removed, types) || 'nothing'} were removed, but ${failures.length === 1 ? 'one' : failures.length} couldn’t be: ${which}${failures.length > 3 ? '; …' : ''}. Disable them again to retry, or remove them under Who has access.${orphaned}`,
+      );
     }
-    return { removed, leftWithoutManager, truncated: listed.truncated };
+    const message =
+      removed.length === 0
+        ? `They had no role on any ${types.names.map((t) => types.get(t).noun).join(' or ')}.`
+        : `Their roles on ${countedNouns(removed, types)} were removed.${orphaned}${listed.truncated ? ' The list stopped partway: disable again to remove the rest.' : ''}`;
+    return { removed, leftWithoutManager, truncated: listed.truncated, message };
   }
 
   // ---- FormData adapters ----------------------------------------------------------------------

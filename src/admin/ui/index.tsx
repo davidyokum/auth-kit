@@ -25,6 +25,7 @@ import {
   SUPERADMIN_GRANT_NOTE,
   TRANSFER_OWNERSHIP_NOTE,
   describeActivity,
+  type ActivityItem,
   lostPasskeyGuidance,
   ownerCountWarning,
   peopleActionDetails,
@@ -802,6 +803,11 @@ export interface ActivityLogProps {
   nextHref?: string;
   /** Display names by sub. Default: the email recorded on the row. */
   names?: Readonly<Record<string, string>>;
+  /**
+   * Items' current nouns and names by `target.recordId` (`project:abc`), from the app's own store.
+   * Default: what the row recorded. Items are never shown by their ID.
+   */
+  items?: Readonly<Record<string, ActivityItem>>;
 }
 
 /** The append-only audit log, newest first. A failed load says why; it never looks like "no activity". */
@@ -817,6 +823,7 @@ export function ActivityLog(props: ActivityLogProps): ReactNode {
     );
   }
   const names = props.names ?? {};
+  const items = props.items ?? {};
   const { entries } = props.page;
   return (
     <div className="ak-activity">
@@ -828,7 +835,7 @@ export function ActivityLog(props: ActivityLogProps): ReactNode {
       ) : (
         <ol className="ak-log">
           {entries.map((entry) => {
-            const line = describeActivity(entry, (sub) => names[sub]);
+            const line = describeActivity(entry, (sub) => names[sub], { items: (recordId) => items[recordId] });
             return (
               <li key={entry.event.id} className={`ak-log-entry ak-log-${entry.status}`}>
                 <time dateTime={entry.event.at}>{entry.event.at.replace('T', ' ').slice(0, 16)} UTC</time>{' '}
