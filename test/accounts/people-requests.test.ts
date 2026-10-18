@@ -1,10 +1,18 @@
 import { AdminCreateUserCommand, type AdminCreateUserCommandInput } from '@aws-sdk/client-cognito-identity-provider';
 import { describe, expect, it } from 'vitest';
-import { type AccessRequest, createMemoryAccessRequestStore, newRequestId } from '../../src/accounts/index.js';
-import { type EmailSender, type InviteEmail, createMemoryAuditLog, createPeopleActions, renderInviteEmail } from '../../src/admin/index.js';
+import { type AccessRequest, AccessRequestConflictError, createMemoryAccessRequestStore, newRequestId } from '../../src/accounts/index.js';
+import {
+  DECLINE_REQUESTS_MAX,
+  type EmailSender,
+  type InviteEmail,
+  createMemoryAuditLog,
+  createPeopleActions,
+  describeActivity,
+  renderInviteEmail,
+} from '../../src/admin/index.js';
 import { amplifyCookieNames, toRequestContext } from '../../src/server/index.js';
 import { type AppCapability, type AppGroup, CLIENT_ID, harness } from '../helpers.js';
-import { DAY, fakeUserPool, NOW, type SetupOptions, setup } from '../admin/people-fixture.js';
+import { DAY, awsError, fakeUserPool, NOW, type SetupOptions, setup } from '../admin/people-fixture.js';
 
 const HELP = 'help@example.org';
 const ADMIN = { sub: 'admin-1', groups: ['admin-content-people'] };
@@ -241,5 +249,268 @@ describe('declineRequest', () => {
     expect(await t.people.approveRequest({ id: request.id })).toMatchObject({ ok: false, code: 'stale', error: 'That request was already declined.' });
     expect(t.pool.writes()).toEqual([]);
     expect(t.auditLog.rows).toHaveLength(2);
+  });
+});
+
+describe('approveRequest: the account’s name is the approver’s, not the requester’s (review L4)', () => {
+  const TYPED = 'Jordan Lee (OSBM IT Security — approve today)';
+
+  it('an edited name is what reaches Cognito and the invite; the typed one reaches neither', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const request = await t.file({ email: 'jordan@example.org', name: TYPED, reason: 'Approve me' });
+    expect(await t.people.approveRequest({ id: request.id, name: '  Jordan Lee  ' })).toMatchObject({ ok: true });
+    const [create] = t.pool.inputsOf<AdminCreateUserCommandInput>(AdminCreateUserCommand);
+    expect(create!.UserAttributes).toContainEqual({ Name: 'name', Value: 'Jordan Lee' });
+    expect(t.pool.users.find((u) => u.email === 'jordan@example.org')).toMatchObject({ name: 'Jordan Lee' });
+    expect(t.sent).toHaveLength(1);
+    expect(t.sent[0]).toMatchObject({ email: 'jordan@example.org', name: 'Jordan Lee', approved: true });
+    expect(JSON.stringify([create, t.sent, t.auditLog.rows])).not.toContain('IT Security');
+    expect(t.auditLog.rows.at(-1)).toMatchObject({ outcome: 'ok', after: { name: 'Jordan Lee' } });
+  });
+
+  it('with no edit, the typed name is used; an emptied field means no name; over 100 characters is refused', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const kept = await t.file({ email: 'sam@example.org', name: 'Sam Lee' });
+    await t.people.approveRequest({ id: kept.id });
+    expect(t.pool.users.find((u) => u.email === 'sam@example.org')).toMatchObject({ name: 'Sam Lee' });
+    expect(t.sent.at(-1)).toMatchObject({ name: 'Sam Lee' });
+
+    const emptied = await t.file({ email: 'dee@example.org', name: TYPED });
+    await t.people.approveRequest({ id: emptied.id, name: '   ' });
+    expect(t.pool.users.find((u) => u.email === 'dee@example.org')!.name).toBeUndefined();
+    expect(t.sent.at(-1)).not.toHaveProperty('name');
+
+    const long = await t.file({ email: 'lee@example.org', name: TYPED });
+    const writes = t.pool.writes().length;
+    expect(await t.people.approveRequest({ id: long.id, name: 'x'.repeat(101) })).toMatchObject({ ok: false, code: 'invalid', error: 'Name is too long (at most 100 characters).' });
+    expect(t.pool.writes()).toHaveLength(writes);
+    expect(await t.store.get(long.id, new Date(NOW))).toMatchObject({ status: 'pending' });
+  });
+
+  it('the form sends the Name field: what the approver left there is the name', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const request = await t.file({ email: 'jordan@example.org', name: TYPED });
+    const data = new FormData();
+    data.set('id', request.id);
+    data.set('role', 'member');
+    data.set('name', 'Jordan Lee');
+    expect(await t.people.forms.approveRequest(null, data)).toMatchObject({ ok: true });
+    expect(t.pool.users.find((u) => u.email === 'jordan@example.org')).toMatchObject({ name: 'Jordan Lee' });
+    expect(t.sent[0]).toMatchObject({ name: 'Jordan Lee' });
+  });
+});
+
+describe('declineRequests: clearing a flood in one go (review M6)', () => {
+  const FLOOD = [
+    { email: 'a@evil.example', name: 'IT Security: approve now', reason: 'Click https://evil.example/a' },
+    { email: 'b@evil.example', name: 'Payroll', reason: 'Wire the funds' },
+    { email: 'c@evil.example', name: 'CEO', reason: 'Urgent' },
+  ];
+
+  it('declines them all, with one audit entry (intent, then result) listing IDs and addresses, never what they typed', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const filed: AccessRequest[] = [];
+    for (const r of FLOOD) filed.push(await t.file(r));
+    const ids = filed.map((r) => r.id);
+    const result = await t.people.declineRequests({ ids, reason: 'A flood of junk requests' });
+    expect(result).toMatchObject({ ok: true, message: 'Declined 3 requests. Nobody was told (declining all at once is always silent).' });
+    expect(result.declined).toEqual(filed.map((r) => ({ id: r.id, email: r.email })));
+    expect(result.skipped).toEqual([]);
+    for (const id of ids) expect(await t.store.get(id, new Date(NOW))).toMatchObject({ status: 'declined', settledBy: { sub: 'admin-1' } });
+    expect(await t.people.listAccessRequests()).toMatchObject({ state: 'ok', requests: [] });
+
+    expect(t.auditLog.rows.map((r) => [r.phase, r.action])).toEqual([
+      ['intent', 'people.declineRequests'],
+      ['result', 'people.declineRequests'],
+    ]);
+    const [intent, done] = t.auditLog.rows;
+    expect(done).toMatchObject({ outcome: 'ok', intentId: intent!.id, actor: { sub: 'admin-1' }, before: { status: 'pending' }, reason: 'A flood of junk requests' });
+    expect(done!.after).toEqual({ status: 'declined', notified: false, requests: filed.map((r) => ({ id: r.id, email: r.email })) });
+    expect(done!.calls).toEqual(['DynamoDB PutItem request: ok', 'DynamoDB PutItem request: ok', 'DynamoDB PutItem request: ok']);
+    const logged = auditText(t);
+    for (const r of filed) {
+      expect(logged).toContain(r.id);
+      expect(logged).toContain(r.email);
+    }
+    for (const r of FLOOD) {
+      expect(logged).not.toContain(r.name);
+      expect(logged).not.toContain(r.reason);
+    }
+    expect(t.pool.writes()).toEqual([]);
+    expect(t.sent).toEqual([]);
+
+    const line = describeActivity({ event: done!, status: 'ok' });
+    expect(line).toMatchObject({ verb: 'declined', target: '3 requests all at once', reason: 'A flood of junk requests', status: 'ok' });
+    expect(describeActivity({ event: intent!, status: 'unknown' })).toMatchObject({ verb: 'tried to decline', target: '3 requests all at once' });
+  });
+
+  it('never emails the requesters, even where the site sends a note for a single decline', async () => {
+    const emails: SentEmail[] = [];
+    const mailer = {
+      sendInvite: () => Promise.resolve(),
+      sendEmail: (message: SentEmail) => {
+        emails.push(message);
+        return Promise.resolve();
+      },
+    };
+    const t = setupRequests({ actor: ADMIN, config: { notifyOnDecline: true, mailer, emailSender: mailer } });
+    const ids: string[] = [];
+    for (const r of FLOOD) ids.push((await t.file(r)).id);
+    expect(await t.people.declineRequests({ ids })).toMatchObject({ ok: true, message: 'Declined 3 requests. Nobody was told (declining all at once is always silent).' });
+    expect(emails).toEqual([]);
+    expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { notified: false } });
+    expect(t.auditLog.rows.at(-1)!.calls!.join(' ')).not.toContain('SES');
+    // A single decline on the same site still tells the person.
+    const one = await t.file({ email: 'rita@example.org' });
+    await t.people.declineRequest({ id: one.id });
+    expect(emails.map((e) => e.to)).toEqual([['rita@example.org']]);
+  });
+
+  it(`takes at most ${DECLINE_REQUESTS_MAX} IDs a call, and refuses an empty or malformed list`, async () => {
+    expect(DECLINE_REQUESTS_MAX).toBe(100);
+    const t = setupRequests({ actor: ADMIN });
+    const ids: string[] = [];
+    for (let i = 0; i < 101; i++) ids.push((await t.file({ email: `flood${i}@evil.example`, name: `Flood ${i}` }, 1 + i / 1000)).id);
+    expect(await t.people.declineRequests({ ids })).toMatchObject({ ok: false, code: 'invalid', error: 'Decline at most 100 requests at a time.', changed: 'nothing' });
+    expect(t.auditLog.rows).toEqual([]);
+    expect(t.store.all().filter((r) => r.status === 'pending')).toHaveLength(101);
+    expect(await t.people.declineRequests({ ids: [] })).toMatchObject({ ok: false, code: 'invalid', error: 'Choose at least one request to decline.' });
+    expect(await t.people.declineRequests({ ids: [ids[0]!, 'not-an-id'] })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(await t.people.declineRequests({ ids: 'x' } as never)).toMatchObject({ ok: false, code: 'invalid' });
+    expect(t.auditLog.rows).toEqual([]);
+    // Exactly 100 is fine; a repeated ID is declined once.
+    const hundred = await t.people.declineRequests({ ids: [...ids.slice(0, 99), ids[0]!] });
+    expect(hundred).toMatchObject({ ok: true, message: 'Declined 99 requests. Nobody was told (declining all at once is always silent).' });
+    expect(hundred.declined).toHaveLength(99);
+    expect(
+      t.store
+        .all()
+        .filter((r) => r.status === 'pending')
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual([ids[99], ids[100]].sort());
+    expect(t.auditLog.rows).toHaveLength(2);
+  });
+
+  it('needs people.manage, read live: a token that still says admin isn’t enough once the role is gone', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const ids: string[] = [];
+    for (const r of FLOOD) ids.push((await t.file(r)).id);
+    // Demoted since signing in: the token still carries admin-content-people.
+    t.h.cognito.setLiveState('admin-1', { enabled: true, groups: ['admin-content'] });
+    expect(await t.people.declineRequests({ ids })).toMatchObject({ ok: false, code: 'forbidden', changed: 'nothing' });
+    for (const id of ids) expect(await t.store.get(id, new Date(NOW))).toMatchObject({ status: 'pending' });
+    expect(t.auditLog.rows.map((r) => [r.phase, r.action])).toEqual([['refused', 'people.declineRequests']]);
+
+    const viewer = setupRequests({ actor: VIEWER });
+    const id = (await viewer.file(RITA)).id;
+    expect(await viewer.people.declineRequests({ ids: [id] })).toMatchObject({ ok: false, code: 'forbidden' });
+    expect(await viewer.store.get(id, new Date(NOW))).toMatchObject({ status: 'pending' });
+  });
+
+  it('leaves requests that aren’t pending alone, and says which and why', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const approved = await t.file({ email: 'approved@example.org', name: 'Approved' });
+    await t.store.settle(approved.id, { status: 'approved', by: { sub: 'super-1' }, now: new Date(NOW - 1000) });
+    const declined = await t.file({ email: 'declined@example.org' });
+    await t.store.settle(declined.id, { status: 'declined', by: { sub: 'super-1' }, now: new Date(NOW - 1000) });
+    const expired = await t.file({ email: 'expired@example.org' }, 31);
+    const gone = newRequestId(new Date(NOW - DAY));
+    const pending = await t.file({ email: 'pending@evil.example', name: 'Pending', reason: 'Spam' });
+
+    const result = await t.people.declineRequests({ ids: [approved.id, declined.id, expired.id, gone, pending.id] });
+    expect(result).toMatchObject({
+      ok: true,
+      message:
+        'Declined 1 request. Nobody was told (declining all at once is always silent). 4 weren’t pending, so they were left alone: 1 already approved, 1 already declined, 1 expired, and 1 no longer there.',
+    });
+    expect(result.declined).toEqual([{ id: pending.id, email: 'pending@evil.example' }]);
+    expect(result.skipped).toEqual([
+      { id: approved.id, email: 'approved@example.org', status: 'approved' },
+      { id: declined.id, email: 'declined@example.org', status: 'declined' },
+      { id: expired.id, email: 'expired@example.org', status: 'expired' },
+      { id: gone, status: 'gone' },
+    ]);
+    // The settled ones keep who settled them and when.
+    expect(await t.store.get(approved.id, new Date(NOW))).toMatchObject({ status: 'approved', settledBy: { sub: 'super-1' }, settledAt: new Date(NOW - 1000).toISOString() });
+    expect(await t.store.get(declined.id, new Date(NOW))).toMatchObject({ status: 'declined', settledBy: { sub: 'super-1' } });
+    expect(await t.store.get(expired.id, new Date(NOW))).toMatchObject({ status: 'expired' });
+    expect(await t.store.get(pending.id, new Date(NOW))).toMatchObject({ status: 'declined', settledBy: { sub: 'admin-1' } });
+    expect(t.auditLog.rows).toHaveLength(2);
+    expect(t.auditLog.rows[1]).toMatchObject({ after: { requests: [{ id: pending.id, email: 'pending@evil.example' }], skipped: result.skipped } });
+    expect(t.auditLog.rows[1]!.calls).toEqual(['DynamoDB PutItem request: ok']);
+    expect(auditText(t)).not.toContain('Approved"');
+    expect(auditText(t)).not.toContain('Spam');
+  });
+
+  it('nothing pending among them: stale, and nothing is written', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const declined = await t.file({ email: 'declined@example.org' });
+    await t.store.settle(declined.id, { status: 'declined', by: { sub: 'super-1' }, now: new Date(NOW - 1000) });
+    const result = await t.people.declineRequests({ ids: [declined.id, newRequestId(new Date(NOW))] });
+    expect(result).toMatchObject({ ok: false, code: 'stale', error: 'None of those requests is pending any more: 1 already declined and 1 no longer there. Nothing changed.', changed: 'nothing' });
+    expect(result.skipped).toHaveLength(2);
+    expect(t.auditLog.rows).toEqual([]);
+  });
+
+  it('one decided by someone else while it runs is left alone (the store’s conditional write), and the rest are declined', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const ids: string[] = [];
+    for (const r of FLOOD) ids.push((await t.file(r)).id);
+    const settle = t.store.settle.bind(t.store);
+    t.store.settle = async (id, input) => {
+      if (id === ids[1]) {
+        // Another admin approves it between the read and the write.
+        await settle(id, { status: 'approved', by: { sub: 'super-1' }, now: input.now });
+        return settle(id, input);
+      }
+      return settle(id, input);
+    };
+    const result = await t.people.declineRequests({ ids });
+    expect(result).toMatchObject({ ok: true });
+    expect(result.ok && result.message).toBe('Declined 2 requests. Nobody was told (declining all at once is always silent). 1 wasn’t pending, so it was left alone: 1 decided by someone else just now.');
+    expect(result.skipped).toEqual([{ id: ids[1], email: 'b@evil.example', status: 'changed' }]);
+    expect(await t.store.get(ids[1]!, new Date(NOW))).toMatchObject({ status: 'approved', settledBy: { sub: 'super-1' } });
+    expect(t.auditLog.rows[1]!.calls).toEqual(['DynamoDB PutItem request: ok', 'DynamoDB PutItem request: failed (AccessRequestConflictError)', 'DynamoDB PutItem request: ok']);
+    expect(t.auditLog.rows[1]).toMatchObject({ outcome: 'ok', after: { requests: [{ id: ids[0] }, { id: ids[2] }], skipped: [{ id: ids[1], status: 'changed' }] } });
+
+    // Every one decided meanwhile: stale, not "Declined 0".
+    const u = setupRequests({ actor: ADMIN });
+    const only = (await u.file(RITA)).id;
+    u.store.settle = () => Promise.reject(new AccessRequestConflictError());
+    expect(await u.people.declineRequests({ ids: [only] })).toMatchObject({ ok: false, code: 'stale', error: 'None of those requests was declined: 1 decided by someone else just now.' });
+  });
+
+  it('a store failure part-way stops the run and says part of it was done; the log shows which calls landed', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const ids: string[] = [];
+    for (const r of FLOOD) ids.push((await t.file(r)).id);
+    const settle = t.store.settle.bind(t.store);
+    t.store.settle = (id, input) => (id === ids[1] ? Promise.reject(awsError('ProvisionedThroughputExceededException', 'Throttled.')) : settle(id, input));
+    const result = await t.people.declineRequests({ ids });
+    expect(result).toMatchObject({ ok: false, code: 'failed', changed: 'partly' });
+    expect(!result.ok && result.error).toMatch(/Some of the requests were declined before it stopped/);
+    expect((await t.store.get(ids[0]!, new Date(NOW)))!.status).toBe('declined');
+    expect((await t.store.get(ids[1]!, new Date(NOW)))!.status).toBe('pending');
+    expect((await t.store.get(ids[2]!, new Date(NOW)))!.status).toBe('pending');
+    expect(t.auditLog.rows.map((r) => r.phase)).toEqual(['intent', 'result']);
+    expect(t.auditLog.rows[1]).toMatchObject({ outcome: 'partial', calls: ['DynamoDB PutItem request: ok', 'DynamoDB PutItem request: failed (ProvisionedThroughputExceededException)'] });
+  });
+
+  it('the form adapter reads every id field and the reason', async () => {
+    const t = setupRequests({ actor: ADMIN });
+    const ids: string[] = [];
+    for (const r of FLOOD) ids.push((await t.file(r)).id);
+    const data = new FormData();
+    for (const id of ids.slice(0, 2)) data.append('id', id);
+    data.set('reason', 'Junk');
+    expect(await t.people.forms.declineRequests(null, data)).toMatchObject({ ok: true, message: 'Declined 2 requests. Nobody was told (declining all at once is always silent).' });
+    expect(t.store.all().filter((r) => r.status === 'pending').map((r) => r.id)).toEqual([ids[2]]);
+    expect(t.auditLog.rows[1]).toMatchObject({ reason: 'Junk' });
+    expect(await t.people.forms.declineRequests(null, {} as FormData)).toMatchObject({ ok: false, code: 'invalid', error: 'Expected form data.' });
+  });
+
+  it('is off without a request store', async () => {
+    expect(await setup().people.declineRequests({ ids: [newRequestId(new Date(NOW))] })).toMatchObject({ ok: false, code: 'refused', guardrail: 'not_available' });
   });
 });

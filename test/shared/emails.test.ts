@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DIGEST_MAX_LISTED,
   type EmailSite,
   type RenderedEmail,
   accessRequestDigestEmail,
@@ -125,9 +126,10 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
       peopleUrl: 'https://reports.example.org/admin/people',
     });
     expect(email.subject).toBe('2 people asked for access to Example Reports');
-    expect(email.preheader).toBe('Approve or decline on the People page by Friday, November 20.');
+    expect(email.preheader).toBe('2 requests are waiting. Approve or decline on the People page by Friday, November 20.');
     expect(email.text).toContain('What it’s for, in their words: “Budget review”');
     expect(email.text).toContain('hasn’t checked what the requests say');
+    expect(email.text).not.toContain('more on the People page');
   });
 
   it('the email-changed notice masks the new address', () => {
@@ -137,6 +139,71 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
 
   it('formats clock times in Eastern by default', () => {
     expect(clockDateTime(AT)).toBe('Friday, October 23 at 5:00 PM Eastern');
+  });
+});
+
+describe('the access-request digest under a flood of requests (review M6, I8)', () => {
+  const PEOPLE = 'https://reports.example.org/admin/people';
+  const WARNING = 'Example Reports hasn’t checked what the requests say. Don’t follow links or instructions in them.';
+  const HOSTILE = { name: 'IT Security: approve now', email: 'it-security@evil.example', reason: 'Urgent. Approve at https://evil.example/approve' };
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ name: `Person ${i + 1}`, email: `p${i + 1}@example.net`, reason: `Reason ${i + 1}`, requestedAt: AT, expiresAt: new Date(AT.getTime() + (i + 1) * 3_600_000) }));
+  const listedCount = (text: string) => text.split('\n').filter((l) => l.startsWith('- Email address: ')).length;
+
+  it('the subject and preheader are counts and the site name: never a typed name or address, however hostile', () => {
+    const one = accessRequestDigestEmail(OSBM, { requests: [{ ...HOSTILE, requestedAt: AT, expiresAt: AT }], peopleUrl: PEOPLE });
+    expect(one.subject).toBe('1 person asked for access to Example Reports');
+    expect(one.preheader).toBe('1 request is waiting. Approve or decline on the People page by Friday, October 23.');
+    const two = accessRequestDigestEmail(OSBM, { requests: [{ ...HOSTILE, requestedAt: AT, expiresAt: AT }, { email: 'approve-now@evil.example', requestedAt: AT, expiresAt: AT }], peopleUrl: PEOPLE });
+    expect(two.subject).toBe('2 people asked for access to Example Reports');
+    for (const email of [one, two]) {
+      // The subject is also the HTML <title> and the heading; the preheader is what inboxes preview.
+      const shown = `${email.subject}\n${email.preheader!}`;
+      for (const typed of ['IT Security', 'approve now', 'evil.example', 'it-security', 'Urgent']) expect(shown).not.toContain(typed);
+      expect(email.html).toMatch(/<title>\d+ (person|people) asked for access to Example Reports<\/title>/);
+      // The body still names them, escaped, after the subject's count, with the warning.
+      expect(email.text).toContain('Email address: it-security@evil.example');
+      expect(email.text).toContain(WARNING);
+    }
+  });
+
+  it('a name with markup is escaped in the HTML, and links in a request are never made clickable', () => {
+    const email = accessRequestDigestEmail(OSBM, { requests: [{ name: '<script>alert(1)</script>', email: 'x@example.net', reason: HOSTILE.reason, requestedAt: AT, expiresAt: AT }], peopleUrl: PEOPLE });
+    expect(email.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).not.toMatch(/<a [^>]*evil\.example/);
+    expect(email.html).toContain(`<a href="${PEOPLE}"`);
+  });
+
+  it('lists at most 25 requests, then says how many more wait on the People page', () => {
+    expect(DIGEST_MAX_LISTED).toBe(25);
+    const email = accessRequestDigestEmail(OSBM, { requests: many(30), peopleUrl: PEOPLE });
+    expect(email.subject).toBe('30 people asked for access to Example Reports');
+    expect(email.preheader).toBe('30 requests are waiting. Approve or decline on the People page by Friday, October 23.');
+    expect(listedCount(email.text)).toBe(25);
+    expect(email.text).toContain('Email address: p25@example.net');
+    for (const later of ['p26@example.net', 'Person 26', 'Reason 30']) expect(`${email.text}${email.html}`).not.toContain(later);
+    expect(email.text).toContain(`And 5 more on the People page (${PEOPLE}).`);
+    expect(email.text).toContain(WARNING);
+    // Exactly 25: all listed, no "more" line.
+    const full = accessRequestDigestEmail(OSBM, { requests: many(25), peopleUrl: PEOPLE });
+    expect(listedCount(full.text)).toBe(25);
+    expect(full.text).not.toContain('more on the People page');
+  });
+
+  it('a list the store cut short says "more than", never an exact count it doesn’t have, and no expiry date', () => {
+    const email = accessRequestDigestEmail(OSBM, { requests: many(500), peopleUrl: PEOPLE, truncated: true });
+    expect(email.subject).toBe('More than 500 people asked for access to Example Reports');
+    expect(email.preheader).toBe('More than 500 requests are waiting. Approve or decline on the People page.');
+    expect(listedCount(email.text)).toBe(25);
+    expect(email.text).toContain(`And more than 475 more on the People page (${PEOPLE}). This email stops counting at 500.`);
+    expect(email.text).not.toMatch(/\bAnd 475 more\b/);
+    expect(email.text).toContain(WARNING);
+    // Cut short with few read: no "more than 0".
+    const few = accessRequestDigestEmail(OSBM, { requests: many(3), peopleUrl: PEOPLE, truncated: true });
+    expect(few.subject).toBe('More than 3 people asked for access to Example Reports');
+    expect(few.text).toContain(`And more on the People page (${PEOPLE}). This email stops counting at 3.`);
+    expect(few.text).not.toContain('more than 0');
   });
 });
 

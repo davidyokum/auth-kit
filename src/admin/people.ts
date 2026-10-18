@@ -66,6 +66,11 @@ import {
   type AccessRequestList,
   type ApproveRequestInput,
   type DeclineRequestInput,
+  type DeclineRequestsInput,
+  type DeclineRequestsResult,
+  type DeclineRequestsSkip,
+  type DeclineRequestsSkipStatus,
+  DECLINE_REQUESTS_MAX,
 } from './types.js';
 
 
@@ -124,7 +129,10 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
    * ADR 0023): the People page's "Pending requests" tab, approve (the ordinary invite), and decline.
    */
   accessRequests?: AccessRequestStore;
-  /** Send "Your request wasn’t approved" when a request is declined (REPORT §5.2k). Default false: declining is silent. */
+  /**
+   * Send "Your request wasn’t approved" when a request is declined (REPORT §5.2k). Default false:
+   * declining is silent. A bulk decline (`declineRequests`) is silent either way.
+   */
   notifyOnDecline?: boolean;
   /** Sends the decline note (`createSesInviteMailer` is one). Default: the mailer, when it can. */
   emailSender?: EmailSender;
@@ -173,10 +181,24 @@ export interface PeopleActions {
   listActivity(query?: AuditLogQuery): Promise<ActivityPage>;
   /** Pending access requests, newest first (the badge counts them). Needs `people.manage`. */
   listAccessRequests(): Promise<AccessRequestList>;
-  /** Approves a request: the ordinary invite (default Member), then the request is marked approved. Needs `people.manage`. */
+  /**
+   * Approves a request: the ordinary invite (default Member), then the request is marked approved.
+   * The account's name is the approver's `name` when given, else the one the requester typed. Needs
+   * `people.manage`.
+   */
   approveRequest(input: ApproveRequestInput): Promise<ActionResult>;
   /** Declines a request: removed from the queue, silently unless `notifyOnDecline`. Needs `people.manage`. */
   declineRequest(input: DeclineRequestInput): Promise<ActionResult>;
+  /**
+   * Declines up to 100 pending requests in one go (a flood of junk requests): `people.manage`, checked
+   * live, as a single decline. Each request is settled with the store's conditional write; one that
+   * isn't pending any more is left alone and reported (`skipped`). One audit entry (intent, then
+   * result) lists the requests' IDs and addresses, never what the requesters typed.
+   *
+   * Always silent, even with `notifyOnDecline`: the addresses in a flood are whoever the sender chose,
+   * and mailing them would make the site send mail for an attacker.
+   */
+  declineRequests(input: DeclineRequestsInput): Promise<DeclineRequestsResult>;
   /** The same actions taking FormData, for `useActionState` and `auth-kit/admin/ui`. */
   readonly forms: PeopleFormActions;
 }
@@ -185,6 +207,8 @@ export interface PeopleFormActions {
   invite: FormAction;
   approveRequest: FormAction;
   declineRequest: FormAction;
+  /** Every `id` field in the form, and `reason`. */
+  declineRequests: FormAction;
   resend: FormAction;
   changeRole: FormAction;
   transferOwnership: FormAction;
@@ -774,17 +798,20 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     const start = await beginRequest(ACCOUNT_AUDIT_ACTIONS.approveRequest, input);
     if ('ok' in start) return start;
     const { who: w, request, raw } = start;
-    let role: string, reason: string | undefined;
+    let role: string, reason: string | undefined, name: string | undefined;
     try {
       role = typeof raw.role === 'string' && raw.role !== '' ? raw.role : MEMBER_ROLE;
       if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
       reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      // The name the approver wrote (the form starts from the typed one): what the requester typed is
+      // the sender's words, and the account's name shows on the People page and in the invite.
+      name = raw.name === undefined ? request.name : text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
     } catch (error) {
       return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
     }
     const result = await inviteAs(
       w,
-      { email: request.email, role, ...(request.name !== undefined && { name: request.name }), ...(reason !== undefined && { reason }) },
+      { email: request.email, role, ...(name !== undefined && { name }), ...(reason !== undefined && { reason }) },
       { auditAction: ACCOUNT_AUDIT_ACTIONS.approveRequest, approved: { requestId: request.id } },
     );
     if (!result.ok && result.code === 'refused' && result.guardrail === 'exists') {
@@ -842,6 +869,120 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     });
     if (run.kind === 'failed' && run.error instanceof AccessRequestConflictError) return fail('stale', run.error.message);
     return finish(run, { ok: () => (tell ? `Declined. ${request.email} was told.` : `Declined. ${request.email} wasn’t told (declining is silent on this site).`) });
+  }
+
+  const SKIP_WORDS: Readonly<Record<DeclineRequestsSkipStatus, string>> = {
+    approved: 'already approved',
+    declined: 'already declined',
+    expired: 'expired',
+    gone: 'no longer there',
+    changed: 'decided by someone else just now',
+  };
+
+  /** "2 already declined and 1 expired" (the serial comma with three or more). */
+  function skippedInWords(skipped: readonly DeclineRequestsSkip[]): string {
+    const parts = (Object.keys(SKIP_WORDS) as DeclineRequestsSkipStatus[])
+      .map((status) => ({ n: skipped.filter((s) => s.status === status).length, words: SKIP_WORDS[status] }))
+      .filter((p) => p.n > 0)
+      .map((p) => `${p.n} ${p.words}`);
+    return parts.length <= 2 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)!}`;
+  }
+
+  const leftAlone = (skipped: readonly DeclineRequestsSkip[]): string =>
+    skipped.length === 0 ? '' : ` ${skipped.length} ${skipped.length === 1 ? 'wasn’t pending, so it was' : 'weren’t pending, so they were'} left alone: ${skippedInWords(skipped)}.`;
+
+  /** 1 to DECLINE_REQUESTS_MAX well-formed request IDs, without repeats. */
+  function requestIdsOf(value: unknown): string[] {
+    if (!Array.isArray(value) || value.length === 0) throw new InputError('Choose at least one request to decline.');
+    if (value.length > DECLINE_REQUESTS_MAX) throw new InputError(`Decline at most ${DECLINE_REQUESTS_MAX} requests at a time.`);
+    if (!value.every(isRequestId)) throw new InputError('That request is invalid.');
+    return [...new Set(value)];
+  }
+
+  async function declineRequests(input: DeclineRequestsInput): Promise<DeclineRequestsResult> {
+    const action = ACCOUNT_AUDIT_ACTIONS.declineRequests;
+    const store = config.accessRequests;
+    if (!store) return fail('refused', REQUESTS_OFF, { guardrail: 'not_available' });
+    let w: Acting<C>;
+    try {
+      w = await acting('people.manage');
+    } catch (error) {
+      await logForbidden(action, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let ids: string[], reason: string | undefined;
+    try {
+      const raw = record(input);
+      ids = requestIdsOf(raw.ids);
+      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+
+    const at = new Date(now());
+    let found: (AccessRequest | null)[];
+    try {
+      found = await Promise.all(ids.map((id) => store.get(id, at)));
+    } catch (error) {
+      return fail('unavailable', `Couldn't read the requests: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    const pending: AccessRequest[] = [];
+    const skipped: DeclineRequestsSkip[] = [];
+    ids.forEach((id, i) => {
+      const r = found[i];
+      if (!r) skipped.push({ id, status: 'gone' });
+      else if (r.status === 'pending') pending.push(r);
+      else skipped.push({ id, email: r.email, status: r.status });
+    });
+    if (pending.length === 0) return { ...fail('stale', `None of those requests is pending any more: ${skippedInWords(skipped)}. Nothing changed.`), skipped };
+
+    // IDs and addresses only: what the requesters typed (names, reasons) stays out of the append-only
+    // log, so it's deleted with the requests 30 days after they're settled.
+    const listed = (rs: readonly AccessRequest[]) => rs.map((r) => ({ id: r.id, email: r.email }));
+    const run = await runAudited(
+      auditLog,
+      {
+        intent: {
+          actor: w.actor,
+          action,
+          before: { status: 'pending' },
+          after: { status: 'declined', notified: false, requests: listed(pending), ...(skipped.length > 0 && { skipped }) },
+          ...(reason !== undefined && { reason }),
+          calls: [`DynamoDB PutItem request (×${pending.length})`],
+          ...contextOf(w.request),
+        },
+        run: async (steps) => {
+          const declined: AccessRequest[] = [];
+          const left = [...skipped];
+          for (const r of pending) {
+            try {
+              await steps.call('DynamoDB PutItem request', () => store.settle(r.id, { status: 'declined', by: w.actor, now: new Date(now()) }));
+              declined.push(r);
+            } catch (error) {
+              // Decided by someone else since it was read: leave it, and say so. Anything else stops the run.
+              if (!(error instanceof AccessRequestConflictError)) throw error;
+              left.push({ id: r.id, email: r.email, status: 'changed' });
+            }
+          }
+          return {
+            value: { declined: listed(declined), skipped: left },
+            after: { status: 'declined', notified: false, requests: listed(declined), ...(left.length > 0 && { skipped: left }) },
+          };
+        },
+      },
+      config.sleep ? { sleep: config.sleep } : {},
+    );
+    const result = await finish(run, {
+      ok: ({ declined, skipped: left }) =>
+        `Declined ${declined.length} ${declined.length === 1 ? 'request' : 'requests'}. Nobody was told (declining all at once is always silent).${leftAlone(left)}`,
+      partial: (error) => `${describeAwsError(error)} Some of the requests were declined before it stopped; the Activity page shows which. Reload to see what’s left.`,
+    });
+    if (run.kind !== 'done') return result;
+    const { declined, skipped: left } = run.value;
+    if (declined.length === 0) {
+      return { ...fail('stale', `None of those requests was declined: ${skippedInWords(left)}.`, run.result ? { auditId: run.result.id } : {}), skipped: left };
+    }
+    return { ...result, declined, skipped: left };
   }
 
   // ---- resend ---------------------------------------------------------------------------------
@@ -1394,12 +1535,17 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     approveRequest: (_prev, data) => {
       const d = formOf(data);
       if (!d) return badForm();
-      return approveRequest({ id: field(d, 'id') ?? '', role: field(d, F.role), reason: field(d, F.reason) });
+      return approveRequest({ id: field(d, 'id') ?? '', role: field(d, F.role), reason: field(d, F.reason), name: field(d, F.name) });
     },
     declineRequest: (_prev, data) => {
       const d = formOf(data);
       if (!d) return badForm();
       return declineRequest({ id: field(d, 'id') ?? '', note: field(d, 'note') });
+    },
+    declineRequests: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return declineRequests({ ids: d.getAll('id').filter((v): v is string => typeof v === 'string'), reason: field(d, F.reason) });
     },
     invite: (_prev, data) => {
       const d = formOf(data);
@@ -1448,6 +1594,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     listAccessRequests,
     approveRequest,
     declineRequest,
+    declineRequests,
     forms: Object.freeze(forms),
   });
 }

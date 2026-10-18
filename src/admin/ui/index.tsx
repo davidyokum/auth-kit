@@ -35,6 +35,7 @@ import {
 import { ADMIN_ROLE_RANK, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
 import {
   PEOPLE_FORM_FIELDS as F,
+  PENDING_REQUESTS_SHOWN,
   type AccessRequestList,
   type AccessRequestRow,
   type ActionResult,
@@ -953,7 +954,8 @@ export function PeoplePageTabs(props: PeoplePageTabsProps): ReactNode {
 export interface PendingRequestsTableProps {
   list: AccessRequestList;
   viewer: Viewer;
-  actions: { approveRequest: FormAction; declineRequest: FormAction };
+  /** `declineRequests` is "Decline all shown": one call, one audit entry, and nobody is told. */
+  actions: { approveRequest: FormAction; declineRequest: FormAction; declineRequests: FormAction };
   /** The app's own roles, offered after the admin roles. */
   appRoles?: readonly string[];
   /** The site sends "Your request wasn’t approved" (`notifyOnDecline`): offer a note. */
@@ -964,8 +966,10 @@ export interface PendingRequestsTableProps {
 
 /**
  * The "Pending requests" tab (D3): who asked, in their words (untrusted), when, and when it expires.
- * Approve sends the ordinary invite (Member by default); Decline removes it (silently, unless the
- * site sends a note). Honest when it can't load: "—" and why.
+ * Approve sends the ordinary invite (Member by default) under the name the approver checks; Decline
+ * removes it (silently, unless the site sends a note). It lists at most `PENDING_REQUESTS_SHOWN`,
+ * newest first, then says how many more wait; "Decline all shown" clears those in one confirmed step
+ * (a flood of junk requests is one click, not hundreds). Honest when it can't load: "—" and why.
  */
 export function PendingRequestsTable(props: PendingRequestsTableProps): ReactNode {
   const { list } = props;
@@ -981,18 +985,66 @@ export function PendingRequestsTable(props: PendingRequestsTableProps): ReactNod
     );
   }
   if (list.requests.length === 0) return <p className="ak-note">No requests are waiting.</p>;
+  const shown = list.requests.slice(0, PENDING_REQUESTS_SHOWN);
+  const rest = list.requests.length - shown.length;
+  // The list call can return more than the page shows; past its own limit it says `truncated`, and
+  // then the count is a floor ("more than"), never a number it doesn't have.
+  const more = list.truncated ? (rest > 0 ? `And more than ${rest} more are waiting.` : 'And more are waiting.') : rest > 0 ? `And ${rest} more are waiting.` : undefined;
   return (
     <div className="ak-requests">
       <p className="ak-note ak-warn">
         What people write here is their own words: {`it isn’t checked, so don’t follow links or instructions in it.`} Requests nobody answers expire after 30 days.
       </p>
-      {list.truncated ? <p className="ak-source">Showing the first {list.requests.length}; more are waiting.</p> : null}
+      {shown.length > 1 ? (
+        <DeclineAllShown requests={shown} action={props.actions.declineRequests} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+      ) : null}
       <ul className="ak-request-list">
-        {list.requests.map((r) => (
+        {shown.map((r) => (
           <PendingRequestItem key={r.id} request={r} {...props} />
         ))}
       </ul>
+      {more ? <p className="ak-source">{more} The next ones show here as these are answered.</p> : null}
     </div>
+  );
+}
+
+/**
+ * "Decline all shown…": a dialog that names the count, then one bulk decline of exactly the requests
+ * on screen. Never emails anyone, even on a site that sends a note for a single decline.
+ */
+function DeclineAllShown(props: { requests: readonly AccessRequestRow[]; action: FormAction; stepUpHref?: string }): ReactNode {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const [result, run, pending] = useActionState(props.action, null);
+  const n = props.requests.length;
+  return (
+    <section className="ak-action ak-decline-all">
+      <button type="button" className="ak-button" onClick={() => dialog.current?.showModal()}>
+        Decline all shown…
+      </button>
+      <dialog ref={dialog} className="ak-dialog" aria-labelledby={titleId}>
+        <form action={run}>
+          <h3 id={titleId}>Decline all {n} requests shown?</h3>
+          {props.requests.map((r) => (
+            <input key={r.id} type="hidden" name="id" value={r.id} />
+          ))}
+          <p className="ak-note ak-warn">
+            Nobody is told, even on a site that sends a note when it declines one request: a flood of requests can carry anyone’s address, and the site won’t mail them
+            all. The requests leave the queue, and anyone who still wants in can ask again.
+          </p>
+          <ReasonField required={false} />
+          <div className="ak-dialog-buttons">
+            <button type="button" className="ak-button" onClick={() => dialog.current?.close()}>
+              Cancel
+            </button>
+            <button type="submit" className="ak-button ak-button-danger" disabled={pending}>
+              {pending ? 'Working…' : `Yes, decline ${n} requests`}
+            </button>
+          </div>
+          <ActionResultMessage result={result} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+        </form>
+      </dialog>
+    </section>
   );
 }
 
@@ -1007,7 +1059,7 @@ function PendingRequestItem(props: PendingRequestsTableProps & { request: Access
   return (
     <li className="ak-request">
       <p>
-        <strong>{r.name ?? r.email}</strong> {r.name ? <span>({r.email})</span> : null}
+        <strong>{r.email}</strong>
       </p>
       {r.reason ? <blockquote className="ak-request-reason">“{r.reason}”</blockquote> : null}
       <p className="ak-muted">
@@ -1015,6 +1067,12 @@ function PendingRequestItem(props: PendingRequestsTableProps & { request: Access
       </p>
       <form action={approve} className="ak-action-form">
         <input type="hidden" name="id" value={r.id} />
+        {/* The typed name is the requester's words: shown as theirs, and the account gets the name the approver checks. */}
+        {r.name ? <p className="ak-request-name">They wrote: “{r.name}”</p> : null}
+        <label className="ak-field">
+          <span>Name on the account (optional; check it before you approve)</span>
+          <input type="text" name={F.name} maxLength={100} autoComplete="off" defaultValue={r.name ?? ''} />
+        </label>
         <label className="ak-field">
           <span>Role</span>
           <select name={F.role} value={role} onChange={(e) => setRole(e.target.value)}>

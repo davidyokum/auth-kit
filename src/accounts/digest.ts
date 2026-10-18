@@ -5,6 +5,10 @@
  * after they're settled, the typed name and reason with them), so the rule holds even while DynamoDB's
  * TTL lags.
  *
+ * The email's subject and preheader are counts and the site name only (anyone can file a request, so
+ * its words are the sender's), and its body lists at most 25 requests, then how many more wait. When
+ * the store's list stops before the end, the email and the result say so (`truncated`).
+ *
  * No Next.js or React: `AccessRequestDigest` bundles this into a Lambda.
  */
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
@@ -40,8 +44,10 @@ export interface AccessRequestDigestOptions {
 }
 
 export interface AccessRequestDigestResult {
-  /** Pending requests listed. */
+  /** Pending requests read. With `truncated`, more were waiting: this is a floor, not the count. */
   pending: number;
+  /** The store's list stopped before the end; the email says "more than" instead of a count. */
+  truncated: boolean;
   /** True when the digest went out (nothing is sent when nothing is pending). */
   sent: boolean;
   recipients: number;
@@ -61,8 +67,8 @@ export function createAccessRequestDigest(options: AccessRequestDigestOptions): 
   return async () => {
     const at = new Date(now());
     const purged = await options.requests.purge(at);
-    const { requests } = await options.requests.list(at);
-    if (requests.length === 0) return { pending: 0, sent: false, recipients: 0, purged };
+    const { requests, truncated } = await options.requests.list(at);
+    if (requests.length === 0) return { pending: 0, truncated, sent: false, recipients: 0, purged };
     const recipients = new Set<string>();
     for (const group of groups) for (const p of await cognito.listGroupMembers(group)) if (p.enabled && p.email) recipients.add(p.email);
     if (recipients.size === 0) throw new Error('auth-kit access-request digest: requests are waiting, but nobody who manages people has an email address to send them to.');
@@ -79,9 +85,10 @@ export function createAccessRequestDigest(options: AccessRequestDigestOptions): 
           expiresAt: new Date(r.expiresAt),
         })),
         peopleUrl: options.peopleUrl,
+        truncated,
       },
     );
     await options.mailer.sendEmail({ to: [...recipients], email, replyTo: [helpEmail] });
-    return { pending: requests.length, sent: true, recipients: recipients.size, purged };
+    return { pending: requests.length, truncated, sent: true, recipients: recipients.size, purged };
   };
 }

@@ -219,6 +219,7 @@ const DONE: Readonly<Record<string, string>> = {
   'accounts.deleteUnverified': 'deleted the never-verified sign-up for',
   'people.approveRequest': 'approved the request from',
   'people.declineRequest': 'declined the request from',
+  'people.declineRequests': 'declined',
   'account.delete': 'deleted their own account',
   'account.requestEmailChange': 'asked to change their own email address',
   'account.changeEmail': 'changed their own email address',
@@ -245,6 +246,7 @@ const TRIED: Readonly<Record<string, string>> = {
   'accounts.deleteUnverified': 'tried to delete the never-verified sign-up for',
   'people.approveRequest': 'tried to approve the request from',
   'people.declineRequest': 'tried to decline the request from',
+  'people.declineRequests': 'tried to decline',
   'account.delete': 'tried to delete their own account',
   'account.requestEmailChange': 'tried to ask to change their own email address',
   'account.changeEmail': 'tried to change their own email address',
@@ -368,6 +370,13 @@ export function describeActivity(
     case 'resources.remove':
       target = [person, what && `on ${what}`].filter(Boolean).join(', ');
       break;
+    case 'people.declineRequests': {
+      // One entry for many requests: the count (the row lists their IDs and addresses).
+      const listed = typeof e.after === 'object' && e.after !== null ? (e.after as { requests?: unknown }).requests : undefined;
+      const n = Array.isArray(listed) ? listed.length : undefined;
+      target = n === undefined ? 'requests all at once' : `${n} ${n === 1 ? 'request' : 'requests'} all at once`;
+      break;
+    }
     case 'account.delete':
     case 'account.requestEmailChange':
     case 'account.changeEmail':

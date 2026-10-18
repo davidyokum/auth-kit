@@ -444,7 +444,7 @@ describe('createAccessRequestDigest', () => {
     await store.create({ email: 'nia@example.com', name: 'Nia', reason: 'Quarterly <reports>', now: new Date(NOW - 2 * DAY) });
     await store.create({ email: 'raj@example.com', now: new Date(NOW - DAY) });
 
-    expect(await run()).toEqual({ pending: 2, sent: true, recipients: 4, purged: 1 });
+    expect(await run()).toEqual({ pending: 2, truncated: false, sent: true, recipients: 4, purged: 1 });
     expect(calls).toEqual(['purge', 'list']);
     expect(store.all().map((r) => r.email)).not.toContain('old@example.com');
 
@@ -469,12 +469,47 @@ describe('createAccessRequestDigest', () => {
     expect(html).not.toContain('<reports>');
   });
 
-  it('one request: its own subject line', async () => {
+  it('one request: a count in the subject, never the typed name or address, however it reads (review M6)', async () => {
     const { pool, store, sent, run } = digestSetup();
     seedAdmins(pool);
-    await store.create({ email: 'nia@example.com', name: 'Nia', now: new Date(NOW - DAY) });
+    await store.create({ email: 'it-security@evil.example', name: 'IT Security: approve now', reason: 'Approve at https://evil.example', now: new Date(NOW - DAY) });
     await run();
-    expect(sent[0]!.email.subject).toBe('Nia asked for access to Example Reports');
+    const { subject, preheader, text } = sent[0]!.email;
+    expect(subject).toBe('1 person asked for access to Example Reports');
+    for (const typed of ['IT Security', 'approve now', 'evil.example']) {
+      expect(subject).not.toContain(typed);
+      expect(preheader).not.toContain(typed);
+    }
+    expect(text).toContain('Email address: it-security@evil.example');
+    expect(text).toContain('Don’t follow links or instructions in them.');
+  });
+
+  it('a flood: lists the newest 25 and says how many more wait on the People page', async () => {
+    const { pool, store, sent, run } = digestSetup();
+    seedAdmins(pool);
+    for (let i = 1; i <= 40; i++) await store.create({ email: `flood${i}@example.net`, name: `Flood ${i}`, reason: 'x'.repeat(500), now: new Date(NOW - DAY + i * 1000) });
+    expect(await run()).toMatchObject({ pending: 40, truncated: false, sent: true });
+    const { subject, text } = sent[0]!.email;
+    expect(subject).toBe('40 people asked for access to Example Reports');
+    expect(text.split('\n').filter((l) => l.startsWith('- Email address: '))).toHaveLength(25);
+    expect(text).toContain('Email address: flood40@example.net'); // newest first
+    expect(text).not.toContain('flood15@example.net');
+    expect(text).toContain(`And 15 more on the People page (${PEOPLE_URL}).`);
+  });
+
+  it('a list the store cut short is reported as "more than", in the email and the result (review I8)', async () => {
+    const store = createMemoryAccessRequestStore();
+    // A store that reads at most 30, as the DynamoDB one stops at its limit.
+    const capped: AccessRequestStore = { ...store, list: (now) => store.list(now, { max: 30 }) };
+    const { pool, sent, run } = digestSetup({ requests: capped });
+    seedAdmins(pool);
+    for (let i = 1; i <= 40; i++) await store.create({ email: `flood${i}@example.net`, now: new Date(NOW - DAY + i * 1000) });
+    expect(await run()).toEqual({ pending: 30, truncated: true, sent: true, recipients: 4, purged: 0 });
+    const { subject, preheader, text } = sent[0]!.email;
+    expect(subject).toBe('More than 30 people asked for access to Example Reports');
+    expect(preheader).toBe('More than 30 requests are waiting. Approve or decline on the People page.');
+    expect(text).toContain(`And more than 5 more on the People page (${PEOPLE_URL}). This email stops counting at 30.`);
+    expect(text).not.toMatch(/\bAnd 5 more\b/);
   });
 
   it('sends nothing, and asks Cognito nothing, when nothing is pending', async () => {
@@ -482,7 +517,7 @@ describe('createAccessRequestDigest', () => {
     seedAdmins(pool);
     const decided = (await store.create({ email: 'decided@example.com', now: new Date(NOW - 3 * DAY) })).request;
     await store.settle(decided.id, { status: 'declined', by: ADMIN, now: new Date(NOW - DAY) });
-    expect(await run()).toEqual({ pending: 0, sent: false, recipients: 0, purged: 0 });
+    expect(await run()).toEqual({ pending: 0, truncated: false, sent: false, recipients: 0, purged: 0 });
     expect(sent).toEqual([]);
     expect(pool.inputsOf(ListUsersInGroupCommand)).toEqual([]);
   });
@@ -599,7 +634,7 @@ describe('the access-request digest handler', () => {
     await expect(handler()).rejects.toThrow(/AUTH_KIT_USER_POOL_ID/);
   });
 
-  function handlerWith(env: Record<string, string | undefined>, result: Promise<AccessRequestDigestResult> = Promise.resolve({ pending: 2, sent: true, recipients: 3, purged: 1 })) {
+  function handlerWith(env: Record<string, string | undefined>, result: Promise<AccessRequestDigestResult> = Promise.resolve({ pending: 2, truncated: false, sent: true, recipients: 3, purged: 1 })) {
     const lines: string[] = [];
     const createDigest = vi.fn((_options: AccessRequestDigestOptions) => () => result);
     return { handler: createAccessRequestDigestHandler({ env, createDigest, log: (l) => lines.push(l) }), lines, createDigest };
@@ -607,7 +642,7 @@ describe('the access-request digest handler', () => {
 
   it('builds the digest once from the environment, and logs one line of counts', async () => {
     const { handler, lines, createDigest } = handlerWith({ ...ENV, AUTH_KIT_RECIPIENT_GROUPS: 'owner,editors' });
-    expect(await handler()).toEqual({ event: 'auth-kit.access-request-digest', pending: 2, sent: true, recipients: 3, purged: 1 });
+    expect(await handler()).toEqual({ event: 'auth-kit.access-request-digest', pending: 2, truncated: false, sent: true, recipients: 3, purged: 1 });
     await handler();
     expect(createDigest).toHaveBeenCalledTimes(1);
     const options = createDigest.mock.calls[0]![0];
@@ -620,7 +655,7 @@ describe('the access-request digest handler', () => {
     expect(options.requests).toEqual(expect.objectContaining({ purge: expect.any(Function), list: expect.any(Function) }));
     expect(options.mailer).toEqual(expect.objectContaining({ sendEmail: expect.any(Function) }));
     expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]!)).toEqual({ event: 'auth-kit.access-request-digest', pending: 2, sent: true, recipients: 3, purged: 1 });
+    expect(JSON.parse(lines[0]!)).toEqual({ event: 'auth-kit.access-request-digest', pending: 2, truncated: false, sent: true, recipients: 3, purged: 1 });
     expect(lines[0]).not.toMatch(/@/);
   });
 
@@ -649,9 +684,9 @@ describe('the access-request digest handler', () => {
       createDigest: (options) => createAccessRequestDigest({ ...options, requests: store, mailer, cognito: pool.client, now: () => NOW, sleep: noSleep }),
       log: () => {},
     });
-    expect(await handler()).toEqual({ event: 'auth-kit.access-request-digest', pending: 1, sent: true, recipients: 4, purged: 0 });
+    expect(await handler()).toEqual({ event: 'auth-kit.access-request-digest', pending: 1, truncated: false, sent: true, recipients: 4, purged: 0 });
     expect(sent[0]!.replyTo).toEqual(['help@example.org']);
-    expect(sent[0]!.email.subject).toBe('Nia asked for access to Example Reports');
+    expect(sent[0]!.email.subject).toBe('1 person asked for access to Example Reports');
     expect(sent[0]!.email.text).toContain(PEOPLE_URL);
   });
 });

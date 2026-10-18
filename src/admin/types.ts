@@ -115,6 +115,12 @@ export interface ApproveRequestInput {
   /** Default `member`: the least access, as the invite form. */
   role?: string;
   reason?: string;
+  /**
+   * The account's name, as the approver wrote it (at most 100 characters, trimmed). It becomes the
+   * Cognito `name` and the invite's name. Leave it out to keep the name the requester typed; an empty
+   * string means no name.
+   */
+  name?: string;
 }
 
 export interface DeclineRequestInput {
@@ -122,6 +128,38 @@ export interface DeclineRequestInput {
   /** Included in the decline note, when the site sends one. */
   note?: string;
 }
+
+/** The most requests one bulk decline takes. */
+export const DECLINE_REQUESTS_MAX = 100;
+
+/** The most requests the "Pending requests" tab lists at once (then "and N more"). */
+export const PENDING_REQUESTS_SHOWN = 50;
+
+export interface DeclineRequestsInput {
+  /** The requests to decline: 1 to `DECLINE_REQUESTS_MAX` IDs. */
+  ids: readonly string[];
+  /** The admin's own words, for the audit log. */
+  reason?: string;
+}
+
+/**
+ * Why a bulk decline left a request alone: already approved or declined, expired, deleted after its
+ * retention (`gone`), or decided by someone else while the decline ran (`changed`).
+ */
+export type DeclineRequestsSkipStatus = 'approved' | 'declined' | 'expired' | 'gone' | 'changed';
+
+export interface DeclineRequestsSkip {
+  id: string;
+  /** Missing when the request is gone. */
+  email?: string;
+  status: DeclineRequestsSkipStatus;
+}
+
+/** A bulk decline's result: which requests it declined, and which it left alone and why. */
+export type DeclineRequestsResult = ActionResult & {
+  declined?: readonly { id: string; email: string }[];
+  skipped?: readonly DeclineRequestsSkip[];
+};
 
 export interface InviteInput {
   email: string;

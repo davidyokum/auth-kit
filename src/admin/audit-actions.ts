@@ -21,6 +21,8 @@ export const ACCOUNT_AUDIT_ACTIONS = {
   deleteUnverified: 'accounts.deleteUnverified',
   approveRequest: 'people.approveRequest',
   declineRequest: 'people.declineRequest',
+  /** Many requests declined in one go: one entry listing their IDs and addresses (never their typed words). */
+  declineRequests: 'people.declineRequests',
   deleteOwnAccount: 'account.delete',
   requestOwnEmailChange: 'account.requestEmailChange',
   changeOwnEmail: 'account.changeEmail',

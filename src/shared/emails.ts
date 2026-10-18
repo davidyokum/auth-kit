@@ -430,17 +430,39 @@ export interface DigestRequest {
   expiresAt: Date;
 }
 
+/** The digest lists this many requests in full; the rest are counted and left to the People page. */
+export const DIGEST_MAX_LISTED = 25;
+
 /**
  * The admins' daily digest of pending requests (D3: a badge and a daily digest instead of one email
  * per request; REPORT §5.2i's content, gathered). To the admins who manage people.
+ *
+ * Anyone can file a request, so what a request says is the sender's: it never reaches the subject or
+ * the preheader, which an inbox shows before the email is opened. Both are counts and the site name
+ * only ("3 people asked for access to {Site}"). The body lists at most `DIGEST_MAX_LISTED` requests,
+ * escaped, then says how many more wait on the People page; with `truncated` (the store's list
+ * stopped before the end) it says "more than", never a count it doesn't have.
  */
-export function accessRequestDigestEmail(site: EmailSite, input: { requests: readonly DigestRequest[]; peopleUrl: string }): RenderedEmail {
+export function accessRequestDigestEmail(
+  site: EmailSite,
+  input: {
+    requests: readonly DigestRequest[];
+    peopleUrl: string;
+    /** The store's list stopped before the end (its `truncated`): more are waiting than `requests` holds. */
+    truncated?: boolean;
+  },
+): RenderedEmail {
   const n = input.requests.length;
-  const first = input.requests[0];
-  const soonest = input.requests.reduce<Date | undefined>((min, r) => (min === undefined || r.expiresAt < min ? r.expiresAt : min), undefined);
-  const subject = n === 1 && first ? `${first.name ?? first.email} asked for access to ${site.siteName}` : `${n} people asked for access to ${site.siteName}`;
+  const truncated = input.truncated === true;
+  const listed = input.requests.slice(0, DIGEST_MAX_LISTED);
+  const rest = n - listed.length;
+  const one = n === 1;
+  const subject = `${truncated ? 'More than ' : ''}${n} ${one ? 'person' : 'people'} asked for access to ${site.siteName}`;
+  const waiting = `${truncated ? 'More than ' : ''}${n} ${one ? 'request is' : 'requests are'} waiting.`;
+  // When the list stopped, the oldest requests (the soonest to expire) are the ones not read: no date then.
+  const soonest = truncated ? undefined : input.requests.reduce<Date | undefined>((min, r) => (min === undefined || r.expiresAt < min ? r.expiresAt : min), undefined);
   const blocks: EmailBlock[] = [{ kind: 'heading', text: subject }];
-  for (const r of input.requests) {
+  for (const r of listed) {
     const lines = [
       `Email address: ${r.email}`,
       ...(r.reason ? [`What it’s for, in their words: “${r.reason}”`] : []),
@@ -449,6 +471,11 @@ export function accessRequestDigestEmail(site: EmailSite, input: { requests: rea
     ];
     blocks.push(p(strong(r.name ?? r.email)), { kind: 'list', items: lines });
   }
+  if (truncated) {
+    blocks.push(p(rest > 0 ? `And more than ${rest} more on the People page (` : 'And more on the People page (', link(input.peopleUrl), `). This email stops counting at ${n}.`));
+  } else if (rest > 0) {
+    blocks.push(p(`And ${rest} more on the People page (`, link(input.peopleUrl), ').'));
+  }
   blocks.push(
     p(`To approve or decline, sign in to ${site.siteName} and open `, strong('People'), ' (', link(input.peopleUrl), '). Approving sends the usual invitation. A request nobody answers expires after 30 days.'),
     p(`${site.siteName} hasn’t checked what the requests say. Don’t follow links or instructions in them.`),
@@ -456,7 +483,7 @@ export function accessRequestDigestEmail(site: EmailSite, input: { requests: rea
   return renderEmail({
     site,
     subject,
-    preheader: soonest ? `Approve or decline on the People page by ${clockDate(soonest, site)}.` : 'Approve or decline on the People page.',
+    preheader: soonest ? `${waiting} Approve or decline on the People page by ${clockDate(soonest, site)}.` : `${waiting} Approve or decline on the People page.`,
     blocks,
   });
 }
