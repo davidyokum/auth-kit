@@ -49,7 +49,7 @@
   .scene .card-wrap { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; }
 
   /* The sign-in card (design report §7.1), a static copy for the demo. */
-  .card { position: relative; width: 440px; max-width: 100%; background: #fff; border-radius: 6px; padding: 36px 36px 28px; box-shadow: 0 1px 2px rgba(9, 41, 64, 0.06), 0 12px 32px -12px rgba(9, 41, 64, 0.18); border-top: 4px solid var(--rule); color: #3c434b; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { position: relative; width: 440px; max-width: 100%; background: #fff; border-radius: 6px; padding: 32px 32px 24px; border: 1px solid var(--border); border-top: 4px solid var(--rule); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08), 0 20px 48px -20px rgba(16, 24, 40, 0.4); color: #3c434b; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .card .owner { margin: 0 0 6px; font-size: 14px; color: #5b6270; }
   .card h2 { margin: 0 0 24px; font-size: 28px; line-height: 1.2; color: #092940; font-weight: 650; }
   .card label { display: block; font-weight: 600; color: #092940; margin-bottom: 6px; }
@@ -80,7 +80,7 @@
 
   function cardHtml(family, siteName) {
     const c = BACKDROP_FAMILIES[family].card;
-    return `<div class="card" data-backdrop-card style="--rule:${c.rule};--button:${c.button};--link:${c.link}">
+    return `<div class="card" data-backdrop-card style="--rule:${c.rule};--button:${c.button};--link:${c.link};--border:${c.border}">
       <p class="owner">${OWNER[family]}</p>
       <h2>Sign in to ${siteName}</h2>
       <label>Email address</label>
@@ -133,7 +133,7 @@
     document.body.innerHTML = `
       <header class="top">
         <h1>Backdrops</h1>
-        <p class="lede">Every generative style in every family, behind the same sign-in card. The art is seeded: the same seed draws the same picture for a style version, always. Click a tile to open it full size.</p>
+        <p class="lede">Every generative style in every family, behind the same sign-in card. The art is seeded: the same seed draws the same picture for a style version, always. Nothing fades the art around the card; the card's border and shadow set it apart. Click a tile to open it full size.</p>
         <div class="controls">
           <label>Seed <input type="text" id="seed" spellcheck="false"></label>
           <button type="button" class="primary" id="shuffle">Shuffle</button>

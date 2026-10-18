@@ -21,10 +21,10 @@ export {
   type BackdropVariationsOptions,
   type LockedBackdrop,
 } from './variations.js';
-export { cardContrast, SCRIM_MAX_RATIO, type CardContrastReport, type ContrastCheck, type ScrimCheck } from './contrast.js';
+export { cardContrast, CARD_EDGE_MINIMUM, type CardContrastReport, type ContrastCheck, type EdgeCheck } from './contrast.js';
 export { BACKDROP_FAMILIES, BACKDROP_FAMILY_IDS, backdropPalette, isBackdropFamily, type BackdropFamilyColors } from './families.js';
 export { BACKDROP_STYLES, backdropStyle, isBackdropStyleId, latestStyleVersion, offeredStyles, type BackdropStyleId } from './styles/registry.js';
 export type { BackdropInteractivity, BackdropStyleModule, StyleVersion } from './styles/define.js';
-export { SCRIM, scrimAlpha, scrimFeather, defaultCardRect } from './scrim.js';
+export { defaultCardRect } from './card.js';
 export { backdropStyles } from './css.js';
 export type { BackdropCardTheme, BackdropFamily, BackdropImage, BackdropPalette, BackdropPointer, BackdropRect } from './types.js';

@@ -3,7 +3,8 @@
  *
  * From the sign-in design report (passwords-flow design/benchmark/REPORT.md §7.1 "The core" and
  * §7.2 "What varies, per family"). The card is the same everywhere: white, heading ink #092940, body
- * #3C434B, focus ring #3892E1. Families change the primary button, the 4px rule, and links.
+ * #3C434B, focus ring #3892E1, a 1px border and a soft shadow (the backdrop is never faded around
+ * it). Families change the primary button, the 4px rule, links, and the border's tint.
  *
  * These are brand constants. Changing one changes every site of that family (style versions pin
  * the algorithm, not the brand; ADR 0020), so treat an edit here as a brand decision.
@@ -23,19 +24,19 @@ export const BACKDROP_FAMILIES: Readonly<Record<BackdropFamily, BackdropFamilyCo
     label: 'NC OSBM',
     // NC navy, NC action blue, and the core focus blue as the lighter brand color.
     palette: Object.freeze({ page: '#f3f4f6', mist: '#e2e7ed', glow: '#a9cbea', primary: '#1e79c8', secondary: '#3892e1', ink: '#092940' }),
-    card: Object.freeze({ ...CORE_CARD, link: '#1668b0', button: '#1e79c8', rule: '#092940' }),
+    card: Object.freeze({ ...CORE_CARD, link: '#1668b0', button: '#1e79c8', rule: '#092940', border: '#4a5f73' }),
   }),
   unc: Object.freeze({
     label: 'UNC-Chapel Hill',
     // UNC navy, Carolina Blue (decorative only on the card), and UNC link blue.
     palette: Object.freeze({ page: '#f3f5f8', mist: '#dde6ef', glow: '#b3d5ee', primary: '#4b9cd3', secondary: '#007fae', ink: '#13294b' }),
-    card: Object.freeze({ ...CORE_CARD, link: '#007fae', button: '#13294b', rule: '#4b9cd3' }),
+    card: Object.freeze({ ...CORE_CARD, link: '#007fae', button: '#13294b', rule: '#4b9cd3', border: '#2c4266' }),
   }),
   personal: Object.freeze({
     label: 'Yokum Lab',
     // Yokum Lab ink and indigo on a warm stone page.
     palette: Object.freeze({ page: '#f5f3ef', mist: '#e7e1d6', glow: '#b6c1e8', primary: '#1c326e', secondary: '#4f63ad', ink: '#1c1917' }),
-    card: Object.freeze({ ...CORE_CARD, link: '#1c326e', button: '#1c1917', rule: '#1c326e' }),
+    card: Object.freeze({ ...CORE_CARD, link: '#1c326e', button: '#1c1917', rule: '#1c326e', border: '#57514c' }),
   }),
 });
 

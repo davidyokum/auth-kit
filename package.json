@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.5-alpha",
+  "version": "0.1.6-alpha",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -88,7 +88,8 @@
     },
     "./backdrops": {
       "types": "./dist/backdrops/index.d.ts",
-      "import": "./dist/backdrops/index.js"
+      "import": "./dist/backdrops/index.js",
+      "default": "./dist/backdrops/index.js"
     },
     "./backdrops/react": {
       "types": "./dist/backdrops/react.d.ts",

@@ -2,6 +2,25 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.6-alpha] - 2026-10-18
+
+Backdrops: a site's identity behind the fixed sign-in card. Pre-release.
+
+### Added
+
+- **`auth-kit/backdrops`** ([ADR 0020](docs/decisions/0020-backdrops.md)): seeded, generative art behind the sign-in card, in each family's palette. Eight styles (`magnetic-dots`, `contours`, `flow-lines`, `watercolor`, `aurora`, `stained-glass`, `constellation`, `ripples`) and `painted`, a slot for a finished image with a blur-up placeholder. Framework-free: `renderBackdrop(canvas | svg, { style, seed, styleVersion, family | palette, interactive, reducedMotion, card })` returns a controller (`pause`, `resume`, `update`, `stats`, `destroy`); `drawBackdropStill` draws one frame anywhere. No dependencies (a seeded generator and simplex noise are in the package).
+- Enforced for every style: reduced motion draws one still frame; the loop stops while the tab is hidden or the canvas is off-screen; at most 30 frames per second and 2 backing pixels per CSS pixel; no allocation on the per-frame path; light palettes and slow motion; the canvas is `aria-hidden` and `pointer-events: none`, with passive window-level listeners, so clicks always reach the card and taps on it never reach a style. Nothing fades or veils the art around the card.
+- `cardContrast(family)`: the card's text, links, button, and focus ring against WCAG 2.2 AA, and its edge (a 1px family-tinted border, `BACKDROP_FAMILIES[family].card.border`, or its surface) at 3:1 against every color the family's backdrops use.
+- Choosing and locking: `backdropVariations({ style?, family, count, salt })` (nine seeds per salt; mixed styles by default), `randomSalt`, `defaultBackdrop(siteName)` (a proposal only), and `backdropLockProblems(stored)` for a site's build to refuse a backdrop that isn't stored as the literal `{ style, seed, styleVersion, locked: true }`.
+- **Frozen style versions.** Each released style version is its own file and never changes, and the kernel it draws with (`kernel/v1`) is frozen too, so a locked backdrop draws the same picture on every later auth-kit; `test/backdrops/frozen.json` pins a hash of each version's drawing. A site moves to a newer version only by choosing it in the picker.
+- **`auth-kit/backdrops/react`**: `<Backdrop style seed styleVersion family>`, the client component that sits behind the card (server-renders as a block in the page color; never breaks the page on a bad option). `backdropStyles`: an optional fade-in.
+- **`auth-kit/backdrops/picker`** (dev only): `<BackdropPicker>`, nine variations behind the site's real card, a style filter, a family preview, a phone or desktop frame, Shuffle, a large view with "Use this one", and side-by-side upgrades when a locked style has a newer version. It carries `BACKDROP_PICKER_MARKER`, and `check-prod-build` now fails a production build that contains it.
+- `SignIn` takes `emailHint`: an example address shown as the email field's placeholder, under the always-visible "Email address" label.
+- `npm run demo:backdrops`: every style in every family (`docs/backdrops/`), served on 127.0.0.1.
+
+### Changed
+
+- `check-prod-build` (and `checkProductionBuild`'s default markers) also looks for the backdrop picker's marker.
 ## [0.1.5-alpha] - 2026-10-18
 
 Site-wide roles: one owner, an explicit admin ladder, and Transfer ownership (David's decision; [ADR 0020](docs/decisions/0020-site-wide-roles.md)). Pre-release. **Breaking:** group names, capabilities, and the owner alerts changed; see Migration.

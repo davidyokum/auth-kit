@@ -13,12 +13,12 @@ import { type Ctx2D, defineVersion } from '../define.js';
 const LEVELS = 5;
 const PACKET = [1, 0.55, 0.28];
 const TAPS = 8;
-const TAP_LIFE = 6;
+const TAP_LIFE = 8;
 const CAPACITY = 1200;
 
 export const ripplesV1 = defineVersion({
   version: 1,
-  fps: 30,
+  fps: 24,
   maxPixelRatio: 2,
   stillTime: 23,
   colors: (p) => ({
@@ -52,14 +52,14 @@ export const ripplesV1 = defineVersion({
       }
       sx[s] = x;
       sy[s] = y;
-      period[s] = place.range(7, 12);
-      speed[s] = place.range(17, 28);
+      period[s] = place.range(11, 17);
+      speed[s] = place.range(9, 14);
       phase[s] = place.range(0, 20);
       strength[s] = place.range(0.6, 1);
       gap[s] = place.range(8, 13);
       accent[s] = s === 0 || place.chance(0.3) ? 1 : 0;
     }
-    const rMax = Math.max(w, h) * 0.46;
+    const rMax = Math.max(w, h) * 0.4;
 
     // Still water: a gentle gradient and a soft light over each source.
     const water = setup.createLayer(w, h);
@@ -139,7 +139,7 @@ export const ripplesV1 = defineVersion({
         for (let i = 0; i < TAPS; i++) {
           const age = t - (tapT[i] as number);
           if (age < 0 || age > TAP_LIFE) continue;
-          const r = 8 + 64 * age;
+          const r = 8 + 40 * age;
           const fade = 1 - age / TAP_LIFE;
           for (let m = 0; m < 3; m++) ring(tapX[i] as number, tapY[i] as number, r - m * 11, fade * fade * 1.1 * (PACKET[m] as number), true);
         }

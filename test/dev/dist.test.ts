@@ -69,9 +69,11 @@ describe.runIf(enabled)('the built package', () => {
     expect(readFileSync(join(DIST, 'dev', 'menu.js'), 'utf8')).toMatch(/^['"]use client['"];/);
   });
 
-  it('next.config.ts can load auth-kit/dev (Next compiles it to CommonJS and requires it)', () => {
+  it('next.config.ts can load auth-kit/dev and auth-kit/backdrops (Next compiles it to CommonJS and requires it)', () => {
     const loaded = createRequire(import.meta.url)('auth-kit/dev') as { withDevKit?: unknown };
     expect(typeof loaded.withDevKit).toBe('function');
+    const backdrops = createRequire(import.meta.url)('auth-kit/backdrops') as { backdropLockProblems?: unknown };
+    expect(typeof backdrops.backdropLockProblems).toBe('function');
   });
 
   it('the auth-kit command starts with a shebang', () => {

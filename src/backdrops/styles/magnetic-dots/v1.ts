@@ -8,7 +8,7 @@
 import { mix, rgba } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import { createRng, hashParts } from '../../kernel/v1/prng.js';
-import { cardDistance, smoothstep, TAU } from '../../kernel/v1/shape.js';
+import { smoothstep, TAU } from '../../kernel/v1/shape.js';
 import { defineVersion } from '../define.js';
 
 const LEVELS = 5;
@@ -24,7 +24,7 @@ export const magneticDotsV1 = defineVersion({
     accent: [0.2, 0.32, 0.45, 0.58, 0.72].map((a) => rgba(mix(p.primary, p.secondary, 0.25), a)),
   }),
   create(setup, c) {
-    const { width: w, height: h, card } = setup;
+    const { width: w, height: h } = setup;
     const rng = createRng(hashParts('magnetic-dots', 1, setup.seed));
     const noise = createNoise(rng.fork('noise'));
     const spacing = rng.range(17, 24);
@@ -36,7 +36,7 @@ export const magneticDotsV1 = defineVersion({
     const waveX = Math.cos(angle);
     const waveY = Math.sin(angle);
     const wavelength = rng.range(260, 420);
-    const waveSpeed = rng.range(0.12, 0.22) * (rng.chance(0.5) ? 1 : -1);
+    const waveSpeed = rng.range(0.04, 0.08) * (rng.chance(0.5) ? 1 : -1);
     const warp = rng.range(1.6, 2.6);
     const warpScale = rng.range(0.0016, 0.0028);
     const accentAngle = angle + rng.range(0.9, 2.2);
@@ -44,7 +44,7 @@ export const magneticDotsV1 = defineVersion({
     const accentY = Math.sin(accentAngle);
     const accentLength = wavelength * rng.range(1.6, 2.4);
     const accentSpeed = waveSpeed * rng.range(0.3, 0.6);
-    const drift = rng.range(0.03, 0.05);
+    const drift = rng.range(0.012, 0.022);
     const reach = Math.max(140, Math.min(220, Math.min(w, h) * 0.22));
     const lean = spacing * 1.15;
 
@@ -52,7 +52,6 @@ export const magneticDotsV1 = defineVersion({
     const by = new Float32Array(n);
     const ox = new Float32Array(n);
     const oy = new Float32Array(n);
-    const weight = new Float32Array(n);
     const radius = new Float32Array(n);
     const bucket = new Uint8Array(n);
     const order = new Uint32Array(n);
@@ -66,7 +65,6 @@ export const magneticDotsV1 = defineVersion({
         const y = (j - 1) * rowStep + rng.range(-0.12, 0.12) * spacing;
         bx[k] = x;
         by[k] = y;
-        weight[k] = 0.35 + 0.65 * smoothstep(0, 1, cardDistance(x, y, card, w, h));
         k++;
       }
     }
@@ -110,7 +108,7 @@ export const magneticDotsV1 = defineVersion({
           const bend = noise.noise3(x * warpScale, y * warpScale, fz) * warp;
           const wave = 0.5 + 0.5 * Math.sin((x * waveX + y * waveY) * k1 + phase1 + bend);
           const u = smoothstep(0.18, 1, wave);
-          const r = (0.4 + 2.5 * u * u) * (weight[i] as number) * (1 + pull * 0.9);
+          const r = (0.4 + 2.5 * u * u) * (1 + pull * 0.9);
           radius[i] = r;
           if (r < 0.45) {
             bucket[i] = LEVELS * 2;

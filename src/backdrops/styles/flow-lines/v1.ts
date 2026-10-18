@@ -8,7 +8,7 @@
 import { mix, rgba } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import { createRng, hashParts } from '../../kernel/v1/prng.js';
-import { cardDistance, TAU } from '../../kernel/v1/shape.js';
+import { TAU } from '../../kernel/v1/shape.js';
 import { defineVersion } from '../define.js';
 
 const GRID = 24;
@@ -27,7 +27,7 @@ export const flowLinesV1 = defineVersion({
     strokes: [rgba(p.ink, 0.11), rgba(p.ink, 0.19), rgba(p.primary, 0.22), rgba(p.primary, 0.36), rgba(mix(p.secondary, p.glow, 0.2), 0.32), rgba(p.glow, 0.45)],
   }),
   create(setup, c) {
-    const { width: w, height: h, card } = setup;
+    const { width: w, height: h } = setup;
     const rng = createRng(hashParts('flow-lines', 1, setup.seed));
     const noise = createNoise(rng.fork('noise'));
     const gcols = Math.ceil(w / GRID) + 2;
@@ -37,7 +37,7 @@ export const flowLinesV1 = defineVersion({
     const scale = rng.range(0.0009, 0.0019);
     const turns = rng.range(0.55, 1.05);
     const base = rng.range(0, TAU);
-    const drift = rng.range(0.025, 0.045);
+    const drift = rng.range(0.01, 0.018);
     const reach = Math.max(150, Math.min(240, Math.min(w, h) * 0.24));
 
     const count = Math.round(Math.max(140, Math.min(720, (w * h) / 2300)));
@@ -54,7 +54,6 @@ export const flowLinesV1 = defineVersion({
       guard++;
       const x = pick.range(-40, w + 40);
       const y = pick.range(-40, h + 40);
-      if (!pick.chance(0.18 + 0.82 * cardDistance(x, y, card, w, h))) continue;
       sx[placed] = x;
       sy[placed] = y;
       steps[placed] = 28 + pick.int(70);

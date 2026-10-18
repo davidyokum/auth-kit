@@ -18,7 +18,7 @@ const LUT_MAX = 4;
 
 export const auroraV1 = defineVersion({
   version: 1,
-  fps: 20,
+  fps: 15,
   maxPixelRatio: 1,
   stillTime: 25,
   colors: (p) => ({
@@ -81,7 +81,7 @@ export const auroraV1 = defineVersion({
       yBase[r] = h * (band + ((1 - band * 2) * (r + shape.range(0.15, 0.85))) / ribbons);
       amp[r] = h * shape.range(0.07, 0.15);
       freq[r] = shape.range(0.45, 1.0) / Math.max(600, w);
-      speed[r] = shape.range(0.025, 0.06);
+      speed[r] = shape.range(0.01, 0.024);
       up[r] = shape.range(110, 230);
       down[r] = shape.range(22, 46);
       strength[r] = shape.range(0.55, 0.85);
@@ -141,17 +141,17 @@ export const auroraV1 = defineVersion({
             center[k] = (yBase[r] as number) + (amp[r] as number) * noise.noise2(x * f + r * 17.3, t * sp) + (tilt[r] as number) * (x - w / 2);
             thick[k] = 0.85 + 0.22 * noise.noise2(x * f * 1.7 + 71.1, t * sp * 1.3 + r);
             // Slow folds along the curtain, never finer than the image's resolution can carry.
-            shimmer[k] = (0.74 + 0.26 * noise.noise2(x * 0.0032 + r * 13.7, t * 0.06)) * (strength[r] as number);
-            const m = 0.5 + 0.5 * noise.noise2(x * 0.0014 + r * 5.1, t * 0.02);
+            shimmer[k] = (0.74 + 0.26 * noise.noise2(x * 0.0032 + r * 13.7, t * 0.025)) * (strength[r] as number);
+            const m = 0.5 + 0.5 * noise.noise2(x * 0.0014 + r * 5.1, t * 0.01);
             cr[k] = (colorA[r * 3] as number) + ((colorB[r * 3] as number) - (colorA[r * 3] as number)) * m;
             cg[k] = (colorA[r * 3 + 1] as number) + ((colorB[r * 3 + 1] as number) - (colorA[r * 3 + 1] as number)) * m;
             cb[k] = (colorA[r * 3 + 2] as number) + ((colorB[r * 3 + 2] as number) - (colorA[r * 3 + 2] as number)) * m;
           }
         }
-        const g0x = (glowX[0] as number) + Math.sin(t * 0.05 + (glowPhase[0] as number)) * w * 0.08;
-        const g0y = (glowY[0] as number) + Math.cos(t * 0.04 + (glowPhase[0] as number)) * h * 0.08;
-        const g1x = (glowX[1] as number) + Math.sin(t * 0.045 + (glowPhase[1] as number)) * w * 0.08;
-        const g1y = (glowY[1] as number) + Math.cos(t * 0.055 + (glowPhase[1] as number)) * h * 0.08;
+        const g0x = (glowX[0] as number) + Math.sin(t * 0.02 + (glowPhase[0] as number)) * w * 0.08;
+        const g0y = (glowY[0] as number) + Math.cos(t * 0.016 + (glowPhase[0] as number)) * h * 0.08;
+        const g1x = (glowX[1] as number) + Math.sin(t * 0.018 + (glowPhase[1] as number)) * w * 0.08;
+        const g1y = (glowY[1] as number) + Math.cos(t * 0.022 + (glowPhase[1] as number)) * h * 0.08;
         const g0r = 1 / (glowR[0] as number);
         const g1r = 1 / (glowR[1] as number);
         const gr = c.glow[0];

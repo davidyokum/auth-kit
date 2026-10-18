@@ -45,7 +45,7 @@ export const contoursV1 = defineVersion({
     const stretch = rng.range(0.7, 1.35);
     const offX = rng.range(-500, 500);
     const offY = rng.range(-500, 500);
-    const drift = rng.range(0.008, 0.016);
+    const drift = rng.range(0.004, 0.008);
     const indexEvery = 5;
     const indexPhase = rng.int(indexEvery);
 

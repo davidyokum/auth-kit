@@ -8,7 +8,7 @@ export type BackdropFamily = 'osbm' | 'unc' | 'personal';
 
 /** The colors a style paints with. Every value is `#rrggbb`. */
 export interface BackdropPalette {
-  /** The page: the backdrop's ground, and what the scrim fades to around the card. */
+  /** The page: the backdrop's ground color. */
   page: string;
   /** A light neutral a step darker than the page (paper shadows, quiet fills). */
   mist: string;
@@ -26,6 +26,8 @@ export interface BackdropPalette {
 export interface BackdropCardTheme {
   /** The card's surface. Solid: the backdrop never shows through it. */
   surface: string;
+  /** The card's crisp 1px border, which sets it apart from any backdrop (with a soft shadow). */
+  border: string;
   /** Headings. */
   heading: string;
   /** Body text. */

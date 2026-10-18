@@ -14,9 +14,6 @@ import {
   drawBackdropStill,
   offeredStyles,
   randomSalt,
-  SCRIM,
-  scrimAlpha,
-  scrimFeather,
 } from '../../src/backdrops/index.js';
 import { describeChoice, lockStatus, sameChoice, upgradeOffer } from '../../src/backdrops/picker-model.js';
 import { RecordingCanvas, recordingCanvasFactory } from './recording-canvas.js';
@@ -90,11 +87,19 @@ describe('backdropLockProblems', () => {
 });
 
 describe('cardContrast', () => {
-  it.each(Object.keys(BACKDROP_FAMILIES) as ('osbm' | 'unc' | 'personal')[])('%s: the card meets WCAG AA and the backdrop is muted under it', (family) => {
+  it.each(Object.keys(BACKDROP_FAMILIES) as ('osbm' | 'unc' | 'personal')[])('%s: the card meets WCAG AA, and its edge shows on every backdrop color', (family) => {
     const report = cardContrast(family);
     expect(report.ok, JSON.stringify(report, null, 2)).toBe(true);
     expect(report.checks.map((c) => c.id)).toEqual(['heading', 'body', 'link', 'button', 'focus']);
-    expect(report.scrim.ratio).toBeLessThanOrEqual(1.2);
+    expect(report.edge.map((e) => e.color)).toEqual(['page', 'mist', 'glow', 'primary', 'secondary', 'ink']);
+    for (const e of report.edge) expect(Math.max(e.border, e.surface)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('fails a card whose border vanishes on a light backdrop color', () => {
+    const colors = BACKDROP_FAMILIES.osbm;
+    const report = cardContrast({ palette: colors.palette, card: { ...colors.card, border: '#d0d7de' } });
+    expect(report.ok).toBe(false);
+    expect(report.edge.find((e) => e.color === 'page')?.pass).toBe(false);
   });
 
   it('fails a family whose button text is unreadable', () => {
@@ -105,40 +110,25 @@ describe('cardContrast', () => {
   });
 });
 
-describe('the scrim', () => {
-  const card = { x: 400, y: 150, width: 440, height: 520 };
-  it('covers the card and its margin at SCRIM.alpha, and fades to nothing', () => {
-    const feather = scrimFeather(1240, 820);
-    for (const [x, y] of [
-      [400, 150],
-      [620, 410],
-      [840, 670],
-      [390, 140],
-    ] as const) {
-      expect(scrimAlpha(x, y, card, feather)).toBe(SCRIM.alpha);
-    }
-    expect(scrimAlpha(0, 0, card, feather)).toBe(0);
-    const near = scrimAlpha(400 - SCRIM.margin - 10, 400, card, feather);
-    const far = scrimAlpha(400 - SCRIM.margin - 60, 400, card, feather);
-    expect(near).toBeGreaterThan(far);
-    expect(far).toBeGreaterThan(0);
-  });
-
-  it('has a sensible default card: centered, 440px, narrower on phones', () => {
+describe('the card’s place', () => {
+  it('defaults to centered, 440px, narrower on phones', () => {
     expect(defaultCardRect(1440, 900)).toEqual({ x: 500, y: 170, width: 440, height: 560 });
     expect(defaultCardRect(390, 844).width).toBe(358);
   });
 });
 
 describe('drawBackdropStill', () => {
-  it('draws a still frame with the scrim into any 2D context', () => {
-    const canvas = new RecordingCanvas(640, 400);
-    const ctx = canvas.getContext('2d');
-    drawBackdropStill(ctx as unknown as CanvasRenderingContext2D, { style: 'aurora', seed: 'still', family: 'unc', width: 320, height: 200, pixelRatio: 2, createCanvas: recordingCanvasFactory() });
-    expect(ctx.counts.images).toBeGreaterThanOrEqual(2);
-    const again = new RecordingCanvas(640, 400);
-    drawBackdropStill(again.getContext('2d') as unknown as CanvasRenderingContext2D, { style: 'aurora', seed: 'still', family: 'unc', width: 320, height: 200, pixelRatio: 2, createCanvas: recordingCanvasFactory(), scrim: false });
-    expect(again.getContext('2d').counts.images).toBe(ctx.counts.images - 1);
+  it('draws a still frame into any 2D context, the same every time, with nothing over the art', () => {
+    const draw = () => {
+      const canvas = new RecordingCanvas(640, 400);
+      const ctx = canvas.getContext('2d');
+      drawBackdropStill(ctx as unknown as CanvasRenderingContext2D, { style: 'aurora', seed: 'still', family: 'unc', width: 320, height: 200, pixelRatio: 2, createCanvas: recordingCanvasFactory() });
+      return ctx;
+    };
+    const ctx = draw();
+    // Aurora's frame is its field and its grain: two image copies, and no veil over the card.
+    expect(ctx.counts.images).toBe(2);
+    expect(draw().counts).toEqual(ctx.counts);
   });
 
   it('refuses bad seeds, families, and palettes', () => {
@@ -152,9 +142,9 @@ describe('drawBackdropStill', () => {
 
 describe('families', () => {
   it('pins the brand colors from the design report (a change here is a brand decision)', () => {
-    expect(BACKDROP_FAMILIES.osbm.card).toMatchObject({ heading: '#092940', body: '#3c434b', link: '#1668b0', button: '#1e79c8', focus: '#3892e1', rule: '#092940' });
-    expect(BACKDROP_FAMILIES.unc.card).toMatchObject({ link: '#007fae', button: '#13294b', rule: '#4b9cd3' });
-    expect(BACKDROP_FAMILIES.personal.card).toMatchObject({ link: '#1c326e', button: '#1c1917', rule: '#1c326e' });
+    expect(BACKDROP_FAMILIES.osbm.card).toMatchObject({ heading: '#092940', body: '#3c434b', link: '#1668b0', button: '#1e79c8', focus: '#3892e1', rule: '#092940', border: '#4a5f73' });
+    expect(BACKDROP_FAMILIES.unc.card).toMatchObject({ link: '#007fae', button: '#13294b', rule: '#4b9cd3', border: '#2c4266' });
+    expect(BACKDROP_FAMILIES.personal.card).toMatchObject({ link: '#1c326e', button: '#1c1917', rule: '#1c326e', border: '#57514c' });
     expect(backdropPalette('osbm')).toMatchObject({ page: '#f3f4f6', primary: '#1e79c8', ink: '#092940' });
     expect(backdropPalette('unc')).toMatchObject({ primary: '#4b9cd3', secondary: '#007fae', ink: '#13294b' });
     expect(backdropPalette('personal')).toMatchObject({ primary: '#1c326e', ink: '#1c1917' });

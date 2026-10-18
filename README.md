@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.5-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.6-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -21,7 +21,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
-| `auth-kit/backdrops` | Seeded, generative art behind the sign-in card (eight styles and a painted-image slot), in each family's palette, with the scrim and contrast check that keep the card solid, variations, defaults, and the lock check ([ADR 0020](docs/decisions/0020-backdrops.md)). Framework-free | **Implemented** |
+| `auth-kit/backdrops` | Seeded, generative art behind the sign-in card (eight styles and a painted-image slot), in each family's palette, with the contrast check for the card in front of it, variations, defaults, and the lock check ([ADR 0020](docs/decisions/0020-backdrops.md)). Framework-free | **Implemented** |
 | `auth-kit/backdrops/react` | `<Backdrop style seed family>`: the client component that sits behind the card | **Implemented** |
 | `auth-kit/backdrops/picker` | The backdrop picker page (nine variations behind the site's real card; "Use this one"). **Dev only; never in a build** | **Implemented** |
 
@@ -30,10 +30,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.5-alpha/auth-kit-0.1.5-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.6-alpha/auth-kit-0.1.6-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.5-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.6-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -512,28 +512,37 @@ import { Backdrop } from 'auth-kit/backdrops/react';
 
 | Style | What it draws | Pointer | Frames/s |
 |---|---|---|---|
-| `magnetic-dots` | A halftone dot field in long, flowing bands; dots lean toward the pointer | leans | 30 |
+| `magnetic-dots` | A halftone dot field in long, slowly flowing bands; dots lean toward the pointer | leans | 30 |
 | `contours` | A topographic map with softly tinted terraces, drifting very slowly | none | 6 |
-| `flow-lines` | Long fine curves following a turning current; they bend around the pointer | bends | 20 |
-| `watercolor` | Translucent washes on grained paper, painted in code; a very slow bleed | none | 6 |
-| `aurora` | Soft silk curtains of light in the brand tints | none | 20 |
-| `stained-glass` | Soft Voronoi glass in light leading; the nearest pane glows | glows | 20 |
-| `constellation` | Drifting points and faint links; links reach for the pointer | links | 30 |
-| `ripples` | Fine rings spreading on still water; a tap starts a ripple | tap | 30 |
+| `flow-lines` | Long fine curves following a slowly turning current; they bend around the pointer | bends | 20 |
+| `watercolor` | Translucent washes on grained paper, painted in code; a three-minute bleed | none | 6 |
+| `aurora` | Soft silk curtains of light in the brand tints, drifting slowly | none | 15 |
+| `stained-glass` | Soft Voronoi glass in light leading; the nearest pane glows | glows | 15 |
+| `constellation` | Slowly drifting points and faint links; links reach for the pointer | links | 24 |
+| `ripples` | Fine rings spreading slowly on still water; a tap starts a ripple | tap | 24 |
 | `painted` | A finished image (`image: { src, placeholder, focus }`) with a blur-up placeholder | none | static |
 
 - **Framework-free core.** `renderBackdrop(canvasOrSvg, { style, seed, styleVersion, family | palette, interactive, reducedMotion, card })` returns a controller (`pause`, `resume`, `update`, `stats`, `destroy`). An SVG target gets a still frame as an image. `drawBackdropStill(ctx, …)` draws one frame anywhere (previews, server-side images, tests).
-- **Enforced, for every style:** reduced motion draws a single still frame; the loop stops while the tab is hidden or the canvas is off-screen; at most 30 frames per second and 2 backing pixels per CSS pixel (soft styles less); no allocation on the per-frame path (tested); the canvas is `aria-hidden` and `pointer-events: none`, with passive window-level listeners, so clicks always reach the card; taps on the card or a control never reach a style.
-- **The card stays solid.** The scrim covers the card and a margin with the page color at 94% (`SCRIM`, `scrimAlpha`), following the element marked `data-backdrop-card`. `cardContrast(family)` checks the card's text, link, button, and focus colors against WCAG 2.2 AA and that what's left of the art under the card is within 1.2:1 of the page. Keep all text inside the card.
+- **Enforced, for every style:** light palettes and slow motion; reduced motion draws a single still frame; the loop stops while the tab is hidden or the canvas is off-screen; at most 30 frames per second and 2 backing pixels per CSS pixel (soft styles less); no allocation on the per-frame path (tested); the canvas is `aria-hidden` and `pointer-events: none`, with passive window-level listeners, so clicks always reach the card; taps on the card or a control never reach a style.
+- **The backdrop stays fully present; the card carries its own contrast.** Nothing fades or veils the art around the card. Give the card an opaque surface, a 1px border in its family's `BACKDROP_FAMILIES[family].card.border`, and a soft shadow. `cardContrast(family)` checks the card's text, link, button, and focus colors against WCAG 2.2 AA, and that its edge reaches 3:1 against every color the family's backdrops paint with. Keep all text inside the card; mark it `data-backdrop-card` (styles keep focal points visible around it, and taps on it never reach a style).
 - **Choosing.** `backdropVariations({ style?, family, count: 9, salt })` gives nine seeds (the same for a salt; "Shuffle" is `randomSalt()`; no style mixes all of them). `defaultBackdrop(siteName)` proposes one from the site's name. `<BackdropPicker>` (`auth-kit/backdrops/picker`, dev only) is the page site-auth-kit-template opens with `npm run backdrop:pick`.
 - **Locking.** A site stores the literal `{ style, seed, styleVersion, locked: true }`, never a value derived at build time, so renaming the site never changes its backdrop. `backdropLockProblems(stored)` says what's missing; the template's production builds fail on any of it. Every released style version is frozen (its own file; `test/backdrops/frozen.json` pins what it draws), so a locked backdrop looks the same on every later auth-kit; a site moves to a newer version only by choosing it.
 - **Adding a style:** a folder `src/backdrops/styles/<id>/` with `index.ts` (`defineStyle`: ID, label, interactivity, versions) and `v1.ts` (`defineVersion`: palette mapping and renderer, drawing only through `kernel/v1`), one line in `styles/registry.ts`, a budget line in `test/backdrops/styles.test.ts`, then `AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts`. Retire a style with `retired: true`; never delete one.
 - **Styling:** `<Backdrop>` positions itself; `backdropStyles` (zero-specificity CSS) adds a fade-in after the first frame. Under a strict CSP, the component's inline `style` attributes need `style-src-attr 'unsafe-inline'` (as `auth-kit/ribbon` does); `painted` images need `img-src`.
 - **Demo:** `npm run demo:backdrops` builds and serves `docs/backdrops/` (every style in every family) on `http://127.0.0.1:4173`.
 
-**Frame cost**, headless Chromium, 1440×900 at 1×, software rendering (no GPU, so a ceiling; a laptop's GPU canvas is cheaper):
+**Frame cost**: main-thread time to draw one frame at 1440×900 (`controller.stats()`), headless Chromium on an Apple-silicon Mac, over 5 seconds with the pointer present; the percentage is of one CPU core. A 2× display draws soft styles at their own cap (aurora 1×, watercolor 1.25×). Nothing runs while the tab is hidden, the canvas is off-screen, or reduced motion is on.
 
-BENCH_TABLE
+| Style | Frames/s | Frame, 1× (ms, mean) | Main thread per second, 1× | Frame, 2× display (ms, mean) | Main thread per second, 2× |
+|---|---|---|---|---|---|
+| `magnetic-dots` | 30 | 1.02 | 30.7 ms (3.1%) | 0.64 (at 2×) | 19.2 ms (1.9%) |
+| `contours` | 6 | 4.54 | 27.2 ms (2.7%) | 3.61 (at 2×) | 21.7 ms (2.2%) |
+| `flow-lines` | 20 | 1.74 | 34.8 ms (3.5%) | 1.12 (at 2×) | 22.4 ms (2.2%) |
+| `watercolor` | 6 | 1.33 | 8 ms (0.8%) | 2.07 (at 1.25×) | 12.4 ms (1.2%) |
+| `aurora` | 15 | 0.34 | 5.1 ms (0.5%) | 0.34 (at 1×) | 5.1 ms (0.5%) |
+| `stained-glass` | 15 | 0.11 | 1.6 ms (0.2%) | 0.23 (at 2×) | 3.4 ms (0.3%) |
+| `constellation` | 24 | 0.1 | 2.5 ms (0.2%) | 0.07 (at 2×) | 1.6 ms (0.2%) |
+| `ripples` | 24 | 0.03 | 0.8 ms (0.1%) | 0.04 (at 2×) | 0.9 ms (0.1%) |
 
 `auth-kit/client`'s `SignIn` also takes `emailHint`: an example address shown as the email field's placeholder, under the always-visible "Email address" label.
 

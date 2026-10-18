@@ -2,14 +2,14 @@
  * stained-glass v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
  *
  * Soft Voronoi glass: relaxed cells (two rounds of Lloyd's algorithm) inset from light leading, with
- * rounded corners, a top-left sheen and a thin bevel. Cell colors follow a slow noise field, paler
- * near the card and richer toward the edges. The cell under the pointer lights up; a wide, faint
+ * rounded corners, a top-left sheen and a thin bevel. Cell colors follow a slow noise field across
+ * the whole page. The cell under the pointer lights up; a wide, faint
  * band of light crosses the glass every minute or so.
  */
 import { mix, parseHex, rgba, toHex } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import { createRng, hashParts } from '../../kernel/v1/prng.js';
-import { cardDistance, clamp } from '../../kernel/v1/shape.js';
+import { clamp } from '../../kernel/v1/shape.js';
 import { type Ctx2D, defineVersion } from '../define.js';
 
 type Pt = [number, number];
@@ -116,22 +116,22 @@ function inset(poly: Pt[], d: number): Pt[] | null {
 
 export const stainedGlassV1 = defineVersion({
   version: 1,
-  fps: 20,
+  fps: 15,
   maxPixelRatio: 2,
   stillTime: 15,
   colors: (p) => ({
     lead: toHex(mix(p.page, '#ffffff', 0.7)),
-    ramp: [toHex(mix(p.mist, p.page, 0.4)), toHex(mix(p.glow, p.page, 0.45)), toHex(mix(p.secondary, p.page, 0.62)), toHex(mix(p.primary, p.page, 0.55)), toHex(mix(mix(p.primary, p.ink, 0.45), p.page, 0.6))],
+    ramp: [toHex(mix(p.mist, p.page, 0.4)), toHex(mix(p.glow, p.page, 0.45)), toHex(mix(p.secondary, p.page, 0.62)), toHex(mix(p.primary, p.page, 0.55)), toHex(mix(mix(p.primary, p.ink, 0.35), p.page, 0.68))],
     page: p.page,
     sheen: rgba('#ffffff', 0.38),
     shade: rgba(p.ink, 0.04),
     bevel: rgba('#ffffff', 0.6),
     lit: toHex(mix(p.glow, '#ffffff', 0.35)),
     rim: rgba(p.primary, 0.5),
-    jewel: toHex(mix(p.primary, p.page, 0.3)),
+    jewel: toHex(mix(p.primary, p.page, 0.42)),
   }),
   create(setup, c) {
-    const { width: w, height: h, card } = setup;
+    const { width: w, height: h } = setup;
     const rng = createRng(hashParts('stained-glass', 1, setup.seed));
     const noise = createNoise(rng.fork('noise'));
     const size = rng.range(115, 175) * clamp(Math.min(w, h) / 900, 0.75, 1.15);
@@ -197,11 +197,11 @@ export const stainedGlassV1 = defineVersion({
       const sx = xs[i] as number;
       const sy = ys[i] as number;
       const field = 0.5 + 0.5 * noise.fbm2(sx * tint + offX, sy * tint + offY, 2);
-      const t = clamp(field * 0.7 + cardDistance(sx, sy, card, w, h) * 0.45 - 0.15, 0, 0.999) * (ramp.length - 1);
+      const t = clamp(field * 1.05 - 0.05, 0, 0.999) * (ramp.length - 1);
       const lo = Math.floor(t);
       let color = mix(ramp[lo] as never, ramp[lo + 1] as never, t - lo);
-      // Now and then a jewel: a richer pane among the pale ones, away from the card.
-      if (jewels.chance(0.07 * cardDistance(sx, sy, card, w, h))) color = parseHex(c.jewel);
+      // Now and then a jewel: a richer pane among the pale ones.
+      if (jewels.chance(0.05)) color = parseHex(c.jewel);
       shapes.push({ pts, color: toHex(color), box: [minX, minY, maxX, maxY] });
       siteX.push(sx);
       siteY.push(sy);
@@ -248,7 +248,7 @@ export const stainedGlassV1 = defineVersion({
     band.ctx.fillStyle = bandGradient;
     band.ctx.fillRect(0, 0, 256, 4);
     const sweepAngle = rng.range(0.35, 0.75) * (rng.chance(0.5) ? 1 : -1);
-    const sweepPeriod = rng.range(55, 85);
+    const sweepPeriod = rng.range(110, 160);
     const sweepWidth = Math.max(w, h) * 0.35;
     const diagonal = Math.hypot(w, h);
 

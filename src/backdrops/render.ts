@@ -11,13 +11,14 @@
  * - **Never in the way**: pointer listeners are window-level and passive, so the canvas keeps
  *   `pointer-events: none` and a click on the card is the card's alone. Taps on controls or on the
  *   card never reach a style.
- * - **The card stays solid**: the scrim (scrim.ts) is drawn over every frame.
+ * - **The backdrop stays fully present**: nothing fades or veils it around the card; the card
+ *   carries its own contrast (a solid surface, a crisp border, a soft shadow; `cardContrast`).
  * - **Decorative**: the canvas is the caller's; `<Backdrop>` marks it `aria-hidden`.
  */
 import { buildSetup, type BackdropArtOptions, layerFactory, NO_POINTER, type ResolvedArt, resolveArt } from './frame.js';
 import { type BackdropHost, browserHost, type PointerLike } from './host.js';
-import { defaultCardRect, drawScrim, paintScrim, SCRIM } from './scrim.js';
-import type { Ctx2D, Layer, StyleInstance } from './styles/define.js';
+import { defaultCardRect } from './card.js';
+import type { Ctx2D, StyleInstance } from './styles/define.js';
 import type { BackdropRect } from './types.js';
 
 export interface BackdropOptions extends BackdropArtOptions {
@@ -25,7 +26,7 @@ export interface BackdropOptions extends BackdropArtOptions {
   interactive?: boolean;
   /** `'auto'` (default) follows the OS setting; `true` always draws a still frame. */
   reducedMotion?: boolean | 'auto';
-  /** Where the card sits: an element (tracked as it moves and resizes), a rectangle in CSS pixels, or the default (centered, 440px wide). */
+  /** Where the card sits: an element (tracked as it moves and resizes), a rectangle in CSS pixels, or the default (centered, 440px wide). Styles keep their focal points visible around it; taps on it never reach a style. */
   card?: BackdropRect | Element | null;
   /** A lower frame-rate cap than the style's (never higher than 30). */
   maxFps?: number;
@@ -43,7 +44,7 @@ export interface BackdropStats {
   style: string;
   styleVersion: number;
   frames: number;
-  /** Moving average of the time to draw one frame (art + scrim), in milliseconds. */
+  /** Moving average of the time to draw one frame, in milliseconds. */
   averageFrameMs: number;
   maxFrameMs: number;
   lastFrameMs: number;
@@ -102,7 +103,6 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let height = 0;
   let ratio = 1;
   let instance: StyleInstance | null = null;
-  let scrimLayer: Layer | null = null;
   let card: BackdropRect = { x: 0, y: 0, width: 0, height: 0 };
 
   let destroyed = false;
@@ -172,7 +172,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     else draw(0);
   }
 
-  /** (Re)creates the style instance, the canvas size, and the scrim. False until the target has a size. */
+  /** (Re)creates the style instance and sizes the canvas. False until the target has a size. */
   function build(): boolean {
     const size = measure();
     if (!(size.w >= 1 && size.h >= 1)) return false;
@@ -198,8 +198,6 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
         invalidate,
       }),
     );
-    scrimLayer = createLayer(width, height, SCRIM.layerScale);
-    paintScrim(scrimLayer, card, art.palette.page);
     surface = canvas ?? host.createCanvas(bw, bh);
     if (surface.width !== bw) surface.width = bw;
     if (surface.height !== bh) surface.height = bh;
@@ -209,12 +207,11 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   }
 
   function draw(dt: number): void {
-    if (!instance || !ctx || !scrimLayer || destroyed) return;
+    if (!instance || !ctx || destroyed) return;
     const start = host.now();
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     const motion = !reduced && !svg;
     instance.draw(ctx, { t: motion ? animTime : art.version.stillTime, dt, pointer: motion ? pointer : NO_POINTER });
-    drawScrim(ctx, scrimLayer);
     const end = host.now();
     const cost = end - start;
     stats.frames++;
@@ -289,7 +286,8 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     }
     const dt = lastTick === null ? 1 / fpsCap() : Math.min(0.1, (now - lastTick) / 1000);
     lastTick = now;
-    lastDraw = now;
+    // Keep the cadence on average (24 a second on a 60 Hz display alternates 2 and 3 refreshes).
+    lastDraw = lastDraw === null || now - lastDraw > interval * 2 ? now : lastDraw + interval;
     animTime += dt;
     updatePointer(dt, now);
     draw(dt);
@@ -357,13 +355,10 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     }
   }
 
+  /** Keeps the card's rectangle current (taps on it never reach a style). */
   function onCardMove(): void {
-    if (destroyed || !scrimLayer) return;
-    const next = cardRect();
-    if (Math.abs(next.x - card.x) + Math.abs(next.y - card.y) + Math.abs(next.width - card.width) + Math.abs(next.height - card.height) < 1) return;
-    card = next;
-    paintScrim(scrimLayer, card, art.palette.page);
-    if (!animating()) draw(0);
+    if (destroyed || !instance) return;
+    card = cardRect();
   }
 
   function bindCard(): void {

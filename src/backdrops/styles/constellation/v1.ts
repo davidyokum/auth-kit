@@ -1,15 +1,15 @@
 /**
  * constellation v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
  *
- * Points spread by best-candidate sampling (even, never gridded), thinner near the card, each
- * drifting on its own slow orbit. Faint links join near neighbors, fading with distance; a few
+ * Points spread evenly by best-candidate sampling (never gridded), each drifting on its own slow
+ * orbit. Faint links join near neighbors, fading with distance; a few
  * brighter stars carry a halo; a soft nebula sits behind. Near the pointer, points brighten and
  * reach for it with links in the brand color.
  */
 import { mix, rgba } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import { createRng, hashParts } from '../../kernel/v1/prng.js';
-import { cardDistance, TAU } from '../../kernel/v1/shape.js';
+import { TAU } from '../../kernel/v1/shape.js';
 import { type Ctx2D, defineVersion } from '../define.js';
 
 const LINK_LEVELS = 4;
@@ -23,7 +23,7 @@ function grown(buffer: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> {
 
 export const constellationV1 = defineVersion({
   version: 1,
-  fps: 30,
+  fps: 24,
   maxPixelRatio: 2,
   stillTime: 20,
   colors: (p) => ({
@@ -37,7 +37,7 @@ export const constellationV1 = defineVersion({
     nebula2: mix(p.glow, p.secondary, 0.25),
   }),
   create(setup, c) {
-    const { width: w, height: h, card } = setup;
+    const { width: w, height: h } = setup;
     const rng = createRng(hashParts('constellation', 1, setup.seed));
     const noise = createNoise(rng.fork('noise'));
     const n = Math.round(Math.max(36, Math.min(130, (w * h) / 14500)));
@@ -71,7 +71,7 @@ export const constellationV1 = defineVersion({
           const dy = (ay[j] as number) - y;
           nearest = Math.min(nearest, dx * dx + dy * dy);
         }
-        const score = Math.sqrt(nearest) * (0.3 + 0.7 * cardDistance(x, y, card, w, h));
+        const score = Math.sqrt(nearest);
         if (score > bestScore) {
           bestScore = score;
           bestX = x;
@@ -82,13 +82,13 @@ export const constellationV1 = defineVersion({
       ay[i] = bestY;
       rx[i] = sample.range(6, 24);
       ry[i] = sample.range(6, 24);
-      wx[i] = sample.range(0.04, 0.14) * (sample.chance(0.5) ? 1 : -1);
-      wy[i] = sample.range(0.04, 0.14) * (sample.chance(0.5) ? 1 : -1);
+      wx[i] = sample.range(0.015, 0.05) * (sample.chance(0.5) ? 1 : -1);
+      wy[i] = sample.range(0.015, 0.05) * (sample.chance(0.5) ? 1 : -1);
       phx[i] = sample.range(0, TAU);
       phy[i] = sample.range(0, TAU);
       star[i] = sample.chance(0.12) ? 1 : 0;
       size[i] = star[i] ? sample.range(2, 3) : sample.range(0.9, 1.7);
-      weight[i] = 0.35 + 0.65 * cardDistance(bestX, bestY, card, w, h);
+      weight[i] = 1;
     }
     const linkDist = Math.max(110, Math.min(190, Math.sqrt((w * h) / n) * 1.45));
     const reach = Math.max(150, Math.min(230, Math.min(w, h) * 0.25));
@@ -104,8 +104,8 @@ export const constellationV1 = defineVersion({
       for (let i = 0; i < nebula.canvas.width; i++) {
         const v = noise.fbm2(i * 0.045 + offX, j * 0.045 + offY, 3);
         const v2 = noise.fbm2(i * 0.03 - offY, j * 0.03 + offX, 2);
-        const a = Math.max(0, v) * 0.7;
-        const b = Math.max(0, v2) * 0.5;
+        const a = Math.max(0, v) * 0.5;
+        const b = Math.max(0, v2) * 0.36;
         const o = (j * nebula.canvas.width + i) * 4;
         const total = Math.min(1, a + b);
         const mixT = a + b > 0 ? b / (a + b) : 0;

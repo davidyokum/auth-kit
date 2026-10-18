@@ -3,8 +3,8 @@
  *
  * A slot for a finished image (a generated watercolor or oil painting): drawn cover-fitted around
  * its focal point. Until it loads, an optional tiny placeholder is drawn enlarged, which reads as a
- * blur, and the image fades in over it (instantly under reduced motion). The scrim applies as for
- * every style. Static: it redraws only when an image arrives or the size changes.
+ * blur, and the image fades in over it (instantly under reduced motion). Static: it redraws only
+ * when an image arrives or the size changes.
  */
 import { defineVersion } from '../define.js';
 import type { Ctx2D } from '../define.js';

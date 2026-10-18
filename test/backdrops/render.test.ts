@@ -120,8 +120,9 @@ describe('renderBackdrop', () => {
     expect(canvas.height).toBe(1000);
     host.advance(1000);
     const s = controller.stats();
-    expect(s.frames).toBeGreaterThanOrEqual(28);
-    expect(s.frames).toBeLessThanOrEqual(32);
+    // Constellation draws at most 24 frames a second.
+    expect(s.frames).toBeGreaterThanOrEqual(22);
+    expect(s.frames).toBeLessThanOrEqual(26);
     controller.destroy();
   });
 

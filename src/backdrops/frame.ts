@@ -4,7 +4,7 @@
  * previews, SVG targets, server-side images, and tests).
  */
 import { backdropPalette, isBackdropFamily } from './families.js';
-import { defaultCardRect, drawScrim, paintScrim, SCRIM } from './scrim.js';
+import { defaultCardRect } from './card.js';
 import type { Ctx2D, Layer, StyleInstance, StyleSetup, StyleVersion } from './styles/define.js';
 import { type BackdropStyleId, resolveStyleVersion } from './styles/registry.js';
 import type { BackdropStyleModule } from './styles/define.js';
@@ -117,13 +117,11 @@ export interface BackdropStillOptions extends BackdropArtOptions {
   t?: number;
   /** Makes offscreen canvases (browser: `document.createElement('canvas')`; Node: a canvas package). */
   createCanvas: CanvasFactory;
-  /** Draw the scrim around the card. Default true. */
-  scrim?: boolean;
 }
 
 /**
  * Draws one still frame into `ctx` (whose canvas is `width × pixelRatio` by `height × pixelRatio`):
- * the art at the style's still time, then the scrim.
+ * the art at the style's still time.
  */
 export function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): void {
   const art = resolveArt(options);
@@ -144,10 +142,5 @@ export function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): vo
   );
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   instance.draw(ctx, { t: options.t ?? art.version.stillTime, dt: 0, pointer: NO_POINTER });
-  if (options.scrim !== false) {
-    const layer = createLayer(options.width, options.height, SCRIM.layerScale);
-    paintScrim(layer, card, art.palette.page);
-    drawScrim(ctx, layer);
-  }
   instance.destroy?.();
 }

@@ -5,7 +5,7 @@
  * laid down as thirty-odd translucent glazes, each deformed again (Tyler Hobbs's technique), with a
  * mottled pigment, a darker pigment edge and lifted "salt" speckles, multiplied onto grained paper.
  * The whole painting is made twice, the second a little wetter and wider, and the two cross-fade over
- * about a minute and a half: a very slow bleed. Everything is painted once, when it's created; a
+ * about three minutes: a very slow bleed. Everything is painted once, when it's created; a
  * frame is two image copies.
  */
 import { mix, parseHex, rgba, type Rgb, saturate, toHex } from '../../kernel/v1/color.js';
@@ -291,7 +291,7 @@ export const watercolorV1 = defineVersion({
     }
     const dry = flatten(paint(false));
     const wet = flatten(paint(true));
-    const period = comp.range(80, 110);
+    const period = comp.range(140, 200);
     const phase = comp.range(0, TAU);
 
     return {
