@@ -12,6 +12,8 @@
  *   refusing a disabled account and a revoked session the way Cognito does.
  * - `peopleCognito`, `mailer`, `auditLog`: for `createPeopleActions`. The People list reads the
  *   fixture; every change is refused; no email is sent; the audit log is in memory.
+ * - `resources`: the resource roles' membership store (`createServerAuth({ resources: { types, store } })`),
+ *   in memory, one per server process.
  * - `shared(key, create)`: the app's own in-memory stores, one per server process.
  *
  * **Keep it out of builds.** Import it only from a module behind a `withDevKit` alias (`@/dev-matrix`
@@ -28,6 +30,8 @@
 import type { CognitoIdentityProviderClient, UserType } from '@aws-sdk/client-cognito-identity-provider';
 import { AuditEventInvalidError, type AuditLogStore, AuditRowExistsError, createMemoryAuditLog } from '../admin/audit.js';
 import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier } from '../admin/mailer.js';
+import { type MemoryResourceData, createMemoryResourceStore } from '../resources/store.js';
+import type { ResourceAccessStore } from '../resources/types.js';
 import { MATRIX_SERVER_MARKER } from '../dev/marker.js';
 import type { CognitoGateway, LiveUserState, UserAuthFactors } from '../server/cognito.js';
 import { UnauthenticatedError } from '../server/errors.js';
@@ -57,6 +61,12 @@ export interface MatrixServerOverrides {
   readonly mailer: InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier;
   /** `createPeopleActions({ auditLog })` and the Activity page: in memory, one log per server process. */
   readonly auditLog: AuditLogStore;
+  /**
+   * The membership store for resource roles (`createServerAuth({ resources: { types, store } })` and
+   * `createResourceActions`): in memory, one per server process, shared by every bundle. Its
+   * conflict error is matched by name, so it crosses bundles safely.
+   */
+  readonly resources: ResourceAccessStore;
   /** The fixture's people. */
   readonly users: readonly MatrixFixtureUser[];
   /**
@@ -214,6 +224,7 @@ function build(fixture: MatrixFixture): MatrixServerOverrides {
       ownerInviteUnused: refuse('owner warning'),
     }),
     auditLog: bundleAuditLog(shared('auth-kit:audit-log', () => createMemoryAuditLog())),
+    resources: createMemoryResourceStore({ data: shared<MemoryResourceData>('auth-kit:resources', () => new Map()) }),
     users: Object.freeze([...fixture.users]),
     shared,
     marker: MATRIX_SERVER_MARKER,

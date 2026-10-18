@@ -1,15 +1,21 @@
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import type { AuthUser, ServerAuth } from '../server/auth.js';
-import { nextHeadersContext } from '../server/context.js';
-import {
-  AuthUnavailableError,
-  ForbiddenError,
-  MfaEnrollmentRequiredError,
-  NotFoundError,
-  StepUpRequiredError,
-  UnauthenticatedError,
-} from '../server/errors.js';
+import { ForbiddenError } from '../server/errors.js';
 import { ADMIN_ROLE_RANK, OWNER_GROUP, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
+import {
+  type Fail,
+  InputError,
+  authFailure,
+  checked,
+  contextOf,
+  defaultRequestContext,
+  emailOf,
+  fail,
+  outsideDomains,
+  record,
+  subOf,
+  text,
+} from './action-kit.js';
 import { type AuditLogStore, type AuditedRun, runAudited } from './audit.js';
 import { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
 import { describeAwsError } from './aws-errors.js';
@@ -30,6 +36,7 @@ import {
   isStandardGroup,
   roleRank,
 } from './guardrails.js';
+import { InviteMisconfiguredError, createInvitedAccount, sendInviteEmail } from './invite-core.js';
 import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
@@ -84,9 +91,14 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   /** Days a disabled account waits before an owner can delete it. Default 90; 0 turns the wait off. */
   deleteRetentionDays?: number;
   /**
-   * Removes the person's per-record memberships in the app's own database when they're disabled
-   * (reviewers of a report, members of a team). Its return value is logged as part of `after`.
+   * Removes the person's access to items when they're disabled: their resource roles (pass
+   * `createResourceActions(…).removeResourceMemberships` from `auth-kit/resources`), or memberships
+   * in the app's own database. Its return value is logged as part of the result's `after`
+   * (`resourceMemberships`). Disabling is never blocked by it: an item left without a Manager is
+   * reported, and site admins who manage people can still manage it.
    */
+  removeResourceMemberships?: (person: { sub: string; username: string; email: string }) => Promise<unknown>;
+  /** @deprecated Renamed `removeResourceMemberships` (ADR 0022); this name is accepted for one release. */
   removeRecordMemberships?: (person: { sub: string; username: string; email: string }) => Promise<unknown>;
   /**
    * Called after each completed change's result row is written: grants and removals should alert a
@@ -123,7 +135,7 @@ export interface PeopleActions {
    * can leave two owners (the People page flags it) but never none.
    */
   transferOwnership(input: TransferOwnershipInput): Promise<ActionResult>;
-  /** AdminDisableUser, then removes admin roles and record memberships. */
+  /** AdminDisableUser, then removes admin roles and access to items (`removeResourceMemberships`). */
   disable(input: TargetInput): Promise<ActionResult>;
   /** AdminEnableUser. Old sessions stay ended; access is member-only until a role is granted again. */
   enable(input: TargetInput): Promise<ActionResult>;
@@ -153,66 +165,6 @@ export interface PeopleFormActions {
   deleteUser: FormAction;
 }
 
-// ---- Input checks (server actions receive untrusted input) -----------------------------------
-
-const SUB_RE = /^[A-Za-z0-9-]{1,128}$/;
-const EMAIL_RE = /^[^\s@"\\<>(),;:[\]]+@[^\s@"\\<>(),;:[\]]+\.[^\s@"\\<>(),;:[\]]+$/;
-
-class InputError extends Error {}
-
-function record(input: unknown): Record<string, unknown> {
-  if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new InputError('Expected an object.');
-  return input as Record<string, unknown>;
-}
-
-/** Trims and drops control characters. */
-function text(value: unknown, field: string, max: number): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value !== 'string') throw new InputError(`${field} must be text.`);
-  const clean = [...value]
-    .filter((ch) => {
-      const c = ch.charCodeAt(0);
-      return c >= 32 && c !== 127;
-    })
-    .join('')
-    .trim();
-  if (clean.length > max) throw new InputError(`${field} is too long (at most ${max} characters).`);
-  return clean === '' ? undefined : clean;
-}
-
-function subOf(value: unknown): string {
-  if (typeof value !== 'string' || !SUB_RE.test(value)) throw new InputError('That person ID is invalid.');
-  return value;
-}
-
-function emailOf(value: unknown): string {
-  const email = text(value, 'Email', 254)?.toLowerCase();
-  if (!email || !EMAIL_RE.test(email)) throw new InputError('Enter a full email address.');
-  return email;
-}
-
-
-// ---- Results ------------------------------------------------------------------------------------
-
-type Fail = Extract<ActionResult, { ok: false }>;
-
-function fail(code: Fail['code'], error: string, extra: Partial<Omit<Fail, 'ok' | 'code' | 'error'>> = {}): Fail {
-  return { ok: false, code, error, changed: 'nothing', ...extra };
-}
-
-function authFailure(error: unknown): Fail | null {
-  if (error instanceof StepUpRequiredError) {
-    return fail('step_up_required', 'Please sign in again to confirm this action.', { maxAgeSeconds: error.maxAgeSeconds });
-  }
-  if (error instanceof MfaEnrollmentRequiredError) return fail('forbidden', error.message);
-  if (error instanceof UnauthenticatedError) return fail('unauthenticated', error.message);
-  if (error instanceof ForbiddenError) return fail('forbidden', error.message);
-  if (error instanceof NotFoundError) return fail('not_found', error.message);
-  if (error instanceof AuthUnavailableError) return fail('unavailable', error.message);
-  return null;
-}
-
-
 class OwnerAlertFailedError extends Error {
   constructor(cause: unknown, undone: boolean, what: 'grant' | 'transfer') {
     const change = what === 'grant' ? 'the Super admin grant' : 'the ownership transfer';
@@ -227,14 +179,6 @@ class OwnerAlertFailedError extends Error {
   }
 }
 
-class InviteMisconfiguredError extends Error {
-  constructor() {
-    super(
-      'This pool gave the new account a password, so it doesn’t offer emailed codes: a no-password invite can’t work here. Use inviteMode "temporary-password" (the admin pool) or turn on emailed codes.',
-    );
-    this.name = 'InviteMisconfiguredError';
-  }
-}
 
 // ---- The actions --------------------------------------------------------------------------------
 
@@ -249,20 +193,6 @@ interface Acting<C extends string> {
   actor: AuditActor;
   request: AuditRequestContext;
 }
-
-async function defaultRequestContext(): Promise<AuditRequestContext> {
-  try {
-    const { headers } = await nextHeadersContext();
-    const ip = headers.get('x-forwarded-for') ?? headers.get('x-real-ip') ?? undefined;
-    const userAgent = headers.get('user-agent') ?? undefined;
-    const requestId = headers.get('x-amzn-trace-id') ?? headers.get('x-request-id') ?? undefined;
-    return { ...(ip && { ip }), ...(userAgent && { userAgent }), ...(requestId && { requestId }) };
-  } catch {
-    return {};
-  }
-}
-
-
 
 /**
  * The People page's server actions. Create once (in a server-only module) and call from your own
@@ -291,6 +221,9 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     throw new Error('auth-kit: emailed-code invites need a mailer (Cognito’s own invite is suppressed). See createSesInviteMailer.');
   }
   if (!config.siteName) throw new Error('auth-kit: createPeopleActions needs a siteName.');
+  if (config.removeResourceMemberships && config.removeRecordMemberships && config.removeResourceMemberships !== config.removeRecordMemberships) {
+    throw new Error('auth-kit: pass removeResourceMemberships only (removeRecordMemberships is its old name).');
+  }
   let signInUrl: URL;
   try {
     signInUrl = new URL(config.signInUrl);
@@ -358,13 +291,6 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       request: { ...request, requestId: request.requestId ?? globalThis.crypto.randomUUID() },
     };
   }
-
-  const contextOf = (request: AuditRequestContext) => ({
-    ...(request.requestId !== undefined && { requestId: request.requestId }),
-    ...((request.ip ?? request.userAgent) !== undefined && {
-      context: { ...(request.ip !== undefined && { ip: request.ip }), ...(request.userAgent !== undefined && { userAgent: request.userAgent }) },
-    }),
-  });
 
   /** A refusal by an authorized person: logged (best effort), never a change. */
   async function refuse(
@@ -595,13 +521,12 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
       name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
       reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
-      confirmOutside = raw.confirmOutsideDomain === true || raw.confirmOutsideDomain === 'on' || raw.confirmOutsideDomain === 'true';
+      confirmOutside = checked(raw.confirmOutsideDomain);
     } catch (error) {
       return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
     }
 
-    const domain = email.slice(email.lastIndexOf('@') + 1);
-    if (inviteDomains.length > 0 && !inviteDomains.includes(domain) && !confirmOutside) {
+    if (outsideDomains(email, inviteDomains) && !confirmOutside) {
       return fail(
         'refused',
         `${email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
@@ -643,13 +568,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           ...contextOf(acting_.request),
         },
         run: async (steps) => {
-          const created = await steps.call('AdminCreateUser', () =>
-            cognito().createInvitedUser({ email, ...(name !== undefined && { name }), mode }),
-          );
-          if (mode === 'emailed-code' && created.status === 'FORCE_CHANGE_PASSWORD') {
-            await steps.rollback('AdminDeleteUser', () => cognito().deleteUser(created.username));
-            throw new InviteMisconfiguredError();
-          }
+          const created = await createInvitedAccount(steps, cognito(), { email, ...(name !== undefined && { name }), mode });
           if (role !== MEMBER_ROLE) {
             try {
               await steps.call(`AdminAddUserToGroup ${role}`, () => cognito().addToGroup(created.username, role));
@@ -670,15 +589,13 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           }
           const expiresAt = inviteExpiresAt(created.createdAt);
           if (mode === 'emailed-code') {
-            await steps.call('SES SendEmail', () =>
-              config.mailer!.sendInvite({
-                email,
-                ...(name !== undefined && { name }),
-                siteName: config.siteName,
-                signInUrl: signInUrl.toString(),
-                expiresAt,
-              }),
-            );
+            await sendInviteEmail(steps, config.mailer!, {
+              email,
+              ...(name !== undefined && { name }),
+              siteName: config.siteName,
+              signInUrl: signInUrl.toString(),
+              expiresAt,
+            });
           }
           return {
             value: { created, expiresAt },
@@ -963,7 +880,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     const remove = adminGroupsOf(target.groups);
     const appRoles = target.groups.filter((g2) => !isStandardGroup(g2));
     const revokingInvite = target.invite === 'pending' || target.invite === 'expiring-soon' || target.invite === 'expired';
-    const hook = config.removeRecordMemberships;
+    const hook = config.removeResourceMemberships ?? config.removeRecordMemberships;
     const run = await runAudited(auditLog, {
       intent: {
         ...base(w, auditAction, target),
@@ -984,7 +901,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           : undefined;
         return {
           value: undefined,
-          after: { enabled: false, adminRole: null, groups: appRoles, ...(memberships !== undefined && { recordMemberships: memberships }) },
+          after: { enabled: false, adminRole: null, groups: appRoles, ...(memberships !== undefined && { resourceMemberships: memberships }) },
         };
       },
     });

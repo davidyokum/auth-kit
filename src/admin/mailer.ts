@@ -1,4 +1,5 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
 
 export interface InviteEmail {
   email: string;
@@ -7,6 +8,11 @@ export interface InviteEmail {
   /** Absolute sign-in URL. */
   signInUrl: string;
   expiresAt: Date;
+  /**
+   * A Manager's invite to one item (`auth-kit/resources`): what they were given access to, in the
+   * app's words, and who invited them. Absent for the People page's invite.
+   */
+  item?: { noun: string; name?: string; role: ResourceRole; invitedBy?: string };
 }
 
 /** Sends the branded invite email (Cognito's own invite is suppressed in `emailed-code` mode). */
@@ -36,10 +42,15 @@ export function renderInviteEmail(input: InviteEmail): RenderedEmail {
   const hello = input.name ? `Hi ${input.name},` : 'Hello,';
   const expires = longDate(input.expiresAt);
   const subject = `You're invited to ${input.siteName}`;
+  const item = input.item;
+  const what = item ? `${item.name ? `the ${item.noun} “${item.name}”` : `a ${item.noun}`} as ${RESOURCE_ROLE_LABEL[item.role]}` : undefined;
+  const invited = item
+    ? `${item.invitedBy ?? 'Someone'} invited you to ${input.siteName}, with access to ${what}.`
+    : `You've been invited to ${input.siteName}.`;
   const text = [
     hello,
     '',
-    `You've been invited to ${input.siteName}.`,
+    invited,
     '',
     `Sign in at ${input.signInUrl} with this email address. We'll email you a one-time code; then save a passkey so next time is one tap.`,
     '',
@@ -48,7 +59,7 @@ export function renderInviteEmail(input: InviteEmail): RenderedEmail {
   const url = escapeHtml(input.signInUrl);
   const html = [
     `<p>${escapeHtml(hello)}</p>`,
-    `<p>You've been invited to <strong>${escapeHtml(input.siteName)}</strong>.</p>`,
+    item ? `<p>${escapeHtml(invited)}</p>` : `<p>You've been invited to <strong>${escapeHtml(input.siteName)}</strong>.</p>`,
     `<p><a href="${url}">Sign in</a> with this email address. We'll email you a one-time code; then save a passkey so next time is one tap.</p>`,
     `<p>This invite expires on ${escapeHtml(expires)} (UTC). If you weren't expecting it, you can ignore this email.</p>`,
   ].join('\n');
@@ -214,6 +225,45 @@ export function renderOwnershipTransferEmail(alert: OwnershipTransferAlert): Ren
   ]);
 }
 
+/**
+ * A Manager brought someone new into one item (ADR 0022): an account with no admin role, with access
+ * to that item only. The site's admins who manage people are told every time; if this alert can't be
+ * sent, the invite is undone.
+ */
+export interface ResourceInviteAlert {
+  siteName: string;
+  /** Who gets it: everyone enabled whose group grants `people.manage` (the owner included), read live. */
+  recipients: readonly { sub: string; email: string; name?: string }[];
+  invited: { sub: string; email: string; name?: string };
+  invitedBy: { sub: string; email?: string };
+  /** The item, in the app's words. `name` comes from the app's own store, never from the request. */
+  item: { type: string; id: string; noun: string; name?: string };
+  role: ResourceRole;
+  at: Date;
+  context?: { ip?: string; userAgent?: string; requestId?: string };
+}
+
+/** Sends the alert above. Throw to report a failure (the invite is then undone). */
+export interface ResourceInviteNotifier {
+  resourceInviteSent(alert: ResourceInviteAlert): Promise<void>;
+}
+
+/** The default alert: who invited whom, to what, with which role, and what to do if it's unexpected. */
+export function renderResourceInviteAlertEmail(alert: ResourceInviteAlert): RenderedEmail {
+  const who = alert.invitedBy.email ?? alert.invitedBy.sub;
+  const whom = alert.invited.name ? `${alert.invited.name} (${alert.invited.email})` : alert.invited.email;
+  const what = alert.item.name ? `the ${alert.item.noun} “${alert.item.name}”` : `a ${alert.item.noun} (${alert.item.id})`;
+  return rendered(`${alert.siteName}: ${who} invited ${alert.invited.email}`, [
+    `${who} invited ${whom} to ${alert.siteName}, as ${RESOURCE_ROLE_LABEL[alert.role]} of ${what}.`,
+    '',
+    `When: ${when(alert.at)}`,
+    ...contextLines(alert.context),
+    '',
+    `The new account has no admin role: it has access to ${what}, and nothing else on the site. Its invite expires in ${INVITE_EXPIRY_DAYS} days if it isn't used.`,
+    `If you didn't expect it, disable the account from the People page and check the Activity page.`,
+  ]);
+}
+
 export interface SesInviteMailerOptions {
   /** A verified SES identity, e.g. `Example Reports <noreply@example.org>`. */
   from: string;
@@ -229,16 +279,21 @@ export interface SesInviteMailerOptions {
   renderOwnershipTransfer?: (alert: OwnershipTransferAlert) => RenderedEmail;
   /** Your own last-owner warning template. Default `renderOwnerInviteWarningEmail`. */
   renderOwnerInviteWarning?: (warning: OwnerInviteWarning) => RenderedEmail;
+  /** Your own alert for a Manager's invite to one item. Default `renderResourceInviteAlertEmail`. */
+  renderResourceInvite?: (alert: ResourceInviteAlert) => RenderedEmail;
 }
 
 /**
  * The site's mailer through SES (SESv2 `SendEmail`): the invite email, the alert the owner gets when
- * someone is made Super admin, the alert the previous and new owner get when ownership moves (each
- * alert is one message to all its recipients, so it's sent to all or to none), and the last-owner
- * warning the invite-expiry sweep sends (one message per recipient). The role needs `ses:SendEmail`
- * on the identity.
+ * someone is made Super admin, the alert the previous and new owner get when ownership moves, the
+ * alert the site's admins get when a Manager invites someone new to one item (each alert is one
+ * message to all its recipients, so it's sent to all or to none), and the last-owner warning the
+ * invite-expiry sweep sends (one message per recipient). The role needs `ses:SendEmail` on the
+ * identity.
  */
-export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier {
+export function createSesInviteMailer(
+  options: SesInviteMailerOptions,
+): InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier & ResourceInviteNotifier {
   if (!options.from) throw new Error('auth-kit: createSesInviteMailer needs a from address.');
   let client = options.client;
   const ses = (): SESv2Client => (client ??= new SESv2Client(options.region ? { region: options.region } : {}));
@@ -246,6 +301,7 @@ export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMa
   const renderGrant = options.renderSuperadminGrant ?? renderSuperadminGrantEmail;
   const renderTransfer = options.renderOwnershipTransfer ?? renderOwnershipTransferEmail;
   const renderWarning = options.renderOwnerInviteWarning ?? renderOwnerInviteWarningEmail;
+  const renderResourceInvite = options.renderResourceInvite ?? renderResourceInviteAlertEmail;
   const send = async (to: string[], email: RenderedEmail) => {
     await ses().send(
       new SendEmailCommand({
@@ -277,6 +333,11 @@ export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMa
     async ownerInviteUnused(warning) {
       if (!warning.to.email) throw new Error('auth-kit: the owner warning has no address to go to.');
       await send([warning.to.email], renderWarning(warning));
+    },
+    async resourceInviteSent(alert) {
+      const to = [...new Set(alert.recipients.map((r) => r.email).filter(Boolean))];
+      if (to.length === 0) throw new Error('auth-kit: the site has no admin who manages people with an email address to alert.');
+      await send(to, renderResourceInvite(alert));
     },
   };
 }

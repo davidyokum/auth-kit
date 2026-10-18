@@ -73,6 +73,14 @@
       "types": "./dist/admin/cdk.d.ts",
       "import": "./dist/admin/cdk.js"
     },
+    "./resources": {
+      "types": "./dist/resources/index.d.ts",
+      "import": "./dist/resources/index.js"
+    },
+    "./resources/ui": {
+      "types": "./dist/resources/ui.d.ts",
+      "import": "./dist/resources/ui.js"
+    },
     "./dev": {
       "types": "./dist/dev/index.d.ts",
       "import": "./dist/dev/index.js",

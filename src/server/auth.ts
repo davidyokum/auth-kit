@@ -1,10 +1,13 @@
-import { SESSION_POLICY } from '../shared/policy.js';
+import { type ResourceNeed, type ResourceTypes, decideResourceAccess, isResourceId, isResourceTypes, neededActions } from '../resources/policy.js';
+import type { ResourceAccessStore, ResourceMembership } from '../resources/types.js';
+import { type ResourceRole, SESSION_POLICY } from '../shared/policy.js';
 import { TtlCache } from './cache.js';
 import type { Capabilities } from './capabilities.js';
 import { type CognitoGateway, type LiveUserState, createCognitoGateway, needsTotpEnrollment } from './cognito.js';
 import { type PoolConfig, type ResolvedPoolConfig, resolvePoolConfig } from './config.js';
 import { type RequestInput, nextHeadersContext, toRequestContext } from './context.js';
 import {
+  AuthUnavailableError,
   ForbiddenError,
   MfaEnrollmentRequiredError,
   NotFoundError,
@@ -45,6 +48,17 @@ export interface ServerAuthOptions<G extends string = string, C extends string =
   now?: () => number;
   /** How to read the current request when none is passed. Default: Next's `cookies()` and `headers()`. */
   context?: () => Promise<RequestContext>;
+  /**
+   * Resource roles (ADR 0022): the app's resource types and where memberships live. Needed by
+   * `requireResourceRole`, `resourceAccess`, and `listMyResources`, and by `createResourceActions`.
+   */
+  resources?: ResourceAccessConfig;
+}
+
+/** The app's resource types (`defineResourceTypes`) and its membership store. */
+export interface ResourceAccessConfig {
+  types: ResourceTypes;
+  store: ResourceAccessStore;
 }
 
 /** Display fields from a verified ID token whose `sub` matches the access token. */
@@ -102,6 +116,39 @@ export interface RequireRoleOptions extends RequireUserOptions {
   recentSignIn?: boolean | number;
 }
 
+export interface ResourceGuardOptions<C extends string = string> extends RequireRoleOptions {
+  /**
+   * The signed-in person, when the page already has them from this auth (`requireUser`, `getUser`, a
+   * page guard): skips reading the request again. A user object from anywhere else is refused.
+   */
+  user?: AuthUser<C>;
+}
+
+/** What one person may do on one item: their resource role there, plus their site role's floor. */
+export interface ResourceAccess<C extends string = string> {
+  readonly user: AuthUser<C>;
+  readonly type: string;
+  readonly id: string;
+  /** Their role on this item, or null for none. */
+  readonly role: ResourceRole | null;
+  readonly membership: ResourceMembership | null;
+  /** Everything they may do on it: what their site role grants on every item, or their role here. */
+  readonly actions: ReadonlySet<string>;
+  /** What their site role alone grants (or a shared directory's `view`). */
+  readonly viaSite: ReadonlySet<string>;
+  can(action: string): boolean;
+}
+
+/**
+ * "My items" for one type. `all`: this person may see every item (a site role whose floor includes
+ * `view`, or a type with a shared directory), so list them from the app's own store; `roles` says
+ * which they have a role on. `mine`: only the items they have a role on.
+ */
+export type MyResources =
+  | { scope: 'all'; reason: 'site-role' | 'shared-directory'; roles: ReadonlyMap<string, ResourceRole>; truncated: boolean }
+  | { scope: 'mine'; items: readonly { id: string; role: ResourceRole; addedAt: string }[]; truncated: boolean };
+
+/** @deprecated Use resource roles: `requireResourceRole` (ADR 0022). Kept for one release. */
 export interface RecordAccessRule<R, C extends string> {
   /** The owner's `sub`. */
   owner?: (record: R) => string | null | undefined;
@@ -138,9 +185,24 @@ export interface ServerAuth<G extends string = string, C extends string = string
   requireRecentSignIn(user: AuthUser<C>, maxAgeSeconds?: number): void;
   /** The person's live status and groups from Cognito (cached). */
   liveState(user: AuthUser<C>): Promise<LiveUserState>;
+  /** The resource types and membership store this instance checks against (`resources`), or null. */
+  readonly resources: Readonly<ResourceAccessConfig> | null;
   /**
-   * Loads-and-checks for routes that take a record ID: returns the record when this person owns it,
-   * belongs to it, or holds a capability that covers every record. Otherwise 404, never 403.
+   * The check for routes that take an item's ID (ADR 0022): allowed when the person's site role
+   * grants it on every item, or their role on this item does. `need` is an action (`'edit'`) or a
+   * minimum role (`'contributor'`: every action a Contributor has). Someone who can't see the item
+   * gets 404 (`NotFoundError`), never a hint that it exists; someone who can see it but not do this
+   * gets 403. Couldn't read memberships: 503.
+   */
+  requireResourceRole(type: string, id: string, need: ResourceNeed, options?: ResourceGuardOptions<C>): Promise<ResourceAccess<C>>;
+  /** The same answer without the refusal: what this person may do on the item (possibly nothing). */
+  resourceAccess(type: string, id: string, options?: ResourceGuardOptions<C>): Promise<ResourceAccess<C>>;
+  /** "My items" for one type: every item for a site role that sees them all, else the person's own. */
+  listMyResources(type: string, options?: ResourceGuardOptions<C>): Promise<MyResources>;
+  /**
+   * @deprecated Use `requireResourceRole` (resource roles, ADR 0022); this alias stays for one
+   * release. Loads-and-checks for routes that take an item's ID: returns it when this person owns
+   * it, belongs to it, or holds a capability that covers every item. Otherwise 404, never 403.
    */
   requireRecordAccess<R>(user: AuthUser<C>, record: R | null | undefined, rule: RecordAccessRule<R, C>): R;
   /**
@@ -169,6 +231,7 @@ const OPTION_KEYS = new Set<string>([
   'verifier',
   'now',
   'context',
+  'resources',
 ]);
 
 /** Fails loudly at startup on a misconfiguration instead of producing odd runtime behavior. */
@@ -194,6 +257,13 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
   }
   for (const key of ['tokenSource', 'jwksFetcher', 'now', 'context'] as const) {
     if (options[key] !== undefined && typeof options[key] !== 'function') problems.push(`${key} must be a function`);
+  }
+  if (options.resources !== undefined) {
+    const { types, store } = options.resources ?? ({} as Partial<ResourceAccessConfig>);
+    if (!isResourceTypes(types)) problems.push('resources.types must come from defineResourceTypes()');
+    for (const method of ['getMembership', 'getAccess', 'listForPerson', 'commit'] as const) {
+      if (typeof store?.[method] !== 'function') problems.push(`resources.store needs ${method}() (createDynamoResourceStore or createMemoryResourceStore)`);
+    }
   }
   if (problems.length > 0) throw new Error(`auth-kit: createServerAuth options are invalid:\n- ${problems.join('\n- ')}`);
 }
@@ -381,6 +451,95 @@ export function createServerAuth<G extends string, C extends string>(
     return user;
   }
 
+  function resourcesConfig(): ResourceAccessConfig {
+    if (!options.resources) {
+      throw new Error('auth-kit: resource roles need createServerAuth({ resources: { types: defineResourceTypes({…}), store } }).');
+    }
+    return options.resources;
+  }
+
+  /** The person for a resource check: the one given (if this instance made it) or the request's. */
+  async function guardUser(opts: ResourceGuardOptions<C>): Promise<AuthUser<C>> {
+    let user: AuthUser<C>;
+    if (opts.user !== undefined) {
+      if (!rawTokens.has(opts.user)) throw new Error('auth-kit: options.user must come from this server auth (requireUser, getUser, or a page guard).');
+      user = opts.user;
+    } else {
+      user = await requireUser(opts);
+    }
+    if (opts.live === true && !user.live) user = await withLiveGroups(user);
+    return user;
+  }
+
+  async function resourceAccess(type: string, id: string, opts: ResourceGuardOptions<C> = {}): Promise<ResourceAccess<C>> {
+    const { types, store } = resourcesConfig();
+    const config = types.get(type);
+    const user = await guardUser(opts);
+    let membership: ResourceMembership | null = null;
+    // An ID that can't name an item gets nothing, not even the site floor: there's no such item.
+    const valid = isResourceId(id);
+    if (valid) {
+      try {
+        membership = await store.getMembership({ type, id }, user.sub);
+      } catch (error) {
+        throw new AuthUnavailableError('Access to this item couldn’t be checked right now. Please try again.', { cause: error });
+      }
+      if (membership && membership.sub !== user.sub) membership = null;
+    }
+    const decision = valid
+      ? decideResourceAccess(config, { capabilities: user.capabilities, role: membership?.role ?? null })
+      : { actions: new Set<string>(), viaSite: new Set<string>() };
+    return Object.freeze({
+      user,
+      type,
+      id,
+      role: membership?.role ?? null,
+      membership,
+      actions: decision.actions,
+      viaSite: decision.viaSite,
+      can: (action: string) => decision.actions.has(action),
+    });
+  }
+
+  async function requireResourceRole(type: string, id: string, need: ResourceNeed, opts: ResourceGuardOptions<C> = {}): Promise<ResourceAccess<C>> {
+    // A misspelled action or type is a programming mistake: fail before reading anything.
+    const needed = neededActions(resourcesConfig().types.get(type), need);
+    const access = await resourceAccess(type, id, opts);
+    if (!access.actions.has('view')) throw new NotFoundError();
+    if (!needed.every((action) => access.actions.has(action))) throw new ForbiddenError();
+    if (opts.recentSignIn !== undefined && opts.recentSignIn !== false) {
+      requireRecentSignIn(access.user, typeof opts.recentSignIn === 'number' ? opts.recentSignIn : stepUpMax);
+    }
+    return access;
+  }
+
+  async function listMyResources(type: string, opts: ResourceGuardOptions<C> = {}): Promise<MyResources> {
+    const { types, store } = resourcesConfig();
+    const config = types.get(type);
+    const user = await guardUser(opts);
+    let mine;
+    try {
+      mine = await store.listForPerson(user.sub, type);
+    } catch (error) {
+      throw new AuthUnavailableError('Your items couldn’t be listed right now. Please try again.', { cause: error });
+    }
+    const memberships = mine.memberships.filter((m) => m.sub === user.sub && m.type === type);
+    const floor = decideResourceAccess({ ...config, sharedDirectory: false }, { capabilities: user.capabilities, role: null });
+    if (floor.viaSite.has('view') || config.sharedDirectory) {
+      return Object.freeze({
+        scope: 'all' as const,
+        reason: floor.viaSite.has('view') ? ('site-role' as const) : ('shared-directory' as const),
+        roles: new Map(memberships.map((m) => [m.id, m.role])),
+        truncated: mine.truncated,
+      });
+    }
+    return Object.freeze({
+      scope: 'mine' as const,
+      items: Object.freeze(memberships.map((m) => Object.freeze({ id: m.id, role: m.role, addedAt: m.addedAt }))),
+      truncated: mine.truncated,
+    });
+  }
+
   return {
     capabilities,
     pool: Object.freeze({ ...pool }),
@@ -396,6 +555,10 @@ export function createServerAuth<G extends string, C extends string>(
     can: (user, capability) => user.capabilities.has(capability),
     requireRecentSignIn,
     liveState,
+    resources: options.resources ? Object.freeze({ ...options.resources }) : null,
+    requireResourceRole,
+    resourceAccess,
+    listMyResources,
     requireRecordAccess<R>(user: AuthUser<C>, record: R | null | undefined, rule: RecordAccessRule<R, C>): R {
       if (record === null || record === undefined) throw new NotFoundError();
       if (rule.coveredBy !== undefined && user.capabilities.has(rule.coveredBy)) return record;

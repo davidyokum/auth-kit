@@ -1,4 +1,5 @@
-import type { AuthUser, RequireRoleOptions, RequireUserOptions, ServerAuth } from './auth.js';
+import type { ResourceNeed } from '../resources/policy.js';
+import type { AuthUser, RequireRoleOptions, RequireUserOptions, ResourceAccess, ResourceGuardOptions, ServerAuth } from './auth.js';
 import { AuthUnavailableError, isAuthError } from './errors.js';
 import { safeRedirect } from './redirect.js';
 
@@ -82,6 +83,13 @@ export interface PageGuards<G extends string, C extends string> {
   requireUser(options?: RequireUserOptions & PageGuardOptions): Promise<AuthUser<C>>;
   requireGroup(groups: G | readonly G[], options?: RequireRoleOptions & PageGuardOptions): Promise<AuthUser<C>>;
   requireCan(capability: C, options?: RequireRoleOptions & PageGuardOptions): Promise<AuthUser<C>>;
+  /** `requireResourceRole` for a page: no access (403 or 404) renders the not-found page. */
+  requireResourceRole(
+    type: string,
+    id: string,
+    need: ResourceNeed,
+    options?: ResourceGuardOptions<C> & PageGuardOptions,
+  ): Promise<ResourceAccess<C>>;
 }
 
 /**
@@ -107,5 +115,6 @@ export function createPageGuards<G extends string, C extends string>(
     requireUser: (options = {}) => guard(() => auth.requireUser(options), options),
     requireGroup: (groups, options = {}) => guard(() => auth.requireGroup(groups, options), options),
     requireCan: (capability, options = {}) => guard(() => auth.requireCan(capability, options), options),
+    requireResourceRole: (type, id, need, options = {}) => guard(() => auth.requireResourceRole(type, id, need, options), options),
   };
 }

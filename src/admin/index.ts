@@ -10,6 +10,9 @@
  *   intent → calls → result ordering for any change an app logs.
  * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days, never the
  *   site's last owner's (deployed by `InviteExpirySweep` from `auth-kit/admin/cdk`).
+ *
+ * Access to one item (resource roles: Manager, Contributor, Reader) is `auth-kit/resources`; pass its
+ * `removeResourceMemberships` to `createPeopleActions` so disabling someone removes it.
  */
 export {
   checkPeopleAction,
@@ -90,6 +93,7 @@ export {
   renderSuperadminGrantEmail,
   renderOwnershipTransferEmail,
   renderOwnerInviteWarningEmail,
+  renderResourceInviteAlertEmail,
   type InviteMailer,
   type InviteEmail,
   type OwnerAlertNotifier,
@@ -97,6 +101,8 @@ export {
   type OwnershipTransferAlert,
   type OwnerInviteWarning,
   type OwnerInviteWarningNotifier,
+  type ResourceInviteAlert,
+  type ResourceInviteNotifier,
   type RenderedEmail,
   type SesInviteMailerOptions,
 } from './mailer.js';
@@ -105,6 +111,8 @@ export {
   auditLogResourcePolicy,
   peopleAdminPolicy,
   inviteExpirySweepPolicy,
+  resourceAccessAppPolicy,
+  RESOURCE_ACCESS_APP_ACTIONS,
   AUDIT_LOG_APP_ACTIONS,
   AUDIT_LOG_DENIED_ITEM_ACTIONS,
   PEOPLE_ADMIN_COGNITO_ACTIONS,
