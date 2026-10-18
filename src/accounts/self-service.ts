@@ -8,9 +8,11 @@
  * - **Change my email address.** A sign-in in the last 5 minutes. The server sets the new address
  *   (`AdminUpdateUserAttributes`); the pool's `AttributesRequireVerificationBeforeUpdate` keeps the old
  *   one in effect while Cognito sends a code to the new one. The person enters it, the server verifies
- *   it with their own token, and the old address is told (§5.2l). The app client can't write `email`
- *   itself, so the recent sign-in can't be skipped. Audited (`account.requestEmailChange`, then
- *   `account.changeEmail`). On these sites this replaces the admin-only email change.
+ *   it with their own token, and the old address is told (§5.2l). Audited
+ *   (`account.requestEmailChange`, then `account.changeEmail`). Cognito lets every app client write
+ *   required attributes, `email` included, so someone holding a session could still start a change
+ *   through Cognito's public API without this path's recent sign-in or notice; that change stays
+ *   pending until the new address enters its code (ADR 0023). On these sites this replaces the admin-only email change.
  *
  * Both are refused on invite-only and request sites, where admins change addresses.
  */

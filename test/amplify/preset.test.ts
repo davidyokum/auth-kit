@@ -432,24 +432,9 @@ describe('account creation (ADR 0023)', () => {
     expect(() => standardAuthProps(BASE, { userAttributes: { 'custom:authkit_origin': { dataType: 'String', mutable: true } } })).toThrow(/auth-kit owns it/);
   });
 
-  it('never lets a person change their own email address or sign-up mark with their token', () => {
-    const { applied, template } = synth({ ...BASE, accountCreation: { mode: 'open' } });
-    const client = Object.values(template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: { WriteAttributes: string[] } };
-    expect(client.Properties.WriteAttributes).toEqual(applied.writeAttributes);
-    expect(client.Properties.WriteAttributes).toEqual(expect.arrayContaining(['name', 'given_name', 'family_name']));
-    for (const forbidden of ['email', 'email_verified', 'phone_number', 'custom:authkit_origin']) expect(client.Properties.WriteAttributes).not.toContain(forbidden);
-  });
-
-  it("keeps a site's own mutable custom attributes writable", () => {
-    const options = { ...BASE };
-    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main' } });
-    const stack = new Stack(app, 'S');
-    const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options, {
-      userAttributes: { 'custom:team': { dataType: 'String', mutable: true }, 'custom:fixed': { dataType: 'String', mutable: false } },
-    }) as unknown as AuthProps);
-    const applied = applyAuthStandard(auth, options);
-    expect(applied.writeAttributes).toContain('custom:team');
-    expect(applied.writeAttributes).not.toContain('custom:fixed');
+  it("leaves the app client's write permissions at Cognito's default (every app client can write required attributes such as email anyway)", () => {
+    const client = Object.values(synth({ ...BASE, accountCreation: { mode: 'open' } }).template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
+    expect(client.Properties).not.toHaveProperty('WriteAttributes');
   });
 
   it('sets the code lifetime once, as the sign-in session', () => {

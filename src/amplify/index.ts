@@ -25,7 +25,6 @@ export { standardAuthProps, type DefineAuthProps, type StandardAuthExtras } from
 export {
   applyAuthStandard,
   formatSender,
-  CLIENT_WRITABLE_STANDARD_ATTRIBUTES,
   type AppliedAuthStandard,
   type AppliedWaf,
   type AuthResourceLike,

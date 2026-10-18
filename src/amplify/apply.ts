@@ -1,7 +1,6 @@
 import { Annotations, ArnFormat, Stack, Tags, Token } from 'aws-cdk-lib';
 import type { CfnIdentityPool, CfnUserPool, CfnUserPoolClient, CfnUserPoolGroup, IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
-import { SIGN_UP_ORIGIN_ATTRIBUTE } from '../shared/account-creation.js';
 import {
   AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY,
   type AmplifyDeploymentType,
@@ -54,8 +53,7 @@ export interface AppliedAuthStandard {
   waf: AppliedWaf;
   /** The sign-in session (and so an emailed code's lifetime), in minutes. */
   codeLifetimeMinutes: number;
-  /** What the app client lets people change about themselves (never `email`). */
-  writeAttributes: string[];
+
   /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
   hostedUiOAuth: boolean;
 }
@@ -79,49 +77,6 @@ function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
   const config = stack.resolve(pool.adminCreateUserConfig) as { allowAdminCreateUserOnly?: unknown; AllowAdminCreateUserOnly?: unknown } | undefined;
   return config?.allowAdminCreateUserOnly === true || config?.AllowAdminCreateUserOnly === true;
 }
-
-/**
- * Standard attributes a person may set on their own account. Not `email` (changed by the server or
- * an admin, then verified), `phone_number`, or `preferred_username` (a sign-in alias in some pools).
- */
-export const CLIENT_WRITABLE_STANDARD_ATTRIBUTES = [
-  'name',
-  'given_name',
-  'family_name',
-  'middle_name',
-  'nickname',
-  'profile',
-  'picture',
-  'website',
-  'gender',
-  'birthdate',
-  'zoneinfo',
-  'locale',
-  'address',
-  'updated_at',
-] as const;
-
-/** The standard ones above, plus the pool's own mutable custom attributes (never auth-kit's sign-up mark). */
-function clientWriteAttributes(stack: Stack, pool: CfnUserPool): string[] {
-  const schema = (stack.resolve(pool.schema) as { name?: string; Name?: string; mutable?: boolean; Mutable?: boolean }[] | undefined) ?? [];
-  const custom = schema
-    .map((a) => ({ name: a.name ?? a.Name ?? '', mutable: a.mutable ?? a.Mutable ?? true }))
-    .filter((a) => a.name !== '' && a.mutable !== false && !(STANDARD_ATTRIBUTE_NAMES as readonly string[]).includes(a.name))
-    .map((a) => (a.name.startsWith('custom:') ? a.name : `custom:${a.name}`))
-    .filter((name) => name !== SIGN_UP_ORIGIN_ATTRIBUTE);
-  return [...CLIENT_WRITABLE_STANDARD_ATTRIBUTES, ...custom];
-}
-
-/** Cognito's standard attribute names (custom attributes are everything else in the schema). */
-const STANDARD_ATTRIBUTE_NAMES = [
-  ...CLIENT_WRITABLE_STANDARD_ATTRIBUTES,
-  'email',
-  'email_verified',
-  'phone_number',
-  'phone_number_verified',
-  'preferred_username',
-  'sub',
-] as const;
 
 /** The callback URL CDK fills in when a client has OAuth on and no callback of its own. */
 const CDK_PLACEHOLDER_CALLBACK = 'https://example.com';
@@ -293,11 +248,6 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPoolClient.tokenValidityUnits = { accessToken: 'minutes', idToken: 'minutes', refreshToken: 'minutes' };
   // The sign-in session is also an emailed code's lifetime (register A7): one setting, also passed to the screens.
   cfnUserPoolClient.authSessionValidity = o.codeLifetimeMinutes;
-  // What a signed-in person may change about themselves with their own token: their name and profile
-  // details, never their email address (on sign-up sites the server changes it after a recent sign-in,
-  // D4; elsewhere admins do), nor auth-kit's sign-up mark.
-  const writeAttributes = clientWriteAttributes(stack, cfnUserPool);
-  cfnUserPoolClient.writeAttributes = writeAttributes;
 
   // Sign-in happens in the app (USER_AUTH), not through the hosted UI's OAuth redirect. Amplify still
   // turns the authorization-code flow on, and CDK fills in its placeholder callback
@@ -375,6 +325,5 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     waf,
     hostedUiOAuth,
     codeLifetimeMinutes: o.codeLifetimeMinutes,
-    writeAttributes,
   };
 }
