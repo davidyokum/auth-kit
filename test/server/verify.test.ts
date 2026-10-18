@@ -33,16 +33,16 @@ async function expect401(token: string) {
 
 describe('verifyAccessToken: the five checks', () => {
   it('accepts a valid access token and returns its claims', async () => {
-    const token = issuer.mintAccessToken({ sub: 'user-1', groups: ['editor'] });
+    const token = issuer.mintAccessToken({ sub: 'user-1', groups: ['admin-content'] });
     const claims = await verifier.verifyAccessToken(token);
     expect(claims.sub).toBe('user-1');
     expect(claims.token_use).toBe('access');
     expect(claims.client_id).toBe(CLIENT_ID);
-    expect(claims['cognito:groups']).toEqual(['editor']);
+    expect(claims['cognito:groups']).toEqual(['admin-content']);
   });
 
   it('1. signature: rejects a payload edited after signing (forged groups)', async () => {
-    const token = tamperToken(issuer.mintAccessToken({ groups: ['viewer'] }), { 'cognito:groups': ['superadmin'] });
+    const token = tamperToken(issuer.mintAccessToken({ groups: ['admin-view'] }), { 'cognito:groups': ['owner'] });
     const error = await expect401(token);
     expect(error.code).toBe('invalid_token');
   });

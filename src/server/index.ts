@@ -101,9 +101,21 @@ export { TtlCache } from './cache.js';
 export type { JwksLike } from './jwks.js';
 export {
   SESSION_POLICY,
+  OWNER_GROUP,
+  MEMBER_ROLE,
+  MEMBER_LABEL,
   ADMIN_ROLE_RANK,
   ADMIN_ROLE_LABEL,
+  ROLE_DESCRIPTIONS,
+  ROLE_MATRIX,
+  ROLE_MATRIX_COLUMNS,
+  ROLE_MATRIX_CAPABILITIES,
   INVITE_EXPIRY_DAYS,
   type StandardGroup,
+  type SiteRole,
+  type RoleDescription,
+  type RoleMatrixColumn,
+  type RoleMatrixCell,
+  type RoleMatrixRow,
   type AuthTier,
 } from '../shared/policy.js';

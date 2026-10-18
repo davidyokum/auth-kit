@@ -3,8 +3,9 @@
  * "Admin area"). Server-only: it imports the AWS SDK. The React components are in
  * `auth-kit/admin/ui`, and the audit table's CDK construct is in `auth-kit/admin/cdk`.
  *
- * - `createPeopleActions`: the People page's server actions (invite, resend, change role, disable,
- *   re-enable, sign out everywhere, delete, list, Activity), each checked live and guarded.
+ * - `createPeopleActions`: the People page's server actions (invite, resend, change role, transfer
+ *   ownership, disable, re-enable, sign out everywhere, delete, list, Activity), each checked live
+ *   and guarded by the site-wide roles (ADR 0020).
  * - `createDynamoAuditLog`: the append-only audit log, and `runAudited` / `recordChange`, the
  *   intent → calls → result ordering for any change an app logs.
  * - `createInviteExpirySweep`: the scheduled job that disables invites unused for 7 days, never the
@@ -15,13 +16,18 @@ export {
   grantableRoles,
   grantCeiling,
   highestAdminRole,
+  adminGroupsOf,
   isKnownRole,
+  isStandardGroup,
   roleRank,
+  roleOptions,
   inviteStatus,
   inviteExpiresAt,
   MEMBER_ROLE,
+  OWNER_GROUP,
   PEOPLE_ACTIONS,
   PEOPLE_ACTION_CAPABILITY,
+  type RoleOption,
   type PeopleAction,
   type GuardrailActor,
   type GuardrailPerson,
@@ -34,7 +40,11 @@ export {
 } from './guardrails.js';
 export {
   PEOPLE_ACTION_COPY,
-  OWNER_GRANT_NOTE,
+  SUPERADMIN_GRANT_NOTE,
+  TRANSFER_OWNERSHIP_NOTE,
+  OWNER_ROLE_NOTE,
+  RESOURCE_ACCESS_NOTE,
+  ownerCountWarning,
   peopleActionDetails,
   roleLabel,
   lostPasskeyGuidance,
@@ -77,12 +87,14 @@ export { AUDIT_TABLE_SCHEMA } from './audit-schema.js';
 export {
   createSesInviteMailer,
   renderInviteEmail,
-  renderOwnerAlertEmail,
+  renderSuperadminGrantEmail,
+  renderOwnershipTransferEmail,
   renderOwnerInviteWarningEmail,
   type InviteMailer,
   type InviteEmail,
   type OwnerAlertNotifier,
-  type OwnerGrantAlert,
+  type SuperadminGrantAlert,
+  type OwnershipTransferAlert,
   type OwnerInviteWarning,
   type OwnerInviteWarningNotifier,
   type RenderedEmail,
@@ -114,6 +126,23 @@ export {
 } from './quota.js';
 export { ADMIN_POLICY, COGNITO_RATE_QUOTAS, DEFAULT_QUOTA_BUDGET, type CognitoQuotaCategory } from './policy.js';
 export {
+  STANDARD_GROUPS,
+  STANDARD_CAPABILITIES,
+  ADMIN_ROLE_RANK,
+  ADMIN_ROLE_LABEL,
+  MEMBER_LABEL,
+  ROLE_DESCRIPTIONS,
+  ROLE_MATRIX,
+  ROLE_MATRIX_COLUMNS,
+  ROLE_MATRIX_CAPABILITIES,
+  type StandardGroup,
+  type SiteRole,
+  type RoleDescription,
+  type RoleMatrixColumn,
+  type RoleMatrixCell,
+  type RoleMatrixRow,
+} from '../shared/policy.js';
+export {
   PEOPLE_FORM_FIELDS,
   type PersonRow,
   type PeopleList,
@@ -123,6 +152,7 @@ export {
   type InviteInput,
   type TargetInput,
   type ChangeRoleInput,
+  type TransferOwnershipInput,
   type DeleteUserInput,
   type AuditPhase,
   type AuditOutcome,

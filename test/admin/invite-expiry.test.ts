@@ -31,9 +31,9 @@ const WARNING_ENV = {
 };
 
 function seedInvites(pool: ReturnType<typeof fakeUserPool>) {
-  pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'editor');
-  pool.add({ sub: 'new', email: 'new@example.org', emailVerified: false, createdAt: new Date(NOW - 2 * DAY) }, 'viewer');
-  pool.add({ sub: 'used', email: 'used@example.org', emailVerified: true, createdAt: new Date(NOW - 30 * DAY) }, 'admin');
+  pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'admin-content');
+  pool.add({ sub: 'new', email: 'new@example.org', emailVerified: false, createdAt: new Date(NOW - 2 * DAY) }, 'admin-view');
+  pool.add({ sub: 'used', email: 'used@example.org', emailVerified: true, createdAt: new Date(NOW - 30 * DAY) }, 'admin-content-people');
 }
 
 const skip = (over: Partial<SweepSkip> = {}): SweepSkip => ({ sub: 'owner', reason: 'last-owner', warningDue: true, warned: ['owner'], problems: [], ...over });

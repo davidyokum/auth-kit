@@ -61,8 +61,8 @@ function buildApp(extraRoutes: Record<string, RouteHandler> = {}) {
 
   const member = issuer.mintAccessToken({ sub: 'member-1', groups: [] });
   const otherMember = issuer.mintAccessToken({ sub: 'member-2', groups: [] });
-  const admin = issuer.mintAccessToken({ sub: 'admin-1', groups: ['admin'] });
-  cognito.setLiveState('admin-1', { enabled: true, groups: ['admin'] });
+  const admin = issuer.mintAccessToken({ sub: 'admin-1', groups: ['admin-content-people'] });
+  cognito.setLiveState('admin-1', { enabled: true, groups: ['admin-content-people'] });
   return { ...next, member, otherMember, admin, issuer };
 }
 

@@ -165,11 +165,12 @@ describe('Tier 2 pool on a branch', () => {
       (g) => (g as { Properties: { GroupName: string; Precedence: number } }).Properties,
     );
     expect(groups.map((g) => [g.GroupName, g.Precedence])).toEqual([
-      ['superadmin', 0],
-      ['admin', 1],
-      ['editor', 2],
-      ['viewer', 3],
-      ['reviewer', 4],
+      ['owner', 0],
+      ['superadmin', 1],
+      ['admin-content-people', 2],
+      ['admin-content', 3],
+      ['admin-view', 4],
+      ['reviewer', 5],
     ]);
   });
 
@@ -609,7 +610,9 @@ describe('option validation', () => {
     ['RP ID upper case', { passkeys: { relyingPartyId: 'Reports.Example.org' } }, /lowercase/],
     ['RP ID too long', { passkeys: { relyingPartyId: `${'a'.repeat(60)}.example.org` } }, /63-character/],
     ['RP ID single label', { passkeys: { relyingPartyId: 'intranet' } }, /full domain/],
-    ['app role reusing a standard group', { appRoles: ['admin'] }, /already a standard group/],
+    ['app role reusing a standard group', { appRoles: ['admin-content'] }, /already a standard group/],
+    ['app role reusing the owner group', { appRoles: ['owner'] }, /already a standard group/],
+    ['app role with a retired admin name', { appRoles: ['editor'] }, /retired admin role: it's "admin-content" now/],
     ['duplicate app roles', { appRoles: ['a', 'a'] }, /duplicates/],
     ['app role with spaces', { appRoles: ['two words'] }, /valid Cognito group/],
     ['refresh above the Tier 2 ceiling', { refreshTokenMinutes: 50000 }, /ceiling/],
@@ -656,7 +659,7 @@ describe('standardAuthProps', () => {
       },
       multifactor: { mode: 'OPTIONAL', totp: true },
       accountRecovery: 'EMAIL_ONLY',
-      groups: ['superadmin', 'admin', 'editor', 'viewer', 'reviewer'],
+      groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
       senders: { email: { fromEmail: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
     });
   });

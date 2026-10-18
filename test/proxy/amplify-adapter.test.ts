@@ -121,7 +121,7 @@ describe('Cognito calls from the proxy (M1)', () => {
 
   it('makes no Cognito call for anonymous, forged, valid, or refresh-cookie-less requests', async () => {
     const proxy = proxyWith(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 1440 }));
-    const forged = tamperToken(h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 }), { 'cognito:groups': ['superadmin'] });
+    const forged = tamperToken(h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 }), { 'cognito:groups': ['owner'] });
     const valid = h.issuer.mintAccessToken({ sub: 'u1' });
     const expired = h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 });
     const send = (cookie?: string) =>

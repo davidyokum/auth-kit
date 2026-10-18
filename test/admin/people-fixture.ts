@@ -21,10 +21,11 @@ import {
   createPeopleActions,
   type InviteMailer,
   type OwnerAlertNotifier,
-  type OwnerGrantAlert,
   type OwnerInviteWarning,
   type OwnerInviteWarningNotifier,
+  type OwnershipTransferAlert,
   type PeopleAdminConfig,
+  type SuperadminGrantAlert,
 } from '../../src/admin/index.js';
 import { toRequestContext } from '../../src/server/index.js';
 import { type AppCapability, type AppGroup, bearer, harness } from '../helpers.js';
@@ -244,7 +245,8 @@ export function setup(options: SetupOptions = {}) {
   };
   const sent: Parameters<InviteMailer['sendInvite']>[0][] = [];
   const mailFailures: Error[] = [];
-  const ownerAlerts: OwnerGrantAlert[] = [];
+  const grantAlerts: SuperadminGrantAlert[] = [];
+  const transferAlerts: OwnershipTransferAlert[] = [];
   const alertFailures: Error[] = [];
   const ownerWarnings: OwnerInviteWarning[] = [];
   const mailer: InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier = {
@@ -255,11 +257,18 @@ export function setup(options: SetupOptions = {}) {
       sent.push(input);
       return Promise.resolve();
     },
-    ownerGranted(alert) {
-      timeline.push('mail:ownerGranted');
+    superadminGranted(alert) {
+      timeline.push('mail:superadminGranted');
       const f = alertFailures.shift();
       if (f) return Promise.reject(f);
-      ownerAlerts.push(alert);
+      grantAlerts.push(alert);
+      return Promise.resolve();
+    },
+    ownershipTransferred(alert) {
+      timeline.push('mail:ownershipTransferred');
+      const f = alertFailures.shift();
+      if (f) return Promise.reject(f);
+      transferAlerts.push(alert);
       return Promise.resolve();
     },
     ownerInviteUnused(warning) {
@@ -277,7 +286,7 @@ export function setup(options: SetupOptions = {}) {
     const nowSec = Math.floor(h.clock.now / 1000);
     token = h.issuer.mintAccessToken({ sub: actor.sub, groups: actor.groups, authTime: nowSec - (actor.authTimeAgoSeconds ?? 30) });
   };
-  const actor = options.actor ?? { sub: 'owner-1', groups: ['superadmin'] };
+  const actor = options.actor ?? { sub: 'owner-1', groups: ['owner'] };
   signIn(actor);
 
   const people = createPeopleActions<AppGroup, AppCapability>({
@@ -307,7 +316,10 @@ export function setup(options: SetupOptions = {}) {
     errors,
     clock,
     failMail: (e: Error = awsError('MessageRejected', 'Email address is not verified.')) => void mailFailures.push(e),
-    ownerAlerts,
+    /** Super admin grant alerts sent to the owner. */
+    grantAlerts,
+    /** Ownership transfer alerts sent to the previous and new owner. */
+    transferAlerts,
     ownerWarnings,
     failOwnerAlert: (e: Error = awsError('MessageRejected', 'Email address is not verified.')) => void alertFailures.push(e),
     signOut: () => {

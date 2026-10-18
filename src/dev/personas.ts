@@ -3,24 +3,27 @@
  *
  * ```json
  * [
- *   { "key": "superadmin", "email": "superadmin@orchard.test", "groups": ["superadmin"] },
- *   { "key": "admin",      "email": "admin@orchard.test",      "groups": ["admin"] },
- *   { "key": "editor",     "email": "editor@orchard.test",     "groups": ["editor"] },
- *   { "key": "viewer",     "email": "viewer@orchard.test",     "groups": ["viewer"] },
- *   { "key": "member",     "email": "member@orchard.test",     "groups": [] },
- *   { "key": "reviewer",   "email": "reviewer@orchard.test",   "groups": ["reviewer"] }
+ *   { "key": "owner",                "email": "owner@orchard.test",                "groups": ["owner"] },
+ *   { "key": "superadmin",           "email": "superadmin@orchard.test",           "groups": ["superadmin"] },
+ *   { "key": "admin-content-people", "email": "admin-content-people@orchard.test", "groups": ["admin-content-people"] },
+ *   { "key": "admin-content",        "email": "admin-content@orchard.test",        "groups": ["admin-content"] },
+ *   { "key": "admin-view",           "email": "admin-view@orchard.test",           "groups": ["admin-view"] },
+ *   { "key": "member",               "email": "member@orchard.test",               "groups": [] },
+ *   { "key": "reviewer",             "email": "reviewer@orchard.test",             "groups": ["reviewer"] }
  * ]
  * ```
+ *
+ * One persona per admin role (exactly one owner, as on a real site) and a member with no group.
  *
  * Passwords and authenticator secrets never go in this file. They live in the git-ignored
  * `.env.local` as `PERSONA_PASSWORD_<KEY>` and `PERSONA_TOTP_<KEY>`, written by the seed script.
  */
-import { DEV_POLICY, STANDARD_GROUPS } from '../shared/policy.js';
+import { DEV_POLICY, OWNER_GROUP, RETIRED_GROUPS, STANDARD_GROUPS } from '../shared/policy.js';
 
 export type PersonaRole = (typeof DEV_POLICY.personaRoles)[number];
 
 export interface Persona {
-  /** A short id (`editor`, `member-2`, `reviewer`). Names the env vars and the menu entry. */
+  /** A short id (`admin-content`, `member-2`, `reviewer`). Names the env vars and the menu entry. */
   key: string;
   /** Ends in `.test` (a reserved TLD that never delivers mail). Also the sign-in name. */
   email: string;
@@ -50,7 +53,7 @@ export function personaEmail(role: string, domain: string = DEV_POLICY.personaEm
   return `${role}@${domain}`;
 }
 
-/** The primer's five personas (one per admin role and a member with no group), plus one per app role. */
+/** One persona per admin role (one owner) and a member with no group, plus one per app role. */
 export function defaultPersonas(options: { domain?: string; appRoles?: readonly string[] } = {}): Persona[] {
   const domain = options.domain ?? DEV_POLICY.personaEmailDomain;
   if (!domain.endsWith('.test')) throw new Error(`auth-kit: persona domain "${domain}" must end in ".test".`);
@@ -64,7 +67,8 @@ export function defaultPersonas(options: { domain?: string; appRoles?: readonly 
 }
 
 /**
- * Validates `personas.json` and returns the personas. Refuses: a missing admin role or member, an
+ * Validates `personas.json` and returns the personas. Refuses: a missing admin role or member, more
+ * than one owner (a site has exactly one), a retired group name (`admin`, `editor`, `viewer`), an
  * address that doesn't end in `.test`, duplicate keys or addresses, more than one admin role on one
  * persona, and (with `appRoles`) unknown groups or an app role nobody has.
  */
@@ -88,7 +92,7 @@ export function parsePersonas(input: unknown, options: ParsePersonasOptions = {}
       if (!['key', 'email', 'groups', 'label', 'attributes'].includes(field)) problems.push(`${where}: unknown field "${field}".`);
     }
     const key = typeof p.key === 'string' ? p.key : '';
-    if (!KEY_RE.test(key)) problems.push(`${where}.key must be lowercase letters, digits, and hyphens (e.g. "editor").`);
+    if (!KEY_RE.test(key)) problems.push(`${where}.key must be lowercase letters, digits, and hyphens (e.g. "admin-content").`);
     else if (keys.has(key)) problems.push(`${where}: a second persona with key "${key}".`);
     else keys.add(key);
 
@@ -105,9 +109,15 @@ export function parsePersonas(input: unknown, options: ParsePersonasOptions = {}
       if (new Set(groups).size !== groups.length) problems.push(`${where}.groups lists a group twice.`);
       const adminRoles = groups.filter((g) => standard.includes(g));
       if (adminRoles.length > 1) problems.push(`${where} has ${adminRoles.length} admin roles; give each role its own persona.`);
+      for (const g of groups) {
+        const renamed = Object.hasOwn(RETIRED_GROUPS, g) ? RETIRED_GROUPS[g] : undefined;
+        if (renamed) problems.push(`${where}: "${g}" is a retired admin role; it's "${renamed}" now.`);
+      }
       if (appRoles) {
         for (const g of groups) {
-          if (!standard.includes(g) && !appRoles.includes(g)) problems.push(`${where}: "${g}" isn't an admin role or one of the app roles.`);
+          if (!standard.includes(g) && !appRoles.includes(g) && !Object.hasOwn(RETIRED_GROUPS, g)) {
+            problems.push(`${where}: "${g}" isn't an admin role or one of the app roles.`);
+          }
         }
       }
     }
@@ -140,6 +150,8 @@ export function parsePersonas(input: unknown, options: ParsePersonasOptions = {}
   for (const role of standard) {
     if (!personas.some((p) => p.groups.includes(role))) problems.push(`no persona has the "${role}" role.`);
   }
+  const owners = personas.filter((p) => p.groups.includes(OWNER_GROUP)).length;
+  if (owners > 1) problems.push(`${owners} personas have the "${OWNER_GROUP}" role; a site has exactly one owner.`);
   if (!personas.some((p) => p.groups.length === 0)) problems.push('no member persona (a persona with no groups).');
   for (const role of appRoles ?? []) {
     if (!personas.some((p) => p.groups.includes(role))) problems.push(`no persona has the app role "${role}".`);
@@ -149,7 +161,7 @@ export function parsePersonas(input: unknown, options: ParsePersonasOptions = {}
   return personas;
 }
 
-/** "Editor", "Member 2": the persona's label, or one made from its key. Shown with "(test)". */
+/** "Admin Content", "Member 2": the persona's label, or one made from its key. Shown with "(test)". */
 export function personaLabel(persona: Pick<Persona, 'key' | 'label'>): string {
   if (persona.label) return persona.label;
   return persona.key

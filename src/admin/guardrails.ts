@@ -1,23 +1,43 @@
-import { ADMIN_ROLE_RANK, INVITE_EXPIRY_DAYS, STANDARD_GROUPS, type StandardGroup } from '../shared/policy.js';
+import {
+  ADMIN_ROLE_LABEL,
+  ADMIN_ROLE_RANK,
+  INVITE_EXPIRY_DAYS,
+  MEMBER_LABEL,
+  MEMBER_ROLE,
+  OWNER_GROUP,
+  ROLE_DESCRIPTIONS,
+  STANDARD_GROUPS,
+  type SiteRole,
+  type StandardGroup,
+} from '../shared/policy.js';
 import { standardCapabilities } from '../server/capabilities.js';
 
 /** Every People-page action. */
-export const PEOPLE_ACTIONS = ['invite', 'resend', 'changeRole', 'disable', 'enable', 'signOutEverywhere', 'delete'] as const;
+export const PEOPLE_ACTIONS = [
+  'invite',
+  'resend',
+  'changeRole',
+  'transferOwnership',
+  'disable',
+  'enable',
+  'signOutEverywhere',
+  'delete',
+] as const;
 export type PeopleAction = (typeof PEOPLE_ACTIONS)[number];
 
-/** The capability each action needs. Owners alone hold `data.delete`. */
+/** The capability each action needs. The owner and Super admins hold `data.delete`; the owner alone `owner.transfer`. */
 export const PEOPLE_ACTION_CAPABILITY: Readonly<Record<PeopleAction, string>> = {
   invite: 'people.manage',
   resend: 'people.manage',
   changeRole: 'roles.manage',
+  transferOwnership: 'owner.transfer',
   disable: 'people.manage',
   enable: 'people.manage',
   signOutEverywhere: 'people.manage',
   delete: 'data.delete',
 };
 
-/** "No admin role" in role pickers and role changes. */
-export const MEMBER_ROLE = 'member';
+export { MEMBER_ROLE, OWNER_GROUP };
 
 export interface GuardrailPerson {
   sub: string;
@@ -53,12 +73,15 @@ export interface GuardrailInput {
   /**
    * The app's own roles (its capability map's groups, e.g. `reviewer`). Role names are matched
    * exactly against the standard groups, `member`, and these; anything else ("Admin", " admin",
-   * "owner") is refused rather than guessed at.
+   * "Owner", "super-admin") is refused rather than guessed at.
    */
   knownRoles?: readonly string[];
-  /** Enabled owners right now, read live. Required whenever the target is an owner; anything but a whole number ≥ 0 is a "no". */
+  /**
+   * Enabled owners right now, read live. Needed only when an owner changes another owner's role, the
+   * one way to fix a site that has more than one; anything but a whole number ≥ 0 is a "no".
+   */
   ownerCount?: number;
-  /** Why. Every role change records one. */
+  /** Why. Every role change and every ownership transfer records one. */
   reason?: string;
 }
 
@@ -66,6 +89,9 @@ export type GuardrailCode =
   | 'capability'
   | 'self'
   | 'rank'
+  /** The owner role was asked for by invite or role change; it moves only by Transfer ownership. */
+  | 'owner_transfer'
+  /** The target is the site's owner, whom nobody disables, demotes, or deletes. */
   | 'last_owner'
   | 'owner_count_unknown'
   | 'reason_required'
@@ -89,7 +115,7 @@ export function isKnownRole(role: unknown, knownRoles: readonly string[] = []): 
   return typeof role === 'string' && (isStandardGroup(role) || role === MEMBER_ROLE || knownRoles.includes(role));
 }
 
-/** Rank of a role: admin roles 1-4; app roles, `member`, and anything unrecognized 0. */
+/** Rank of a role: admin roles 1 (`admin-view`) to 5 (`owner`); app roles, `member`, and anything unrecognized 0. */
 export function roleRank(role: string | null | undefined): number {
   return isStandardGroup(role) ? ADMIN_ROLE_RANK[role] : 0;
 }
@@ -106,31 +132,95 @@ export function highestAdminRole(groups: readonly string[]): StandardGroup | nul
   return best;
 }
 
-/** Highest rank this person may grant or act on: owners anything (including owners), others below their own. */
+/**
+ * Highest rank this person may grant or act on: always below their own. So only the owner grants
+ * (or manages) Super admins, and nobody can grant the owner role at all: it moves only by Transfer
+ * ownership.
+ */
 export function grantCeiling(groups: readonly string[]): number {
   const top = highestAdminRole(groups);
-  if (!top) return 0;
-  return top === 'superadmin' ? ADMIN_ROLE_RANK.superadmin : ADMIN_ROLE_RANK[top] - 1;
+  return top ? ADMIN_ROLE_RANK[top] - 1 : 0;
 }
 
-/** Admin roles this person may grant. */
+/** Admin roles this person may grant (never `owner`). */
 export function grantableRoles(groups: readonly string[]): StandardGroup[] {
   const ceiling = grantCeiling(groups);
-  return STANDARD_GROUPS.filter((g) => ADMIN_ROLE_RANK[g] <= ceiling);
+  return STANDARD_GROUPS.filter((g) => g !== OWNER_GROUP && ADMIN_ROLE_RANK[g] <= ceiling);
+}
+
+/** The screen name for a role: `member` (or none) is "Member"; anything unrecognized is shown as given. */
+export function roleLabel(role: string | null | undefined): string {
+  if (!role || role === MEMBER_ROLE) return MEMBER_LABEL;
+  return isStandardGroup(role) ? ADMIN_ROLE_LABEL[role] : role;
+}
+
+/** One choice in a role picker: the role, what it can and can't do, and why it's unavailable if it is. */
+export interface RoleOption {
+  role: SiteRole;
+  label: string;
+  can: string;
+  cannot: string;
+  /** False when this person can't pick it here; `reason` says why. */
+  available: boolean;
+  reason?: string;
+  /** True for the person's current role (role changes). */
+  current: boolean;
+}
+
+/**
+ * The choices a role picker offers, highest first, then Member: every role except Owner (which moves
+ * only by Transfer ownership), each marked available or not, with the reason. The server re-checks
+ * everything; this only decides what to offer and how to explain it.
+ *
+ * @param actorGroups the acting person's live groups
+ * @param current the target's current role, for a role change (`member` for none); omit for an invite
+ */
+export function roleOptions(actorGroups: readonly string[], current?: SiteRole | null): RoleOption[] {
+  const top = highestAdminRole(actorGroups);
+  const ceiling = grantCeiling(actorGroups);
+  const roles: SiteRole[] = [...STANDARD_GROUPS.filter((g) => g !== OWNER_GROUP), MEMBER_ROLE];
+  const currentRole: SiteRole | undefined = current === undefined ? undefined : (current ?? MEMBER_ROLE);
+  return roles.map((role) => {
+    const isCurrent = currentRole === role;
+    let reason: string | undefined;
+    if (isCurrent) reason = 'Their current role.';
+    else if (!top) reason = 'You can’t grant roles.';
+    else if (role !== MEMBER_ROLE && ADMIN_ROLE_RANK[role] > ceiling) {
+      reason =
+        role === 'superadmin'
+          ? 'Only the owner can grant Super admin.'
+          : `You grant only roles below your own (${ADMIN_ROLE_LABEL[top]}).`;
+    }
+    return {
+      role,
+      label: roleLabel(role),
+      ...ROLE_DESCRIPTIONS[role],
+      available: reason === undefined,
+      ...(reason !== undefined && { reason }),
+      current: isCurrent,
+    };
+  });
 }
 
 function deny(code: GuardrailCode, reason: string): GuardrailResult {
   return { ok: false, code, reason };
 }
 
+const OWNER_ROLE_MOVES_BY_TRANSFER = 'The owner role can’t be granted. It moves only by Transfer ownership, which the owner starts.';
+
 /**
- * The People page's guardrails (03 §2, Admin area), as one pure check every server action runs
- * before calling Cognito:
- * - the action's capability (owners alone delete accounts);
+ * The People page's guardrails (03 §2, Admin area; ADR 0020), as one pure check every server action
+ * runs before calling Cognito:
+ * - the action's capability (`data.delete` for deleting, the owner's `owner.transfer` for Transfer
+ *   ownership);
  * - nobody changes their own role, disables themselves, or deletes themselves;
- * - you grant, and act on, only roles below your own (owners may make owners);
- * - nobody removes, disables, or deletes the last owner (and an unknown owner count is a "no");
- * - every role change records a reason, and a promotion needs a recent sign-in;
+ * - you grant, and act on, only roles below your own: only the owner grants or manages Super admins;
+ * - the owner role is never granted (invite or role change): it moves only by Transfer ownership,
+ *   which only the owner starts, to someone who has signed in, with a reason;
+ * - nobody disables, demotes, or deletes the owner. The one exception repairs a site with more than
+ *   one owner: an owner may change another owner's role while the live owner count is 2 or more (an
+ *   unknown count is a "no");
+ * - every role change records a reason, and a promotion or a transfer needs a recent sign-in;
  * - when the target's state is given: resend only an unused invite (it never touches an active
  *   account), re-enable only a disabled account, disable only an enabled one, and delete only after
  *   disabling (the retention period itself is checked by the action, from the audit log).
@@ -144,64 +234,111 @@ export function checkPeopleAction(input: GuardrailInput): GuardrailResult {
     ['fromRole', input.fromRole],
   ] as const) {
     if (role !== undefined && !isKnownRole(role, input.knownRoles)) {
-      return deny('invalid', `Unknown ${field === 'toRole' ? 'role' : 'current role'} "${String(role)}". Roles are spelled exactly, e.g. "superadmin" (shown as Owner).`);
+      return deny(
+        'invalid',
+        `Unknown ${field === 'toRole' ? 'role' : 'current role'} "${String(role)}". Roles are spelled exactly, e.g. "admin-content" (shown as ${ADMIN_ROLE_LABEL['admin-content']}).`,
+      );
     }
   }
 
   const capabilities = actor.capabilities ?? standardCapabilities.capabilitiesOf(actor.groups);
   if (typeof capabilities?.has !== 'function' || !capabilities.has(PEOPLE_ACTION_CAPABILITY[action])) {
-    return deny('capability', action === 'delete' ? 'Only owners can delete accounts.' : "You don't have permission to do that.");
+    return deny(
+      'capability',
+      action === 'delete'
+        ? 'Only the owner and Super admins can delete accounts.'
+        : action === 'transferOwnership'
+          ? 'Only the owner can transfer ownership.'
+          : "You don't have permission to do that.",
+    );
   }
   if (action !== 'invite' && !target) return deny('invalid', 'This action needs a person.');
   if ((action === 'invite' || action === 'changeRole') && !input.toRole) return deny('invalid', 'Choose a role.');
 
   const self = target !== undefined && target.sub === actor.sub;
-  if (self && (action === 'changeRole' || action === 'disable' || action === 'delete')) {
+  if (self && (action === 'changeRole' || action === 'disable' || action === 'delete' || action === 'transferOwnership')) {
     return deny(
       'self',
-      action === 'changeRole' ? 'Nobody can change their own role.' : `You can't ${action} your own account.`,
+      action === 'changeRole'
+        ? 'Nobody can change their own role.'
+        : action === 'transferOwnership'
+          ? 'You already own this site. Choose who should own it next.'
+          : `You can't ${action} your own account.`,
     );
   }
 
   // Signing yourself out everywhere is always fine.
   if (self && action === 'signOutEverywhere') return { ok: true, requiresRecentSignIn: false };
 
+  if (action === 'transferOwnership') return checkTransfer(input, target!);
+
+  if ((action === 'invite' || action === 'changeRole') && input.toRole === OWNER_GROUP) {
+    return deny('owner_transfer', OWNER_ROLE_MOVES_BY_TRANSFER);
+  }
+
+  const actorIsOwner = actor.groups.includes(OWNER_GROUP);
   const ceiling = grantCeiling(actor.groups);
   const currentRole = target ? highestAdminRole(target.groups) : null;
-  if (roleRank(currentRole) > ceiling) {
+  // A disabled account in the owner group isn't the owner; the rank check below still protects it.
+  const targetIsOwner = target?.groups.includes(OWNER_GROUP) === true && target.enabled !== false;
+
+  // Nobody disables, demotes, or deletes the owner.
+  let repairingExtraOwner = false;
+  if (targetIsOwner) {
+    if (action === 'disable' || action === 'delete') {
+      return deny('last_owner', `The site's owner can't be ${action === 'disable' ? 'disabled' : 'deleted'}. The owner can transfer ownership first.`);
+    }
+    if (action === 'changeRole') {
+      if (!actorIsOwner) return deny('last_owner', "The owner's role changes only by Transfer ownership.");
+      // Fail closed: undefined, NaN, Infinity, fractions, and negatives all mean "couldn't confirm".
+      const count = input.ownerCount;
+      if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+        return deny('owner_count_unknown', "Couldn't confirm how many owners this site has, so no owner's role can change right now.");
+      }
+      if (count <= 1) return deny('last_owner', "The owner's role changes only by Transfer ownership.");
+      // More than one owner: an owner may demote the extra one, back toward exactly one.
+      repairingExtraOwner = true;
+    }
+  }
+
+  if (!repairingExtraOwner && roleRank(currentRole) > ceiling) {
     return deny('rank', 'You can only manage people whose role is below your own.');
   }
-  if (input.fromRole !== undefined && roleRank(input.fromRole) > ceiling) {
+  if (!repairingExtraOwner && input.fromRole !== undefined && roleRank(input.fromRole) > ceiling) {
     return deny('rank', 'You can only remove roles below your own.');
   }
   if (input.toRole !== undefined && roleRank(input.toRole) > ceiling) {
-    return deny('rank', 'You can only grant roles below your own.');
+    return deny('rank', input.toRole === 'superadmin' ? 'Only the owner can grant Super admin.' : 'You can only grant roles below your own.');
   }
 
   const stateProblem = target ? targetStateProblem(action, target) : null;
   if (stateProblem) return deny('state', stateProblem);
 
-  // The last owner can't be removed, demoted, disabled, or deleted. A disabled owner already isn't one.
-  const targetIsOwner = target?.groups.includes('superadmin') === true && target.enabled !== false;
-  const removesOwner =
-    targetIsOwner &&
-    (action === 'disable' || action === 'delete' || (action === 'changeRole' && input.toRole !== 'superadmin'));
-  if (removesOwner) {
-    // Fail closed: undefined, NaN, Infinity, fractions, and negatives all mean "couldn't confirm".
-    const count = input.ownerCount;
-    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
-      return deny('owner_count_unknown', "Couldn't confirm another owner exists, so this owner can't be removed right now.");
-    }
-    if (count <= 1) return deny('last_owner', 'Each site keeps at least one owner. Add another owner first.');
-  }
-
   if (action === 'changeRole' && (typeof input.reason === 'string' ? input.reason.trim() : '').length < 3) {
-    return deny('reason_required', 'Every role change records a reason.');
+    return deny('reason_required', 'Every role change needs a reason (it goes in the audit log).');
   }
 
   const promotion =
     (action === 'invite' || action === 'changeRole') && roleRank(input.toRole) > roleRank(currentRole) && roleRank(input.toRole) > 0;
   return { ok: true, requiresRecentSignIn: promotion };
+}
+
+/**
+ * Transfer ownership: only the owner, only to an enabled account that has signed in (an unused
+ * invite would hand the site to whoever controls that inbox), never to an owner, always with a reason
+ * and a recent sign-in. The previous owner becomes Super admin.
+ */
+function checkTransfer(input: GuardrailInput, target: GuardrailTarget): GuardrailResult {
+  if (!input.actor.groups.includes(OWNER_GROUP)) return deny('capability', 'Only the owner can transfer ownership.');
+  if (target.groups.includes(OWNER_GROUP)) return deny('state', 'They already hold the owner role.');
+  if (target.enabled === false) return deny('state', 'Ownership can go only to an enabled account.');
+  if (target.invite !== undefined && target.invite !== 'accepted') {
+    return deny('state', 'Ownership can go only to someone who has signed in. Their invite hasn’t been used yet.');
+  }
+  if ((typeof input.reason === 'string' ? input.reason.trim() : '').length < 3) {
+    return deny('reason_required', 'Transferring ownership needs a reason (it goes in the audit log).');
+  }
+  return { ok: true, requiresRecentSignIn: true };
 }
 
 function isPerson(value: unknown): value is GuardrailPerson {
@@ -226,6 +363,7 @@ function targetStateProblem(action: PeopleAction, target: GuardrailTarget): stri
       return target.enabled === true ? 'Disable first. Deleting comes after the retention period.' : null;
     case 'invite':
     case 'changeRole':
+    case 'transferOwnership':
     case 'signOutEverywhere':
       return null;
   }

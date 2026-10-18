@@ -10,8 +10,11 @@ import {
   lostPasskeyGuidance,
   peopleAdminPolicy,
   renderInviteEmail,
-  renderOwnerAlertEmail,
   renderOwnerInviteWarningEmail,
+  renderOwnershipTransferEmail,
+  renderSuperadminGrantEmail,
+  ownerCountWarning,
+  RESOURCE_ACCESS_NOTE,
   roleLabel,
   type ActivityEntry,
 } from '../../src/admin/index.js';
@@ -55,50 +58,78 @@ describe('invite email', () => {
   });
 });
 
-describe('owner-grant alert email (the default notifier)', () => {
+describe('Super admin grant alert email (the default notifier)', () => {
   const alert = {
     siteName: 'Example Reports',
     owners: [
       { sub: 'o1', email: 'olivia@example.org' },
-      { sub: 'o2', email: 'priya@example.org' },
-      { sub: 'o2b', email: 'priya@example.org' },
-      { sub: 'g', email: 'grace@example.org', name: 'Grace <b>' },
+      { sub: 'o1b', email: 'olivia@example.org' },
     ],
     grantedTo: { sub: 'g', email: 'grace@example.org', name: 'Grace <b>' },
     grantedBy: { sub: 'o1', email: 'olivia@example.org' },
     via: 'changeRole' as const,
-    reason: 'Second owner',
+    reason: 'Deputy',
     at: new Date('2026-10-17T15:04:00Z'),
     context: { ip: '203.0.113.24', userAgent: 'Safari', requestId: 'req-1' },
   };
 
   it('says who, whom, when, from where, why, and what to do', () => {
-    const email = renderOwnerAlertEmail(alert);
-    expect(email.subject).toBe('Example Reports: grace@example.org is now an owner');
-    expect(email.text).toContain('olivia@example.org made Grace <b> (grace@example.org) an owner of Example Reports.');
+    const email = renderSuperadminGrantEmail(alert);
+    expect(email.subject).toBe('Example Reports: grace@example.org is now a Super admin');
+    expect(email.text).toContain('olivia@example.org made Grace <b> (grace@example.org) a Super admin of Example Reports.');
     expect(email.text).toContain('When: 2026-10-17 15:04 UTC');
-    expect(email.text).toContain('Reason given: Second owner');
+    expect(email.text).toContain('Reason given: Deputy');
     expect(email.text).toContain('From: 203.0.113.24 (Safari)');
-    expect(email.text).toMatch(/didn't expect it, disable both accounts/);
+    expect(email.text).toMatch(/Only the owner can grant it/);
+    expect(email.text).toMatch(/didn't expect it, disable the new Super admin/);
     expect(email.html).toContain('Grace &lt;b&gt;');
     expect(email.html).not.toContain('<b>');
   });
 
-  it('goes to every owner in one SES message, from the site sender', async () => {
+  it('goes to the owner in one SES message, from the site sender', async () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
     const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
-    await mailer.ownerGranted(alert);
+    await mailer.superadminGranted(alert);
     const calls = ses.commandCalls(SendEmailCommand);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args[0].input).toMatchObject({
       FromEmailAddress: 'Example <noreply@example.org>',
-      Destination: { ToAddresses: ['olivia@example.org', 'priya@example.org', 'grace@example.org'] },
+      Destination: { ToAddresses: ['olivia@example.org'] },
     });
-    await expect(mailer.ownerGranted({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
+    await expect(mailer.superadminGranted({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
     ses.on(SendEmailCommand).rejects(Object.assign(new Error('nope'), { name: 'MessageRejected' }));
-    await expect(mailer.ownerGranted(alert)).rejects.toMatchObject({ name: 'MessageRejected' });
+    await expect(mailer.superadminGranted(alert)).rejects.toMatchObject({ name: 'MessageRejected' });
+  });
+});
+
+describe('ownership transfer alert email (the default notifier)', () => {
+  const alert = {
+    siteName: 'Example Reports',
+    previousOwner: { sub: 'o1', email: 'olivia@example.org', name: 'Olivia' },
+    newOwner: { sub: 'g', email: 'grace@example.org', name: 'Grace' },
+    reason: 'Handing the site over',
+    at: new Date('2026-10-18T09:30:00Z'),
+    context: { ip: '203.0.113.24', userAgent: 'Safari' },
+  };
+
+  it('says who handed the site to whom, when, why, and what each now is', () => {
+    const email = renderOwnershipTransferEmail(alert);
+    expect(email.subject).toBe('Example Reports: grace@example.org is now the owner');
+    expect(email.text).toContain('Olivia (olivia@example.org) transferred ownership of Example Reports to Grace (grace@example.org).');
+    expect(email.text).toContain('Reason given: Handing the site over');
+    expect(email.text).toContain("grace@example.org is now the site's only owner. olivia@example.org is now a Super admin.");
+  });
+
+  it('goes to both owners in one message, and refuses without both addresses', async () => {
+    const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
+    const ses = mockClient(client);
+    ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
+    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    await mailer.ownershipTransferred(alert);
+    expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input.Destination).toEqual({ ToAddresses: ['olivia@example.org', 'grace@example.org'] });
+    await expect(mailer.ownershipTransferred({ ...alert, newOwner: { sub: 'g', email: '' } })).rejects.toThrow(/both/);
   });
 });
 
@@ -132,7 +163,7 @@ describe('last-owner warning email (the sweep leaves the only owner’s unused i
     const email = renderOwnerInviteWarningEmail({ ...warning, to: { email: 'ops@example.org', kind: 'fallback' } });
     expect(email.subject).toBe("Example & Co: the owner invite for olivia@example.org hasn't been used");
     expect(email.text).toContain('The owner invite for Olivia <b> (olivia@example.org) on Example & Co');
-    expect(email.text).toMatch(/make someone else an owner: the next run then disables this invite/);
+    expect(email.text).toMatch(/give the owner role to the right person through the break-glass path .*: the next run then disables this invite/);
     expect(email.html).not.toContain('<a ');
   });
 
@@ -179,10 +210,22 @@ describe('IAM policies', () => {
 
 describe('copy', () => {
   it('names roles the way screens do', () => {
-    expect(roleLabel('superadmin')).toBe('Owner');
+    expect(roleLabel('owner')).toBe('Owner');
+    expect(roleLabel('superadmin')).toBe('Super admin');
+    expect(roleLabel('admin-content')).toBe(`Admin ${String.fromCharCode(0x2013)} content only`);
     expect(roleLabel('member')).toBe('Member');
     expect(roleLabel(null)).toBe('Member');
     expect(roleLabel('reviewer')).toBe('reviewer');
+  });
+
+  it('says site roles aren’t item access, in David’s exact words, never "record" or "resource"', () => {
+    expect(RESOURCE_ACCESS_NOTE).toBe('These roles are for running the site. Access to individual projects, plans, and other items is managed on each one.');
+  });
+
+  it('flags a site without exactly one owner', () => {
+    expect(ownerCountWarning(1)).toBeNull();
+    expect(ownerCountWarning(0)).toMatch(/no owner.*Cognito console/s);
+    expect(ownerCountWarning(2)).toMatch(/2 owners; it should have exactly one/);
   });
 
   it('guides a lost passkey through the person’s own account, and differs for an admin pool', () => {
@@ -201,20 +244,20 @@ describe('copy', () => {
       actor: { sub: 'b', email: 'bob@example.org' },
       action: 'people.changeRole',
       target: { sub: 'g', email: 'grace@example.org' },
-      before: { adminRole: 'editor' },
-      after: { adminRole: 'admin' },
+      before: { adminRole: 'admin-content' },
+      after: { adminRole: 'superadmin' },
       reason: 'Runs the newsletter',
       context: { ip: '203.0.113.24', userAgent: 'Safari' },
     };
-    const ok: ActivityEntry = { status: 'ok', event: { ...base, phase: 'result', outcome: 'ok', calls: ['AdminRemoveUserFromGroup editor: ok', 'AdminAddUserToGroup admin: ok'] } };
+    const ok: ActivityEntry = { status: 'ok', event: { ...base, phase: 'result', outcome: 'ok', calls: ['AdminRemoveUserFromGroup admin-content: ok', 'AdminAddUserToGroup superadmin: ok'] } };
     expect(describeActivity(ok, (sub) => (sub === 'g' ? 'Grace' : undefined))).toEqual({
       actor: 'bob@example.org',
       verb: 'changed the role of',
       target: 'Grace',
-      change: 'Editor → Admin',
+      change: `Admin ${String.fromCharCode(0x2013)} content only → Super admin`,
       reason: 'Runs the newsletter',
       status: 'ok',
-      trail: 'intent logged → AdminRemoveUserFromGroup editor: ok → AdminAddUserToGroup admin: ok → result: ok',
+      trail: 'intent logged → AdminRemoveUserFromGroup admin-content: ok → AdminAddUserToGroup superadmin: ok → result: ok',
       from: '203.0.113.24 · Safari',
     });
     expect(describeActivity({ status: 'refused', event: { ...base, phase: 'refused', error: 'self: Nobody can change their own role.' } })).toMatchObject({

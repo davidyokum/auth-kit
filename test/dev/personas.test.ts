@@ -10,30 +10,33 @@ import {
 } from '../../src/dev/index.js';
 
 const primer = [
+  { key: 'owner', email: 'owner@orchard.test', groups: ['owner'] },
   { key: 'superadmin', email: 'superadmin@orchard.test', groups: ['superadmin'] },
-  { key: 'admin', email: 'admin@orchard.test', groups: ['admin'] },
-  { key: 'editor', email: 'editor@orchard.test', groups: ['editor'] },
-  { key: 'viewer', email: 'viewer@orchard.test', groups: ['viewer'] },
+  { key: 'admin-content-people', email: 'admin-content-people@orchard.test', groups: ['admin-content-people'] },
+  { key: 'admin-content', email: 'admin-content@orchard.test', groups: ['admin-content'] },
+  { key: 'admin-view', email: 'admin-view@orchard.test', groups: ['admin-view'] },
   { key: 'member', email: 'member@orchard.test', groups: [] },
 ];
+const MEMBER = 5;
 
 describe('personas.json', () => {
-  it("accepts the primer's file as written", () => {
+  it('accepts the documented file as written', () => {
     expect(parsePersonas(primer)).toEqual(primer);
   });
 
-  it('defaults to one persona per admin role plus a member with no group, all on .test, plus app roles', () => {
+  it('defaults to one persona per admin role (one owner) plus a member with no group, all on .test, plus app roles', () => {
     expect(defaultPersonas().map((p) => [p.key, p.email, p.groups])).toEqual([
+      ['owner', 'owner@personas.test', ['owner']],
       ['superadmin', 'superadmin@personas.test', ['superadmin']],
-      ['admin', 'admin@personas.test', ['admin']],
-      ['editor', 'editor@personas.test', ['editor']],
-      ['viewer', 'viewer@personas.test', ['viewer']],
+      ['admin-content-people', 'admin-content-people@personas.test', ['admin-content-people']],
+      ['admin-content', 'admin-content@personas.test', ['admin-content']],
+      ['admin-view', 'admin-view@personas.test', ['admin-view']],
       ['member', 'member@personas.test', []],
     ]);
     const withRoles = defaultPersonas({ domain: 'orchard.test', appRoles: ['reviewer'] });
     expect(withRoles.at(-1)).toEqual({ key: 'reviewer', email: 'reviewer@orchard.test', groups: ['reviewer'] });
-    expect(parsePersonas(withRoles, { appRoles: ['reviewer'] })).toHaveLength(6);
-    expect(personaEmail('editor')).toBe('editor@personas.test');
+    expect(parsePersonas(withRoles, { appRoles: ['reviewer'] })).toHaveLength(7);
+    expect(personaEmail('admin-content')).toBe('admin-content@personas.test');
     expect(() => defaultPersonas({ domain: 'example.com' })).toThrow(/\.test/);
   });
 
@@ -48,15 +51,18 @@ describe('personas.json', () => {
   it.each([
     ['a real-looking address', primer.map((p, i) => (i === 0 ? { ...p, email: 'owner@example.com' } : p)), /\.test/],
     ['a bare .test TLD address', primer.map((p, i) => (i === 0 ? { ...p, email: 'owner@test' } : p)), /\.test/],
-    ['a missing admin role', primer.slice(1), /no persona has the "superadmin" role/],
-    ['no member', primer.slice(0, 4), /no member persona/],
-    ['duplicate keys', [...primer, { key: 'admin', email: 'admin2@orchard.test', groups: ['admin'] }], /second persona with key "admin"/],
-    ['duplicate emails', [...primer, { key: 'admin-2', email: 'ADMIN@orchard.test', groups: ['admin'] }], /duplicate email/],
-    ['two admin roles on one persona', primer.map((p, i) => (i === 2 ? { ...p, groups: ['editor', 'admin'] } : p)), /2 admin roles/],
-    ['a bad key', primer.map((p, i) => (i === 4 ? { ...p, key: 'Member One' } : p)), /\.key must be/],
-    ['groups that are not a list', primer.map((p, i) => (i === 4 ? { ...p, groups: 'admin' } : p)), /\.groups must be a list/],
-    ['an unknown field (a password)', primer.map((p, i) => (i === 4 ? { ...p, password: 'hunter2hunter2hunter2' } : p)), /unknown field "password"/],
-    ['an attribute auth-kit sets', primer.map((p, i) => (i === 4 ? { ...p, attributes: { email_verified: 'false' } } : p)), /can't set "email_verified"/],
+    ['a missing owner', primer.slice(1), /no persona has the "owner" role/],
+    ['a missing admin role', primer.filter((p) => p.key !== 'admin-view'), /no persona has the "admin-view" role/],
+    ['two owners (a site has exactly one)', [...primer, { key: 'owner-2', email: 'owner-2@orchard.test', groups: ['owner'] }], /2 personas have the "owner" role/],
+    ['a retired group name', [...primer, { key: 'editor', email: 'editor@orchard.test', groups: ['editor'] }], /"editor" is a retired admin role; it's "admin-content" now/],
+    ['no member', primer.slice(0, MEMBER), /no member persona/],
+    ['duplicate keys', [...primer, { key: 'admin-view', email: 'view2@orchard.test', groups: ['admin-view'] }], /second persona with key "admin-view"/],
+    ['duplicate emails', [...primer, { key: 'view-2', email: 'ADMIN-VIEW@orchard.test', groups: ['admin-view'] }], /duplicate email/],
+    ['two admin roles on one persona', primer.map((p, i) => (i === 3 ? { ...p, groups: ['admin-content', 'admin-view'] } : p)), /2 admin roles/],
+    ['a bad key', primer.map((p, i) => (i === MEMBER ? { ...p, key: 'Member One' } : p)), /\.key must be/],
+    ['groups that are not a list', primer.map((p, i) => (i === MEMBER ? { ...p, groups: 'admin-view' } : p)), /\.groups must be a list/],
+    ['an unknown field (a password)', primer.map((p, i) => (i === MEMBER ? { ...p, password: 'hunter2hunter2hunter2' } : p)), /unknown field "password"/],
+    ['an attribute auth-kit sets', primer.map((p, i) => (i === MEMBER ? { ...p, attributes: { email_verified: 'false' } } : p)), /can't set "email_verified"/],
     ['not an array', {}, /array/],
   ])('refuses %s', (_label, input, message) => {
     expect(() => parsePersonas(input)).toThrow(message);
@@ -72,13 +78,19 @@ describe('personas.json', () => {
   it('names env vars, labels, and lookups', () => {
     expect(personaEnvNames('member-2')).toEqual({ password: 'PERSONA_PASSWORD_MEMBER_2', totpSecret: 'PERSONA_TOTP_MEMBER_2' });
     expect(personaLabel({ key: 'member-2' })).toBe('Member 2');
-    expect(personaLabel({ key: 'editor', label: 'Copy editor' })).toBe('Copy editor');
-    expect(personaCredentialsFromEnv({ key: 'editor' }, { PERSONA_PASSWORD_EDITOR: 'p'.repeat(20), PERSONA_TOTP_EDITOR: 'JBSWY3DP' })).toEqual({
+    expect(personaLabel({ key: 'admin-content', label: 'Copy editor' })).toBe('Copy editor');
+    expect(personaEnvNames('admin-content-people')).toEqual({
+      password: 'PERSONA_PASSWORD_ADMIN_CONTENT_PEOPLE',
+      totpSecret: 'PERSONA_TOTP_ADMIN_CONTENT_PEOPLE',
+    });
+    expect(
+      personaCredentialsFromEnv({ key: 'admin-content' }, { PERSONA_PASSWORD_ADMIN_CONTENT: 'p'.repeat(20), PERSONA_TOTP_ADMIN_CONTENT: 'JBSWY3DP' }),
+    ).toEqual({
       password: 'p'.repeat(20),
       totpSecret: 'JBSWY3DP',
     });
-    expect(personaCredentialsFromEnv({ key: 'editor' }, {})).toBeUndefined();
-    expect(personaForEmail(parsePersonas(primer), ' Editor@Orchard.test ')?.key).toBe('editor');
+    expect(personaCredentialsFromEnv({ key: 'admin-content' }, {})).toBeUndefined();
+    expect(personaForEmail(parsePersonas(primer), ' Admin-Content@Orchard.test ')?.key).toBe('admin-content');
     expect(personaForEmail(parsePersonas(primer), 'someone@example.org')).toBeUndefined();
   });
 });

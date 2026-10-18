@@ -3,6 +3,7 @@ import {
   type AuthTier,
   SESSION_POLICY,
   STANDARD_GROUPS,
+  RETIRED_GROUPS,
   WAF_POLICY,
 } from '../shared/policy.js';
 
@@ -130,7 +131,7 @@ export interface AuthStandardOptions {
   email: AuthEmailOptions;
   /** Passkey settings, or `false`/omitted until the final domain is live. */
   passkeys?: PasskeyOptions | false;
-  /** Groups beyond superadmin, admin, editor, and viewer, e.g. `['reviewer']`. */
+  /** Groups beyond the standard roles (owner, superadmin, admin-content-people, admin-content, admin-view), e.g. `['reviewer']`. */
   appRoles?: readonly string[];
   /**
    * Rate limiting (see `WafOptions`). `false` leaves the pool with no rate limit at all and must be
@@ -364,6 +365,8 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   for (const role of appRoles) {
     if (!GROUP_RE.test(role)) fail(`appRoles entry "${role}" isn't a valid Cognito group name.`);
     if ((STANDARD_GROUPS as readonly string[]).includes(role)) fail(`appRoles entry "${role}" is already a standard group.`);
+    const renamed = Object.hasOwn(RETIRED_GROUPS, role) ? RETIRED_GROUPS[role] : undefined;
+    if (renamed) fail(`appRoles entry "${role}" is a retired admin role: it's "${renamed}" now (ADR 0020's migration note).`);
   }
   if (new Set(appRoles).size !== appRoles.length) fail('appRoles contains duplicates.');
   const groups = [...STANDARD_GROUPS, ...appRoles];

@@ -3,6 +3,7 @@ export const PEOPLE_AUDIT_ACTIONS = {
   invite: 'people.invite',
   resend: 'people.resend',
   changeRole: 'people.changeRole',
+  transferOwnership: 'people.transferOwnership',
   disable: 'people.disable',
   enable: 'people.enable',
   signOutEverywhere: 'people.signOutEverywhere',

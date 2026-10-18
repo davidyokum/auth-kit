@@ -207,7 +207,7 @@ function build(fixture: MatrixFixture): MatrixServerOverrides {
       cognito: scriptedGateway(new Map(fixture.users.map((u) => [u.username, u]))),
     }),
     peopleCognito: readOnlyPeopleClient(fixture.users),
-    mailer: Object.freeze({ sendInvite: refuse('invite'), ownerGranted: refuse('owner alert') }),
+    mailer: Object.freeze({ sendInvite: refuse('invite'), superadminGranted: refuse('Super admin alert'), ownershipTransferred: refuse('ownership alert') }),
     auditLog: bundleAuditLog(shared('auth-kit:audit-log', () => createMemoryAuditLog())),
     users: Object.freeze([...fixture.users]),
     shared,

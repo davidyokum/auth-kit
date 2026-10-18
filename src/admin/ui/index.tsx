@@ -7,17 +7,31 @@
  *
  * Unstyled, semantic HTML with `ak-` class names. Imports nothing server-side.
  */
-import { type ReactNode, useActionState, useRef, useState } from 'react';
+import { type ReactNode, type RefObject, useActionState, useId, useRef, useState } from 'react';
 import {
   type InviteMode,
   MEMBER_ROLE,
+  OWNER_GROUP,
   type PeopleAction,
+  type RoleOption,
   checkPeopleAction,
   grantableRoles,
+  roleOptions,
   roleRank,
 } from '../guardrails.js';
-import { OWNER_GRANT_NOTE, describeActivity, lostPasskeyGuidance, peopleActionDetails, roleLabel, type PeopleActionDetail } from '../copy.js';
-import { ADMIN_ROLE_RANK, STANDARD_GROUPS, type StandardGroup } from '../../shared/policy.js';
+import {
+  OWNER_ROLE_NOTE,
+  RESOURCE_ACCESS_NOTE,
+  SUPERADMIN_GRANT_NOTE,
+  TRANSFER_OWNERSHIP_NOTE,
+  describeActivity,
+  lostPasskeyGuidance,
+  ownerCountWarning,
+  peopleActionDetails,
+  roleLabel,
+  type PeopleActionDetail,
+} from '../copy.js';
+import { ADMIN_ROLE_RANK, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
 import { PEOPLE_FORM_FIELDS as F, type ActionResult, type ActivityPage, type FormAction, type PeopleList, type PersonRow } from '../types.js';
 
 export interface Viewer {
@@ -71,7 +85,7 @@ export function ActionExplainer({ detail }: { detail: PeopleActionDetail }): Rea
             <dd>{detail.later}</dd>
           </>
         ) : null}
-        <dt>Cognito calls (after the audit log records the intent)</dt>
+        <dt>Cognito calls (after the intent is in the audit log)</dt>
         <dd>
           <ul className="ak-calls">
             {detail.calls.map((c) => (
@@ -126,6 +140,8 @@ function formatDate(iso: string): string {
 export interface PeopleTableActions {
   resend?: FormAction;
   changeRole?: FormAction;
+  /** The owner's Transfer ownership, offered from the role picker. */
+  transferOwnership?: FormAction;
   disable?: FormAction;
   enable?: FormAction;
   signOutEverywhere?: FormAction;
@@ -142,10 +158,14 @@ export interface PeopleTableProps {
    * a step-up and comes back here: `/sign-in?next=%2Fadmin%2Fpeople&reauth=1`.
    */
   stepUpHref?: string;
-  /** The app's own roles (its capability map's groups beyond the standard four). */
+  /** The app's own roles (its capability map's groups beyond the standard roles). */
   appRoles?: readonly string[];
   /** False for an admin pool (no emailed codes), which changes the lost-passkey guide. Default true. */
   emailCodes?: boolean;
+  /** Links the note under the role picker to where item access is explained (resource roles, coming next). */
+  resourceAccessHref?: string;
+  /** Shown under that note: the site's resource-access section, when it has one. */
+  resourceAccess?: ReactNode;
 }
 
 function statusText(p: PersonRow): { label: string; note?: string } {
@@ -173,7 +193,7 @@ export function allowedPeopleActions(viewer: Viewer, person: PersonRow, ownerCou
   };
   const target = { sub: person.sub, groups: person.groups, enabled: person.enabled, invite: person.invite.status };
   const candidates: PeopleAction[] = person.enabled
-    ? ['changeRole', 'resend', 'signOutEverywhere', 'disable']
+    ? ['changeRole', 'transferOwnership', 'resend', 'signOutEverywhere', 'disable']
     : ['enable', 'delete'];
   return candidates.filter((action) => {
     // changeRole is offered when any role change would pass; the dialog narrows the choice.
@@ -184,7 +204,8 @@ export function allowedPeopleActions(viewer: Viewer, person: PersonRow, ownerCou
       target,
       knownRoles: appRoles,
       ownerCount,
-      ...(toRole !== undefined && { toRole, reason: 'precheck' }),
+      ...(toRole !== undefined && { toRole }),
+      ...((action === 'changeRole' || action === 'transferOwnership') && { reason: 'precheck' }),
     }).ok;
   });
 }
@@ -202,9 +223,16 @@ export function PeopleTable(props: PeopleTableProps): ReactNode {
     );
   }
   const { people, fetchedAt, truncated, inviteMode } = props.people;
-  const ownerCount = people.filter((p) => p.adminRole === 'superadmin' && p.enabled).length;
+  const ownerCount = people.filter((p) => p.groups.includes(OWNER_GROUP) && p.enabled).length;
+  const ownerWarning = ownerCountWarning(ownerCount);
   return (
     <div className="ak-people">
+      {ownerWarning ? (
+        <p className="ak-note ak-warn ak-owner-count" role="alert">
+          {truncated ? `The list stopped at ${people.length} people, so the owner count may be incomplete. ` : ''}
+          {ownerWarning}
+        </p>
+      ) : null}
       <p className="ak-source">
         {people.length} {people.length === 1 ? 'person' : 'people'} · snapshot from ListUsers at {fetchedAt.replace('T', ' ').slice(0, 16)} UTC ·
         roles from ListUsersInGroup
@@ -259,8 +287,8 @@ function PersonRowView(props: PeopleTableProps & { person: PersonRow; ownerCount
         {p.lastSignInAt ? (
           formatDate(p.lastSignInAt)
         ) : (
-          <span className="ak-dash" title="Cognito doesn’t record sign-ins; a sign-in trigger can">
-            — <small>not recorded</small>
+          <span className="ak-dash" title="Cognito doesn’t keep a last sign-in; a sign-in trigger can">
+            — <small>not tracked</small>
           </span>
         )}
       </td>
@@ -271,7 +299,16 @@ function PersonRowView(props: PeopleTableProps & { person: PersonRow; ownerCount
           <details>
             <summary>Manage</summary>
             {allowed.includes('changeRole') && a.changeRole ? (
-              <RoleChangeDialog person={p} viewer={viewer} action={a.changeRole} ownerCount={props.ownerCount} {...stepUp} />
+              <RoleChangeDialog
+                person={p}
+                viewer={viewer}
+                action={a.changeRole}
+                ownerCount={props.ownerCount}
+                {...(allowed.includes('transferOwnership') && a.transferOwnership && { transferAction: a.transferOwnership })}
+                {...(props.resourceAccessHref !== undefined && { resourceAccessHref: props.resourceAccessHref })}
+                {...(props.resourceAccess !== undefined && { resourceAccess: props.resourceAccess })}
+                {...stepUp}
+              />
             ) : null}
             {allowed.includes('resend') && a.resend ? (
               <section className="ak-action">
@@ -324,7 +361,7 @@ function PersonRowView(props: PeopleTableProps & { person: PersonRow; ownerCount
                     <input type="text" name={F.confirmEmail} required autoComplete="off" spellCheck={false} />
                   </label>
                   <ReasonField required />
-                  <p className="ak-note">Owners only, after the retention period, with a sign-in in the last few minutes.</p>
+                  <p className="ak-note">The owner and Super admins only, after the retention period, with a sign-in in the last few minutes.</p>
                 </ActionForm>
               </section>
             ) : null}
@@ -335,6 +372,160 @@ function PersonRowView(props: PeopleTableProps & { person: PersonRow; ownerCount
   );
 }
 
+// ---- Roles: the picker, the comparison, and the resource-access note ------------------------------
+
+/** "Compare roles": every role's powers side by side (`ROLE_MATRIX`), one click away. */
+export function RoleMatrixTable({ caption }: { caption?: string }): ReactNode {
+  return (
+    <table className="ak-table ak-role-matrix">
+      <caption>{caption ?? 'What each role can do. Each role includes everything below it.'}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Role</th>
+          {ROLE_MATRIX.columns.map((c) => (
+            <th scope="col" key={c}>
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {ROLE_MATRIX.rows.map((row) => (
+          <tr key={row.role}>
+            <th scope="row">{row.role === OWNER_GROUP ? `${row.label} (only one)` : row.label}</th>
+            {ROLE_MATRIX.columns.map((c) => {
+              const cell = row.cells[c];
+              return (
+                <td key={c} className={cell.allowed ? 'ak-yes' : 'ak-no'}>
+                  {cell.allowed ? 'Yes' : 'No'}
+                  {cell.note ? <small> · {cell.note}</small> : null}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** A collapsed "Compare roles" with the matrix inside. */
+export function CompareRoles(): ReactNode {
+  return (
+    <details className="ak-compare-roles">
+      <summary>Compare roles</summary>
+      <RoleMatrixTable />
+    </details>
+  );
+}
+
+export interface ResourceAccessNoteProps {
+  /** Links the note's second sentence to where item access is explained (resource roles). */
+  href?: string;
+  /** Rendered under the note: the site's resource-access section, when it has one. */
+  children?: ReactNode;
+}
+
+/**
+ * Site roles aren't resource access: the note under every role picker, exactly as written in
+ * `RESOURCE_ACCESS_NOTE`. With `href`, its second sentence links there (the words stay the same).
+ */
+export function ResourceAccessNote({ href, children }: ResourceAccessNoteProps): ReactNode {
+  const split = RESOURCE_ACCESS_NOTE.indexOf('. ') + 2;
+  const first = RESOURCE_ACCESS_NOTE.slice(0, split);
+  const second = RESOURCE_ACCESS_NOTE.slice(split);
+  return (
+    <div className="ak-resource-access">
+      <p className="ak-note">
+        {href ? (
+          <>
+            {first}
+            <a href={href}>{second}</a>
+          </>
+        ) : (
+          RESOURCE_ACCESS_NOTE
+        )}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+/** One choice in a picker: a role option, or one of the app's own roles. */
+export type RolePickerOption = Omit<RoleOption, 'role'> & { role: string };
+
+export interface RolePickerProps {
+  /** The form field: `role` (invite) or `toRole` (role change). */
+  name: string;
+  options: readonly RolePickerOption[];
+  value: string;
+  onChange: (role: string) => void;
+  legend?: string;
+  /** What the owner line offers: the owner's "Transfer ownership…", or why it isn't available. */
+  ownerAction?: ReactNode;
+  resourceAccessHref?: string;
+  resourceAccess?: ReactNode;
+}
+
+/**
+ * The role picker: each role with what it can and can't do, unavailable ones disabled with the
+ * reason, the owner shown apart (it moves only by Transfer ownership), "Compare roles" one click
+ * away, and the resource-access note at the bottom.
+ */
+export function RolePicker(props: RolePickerProps): ReactNode {
+  const id = useId();
+  return (
+    <fieldset className="ak-role-picker">
+      <legend>{props.legend ?? 'Role'}</legend>
+      <ul className="ak-role-options">
+        {props.options.map((o) => {
+          const reasonId = `${id}-${o.role}-why`;
+          return (
+            <li key={o.role} className={o.available ? 'ak-role-option' : 'ak-role-option ak-role-unavailable'}>
+              <label>
+                <input
+                  type="radio"
+                  name={props.name}
+                  value={o.role}
+                  checked={props.value === o.role}
+                  disabled={!o.available}
+                  onChange={() => props.onChange(o.role)}
+                  {...(o.reason !== undefined && { 'aria-describedby': reasonId })}
+                />
+                <span className="ak-role-label">{o.label}</span>
+                <small className="ak-role-can">Can: {o.can}</small>
+                <small className="ak-role-cannot">Can’t: {o.cannot}</small>
+                {o.reason ? (
+                  <small className="ak-role-reason" id={reasonId}>
+                    {o.reason}
+                  </small>
+                ) : null}
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <div className="ak-role-owner">
+        <p className="ak-note">{OWNER_ROLE_NOTE}</p>
+        {props.ownerAction}
+      </div>
+      <CompareRoles />
+      <ResourceAccessNote {...(props.resourceAccessHref !== undefined && { href: props.resourceAccessHref })}>{props.resourceAccess}</ResourceAccessNote>
+    </fieldset>
+  );
+}
+
+function appRoleOption(role: string): RolePickerOption {
+  return {
+    role,
+    label: role,
+    can: 'This site’s own role: what it allows is set in the site’s capability map.',
+    cannot: 'Open the admin area, unless the site’s map says so.',
+    available: true,
+    current: false,
+  };
+}
+
 // ---- Role change --------------------------------------------------------------------------------
 
 export interface RoleChangeDialogProps {
@@ -343,21 +534,50 @@ export interface RoleChangeDialogProps {
   action: FormAction;
   /** Where "Sign in again to confirm" goes: `signInUrl('/admin/people', { reauth: true })`. */
   stepUpHref?: string;
-  /** Enabled owners, for the "keep an owner" hint. The server re-counts live. */
+  /** Enabled owners, for the hints. The server re-counts live. */
   ownerCount?: number;
+  /** The owner's Transfer ownership for this person, offered on the owner line. */
+  transferAction?: FormAction;
+  resourceAccessHref?: string;
+  resourceAccess?: ReactNode;
 }
 
 /** A dialog that changes someone's admin role, with a required reason. Granting is deliberate. */
 export function RoleChangeDialog(props: RoleChangeDialogProps): ReactNode {
   const { person: p, viewer } = props;
   const dialog = useRef<HTMLDialogElement>(null);
-  const current: StandardGroup | typeof MEMBER_ROLE = p.adminRole ?? MEMBER_ROLE;
-  const choices = [...grantableRoles(viewer.groups).filter((r) => r !== current), ...(current !== MEMBER_ROLE ? [MEMBER_ROLE] : [])];
-  const [toRole, setToRole] = useState<string>(choices[0] ?? MEMBER_ROLE);
+  const transferDialog = useRef<HTMLDialogElement>(null);
+  const isOwner = p.groups.includes(OWNER_GROUP);
+  const current: SiteRole = isOwner ? OWNER_GROUP : (p.adminRole ?? MEMBER_ROLE);
+  const options = roleOptions(viewer.groups, isOwner ? undefined : current);
+  const first = options.find((o) => o.available)?.role;
+  const [toRole, setToRole] = useState<string>(first ?? MEMBER_ROLE);
   const [result, run, pending] = useActionState(props.action, null);
   const detail = peopleActionDetails().changeRole;
-  const promotion = roleRank(toRole) > roleRank(p.adminRole);
-  const lastOwner = p.adminRole === 'superadmin' && toRole !== 'superadmin' && (props.ownerCount ?? 0) <= 1;
+  const promotion = roleRank(toRole) > roleRank(current);
+  const viewerIsOwner = viewer.groups.includes(OWNER_GROUP);
+  const transferCheck = viewerIsOwner
+    ? checkPeopleAction({
+        action: 'transferOwnership',
+        actor: { sub: viewer.sub, groups: viewer.groups, ...(viewer.capabilities !== undefined && { capabilities: new Set(viewer.capabilities) }) },
+        target: { sub: p.sub, groups: p.groups, enabled: p.enabled, invite: p.invite.status },
+        reason: 'precheck',
+      })
+    : null;
+  const ownerAction = !viewerIsOwner ? null : transferCheck?.ok && props.transferAction ? (
+    <button
+      type="button"
+      className="ak-button"
+      onClick={() => {
+        dialog.current?.close();
+        transferDialog.current?.showModal();
+      }}
+    >
+      Transfer ownership…
+    </button>
+  ) : transferCheck && !transferCheck.ok ? (
+    <p className="ak-note ak-muted">Transfer ownership: {transferCheck.reason}</p>
+  ) : null;
   return (
     <section className="ak-action">
       <button type="button" className="ak-button" onClick={() => dialog.current?.showModal()}>
@@ -370,42 +590,112 @@ export function RoleChangeDialog(props: RoleChangeDialogProps): ReactNode {
           </h3>
           <input type="hidden" name={F.sub} value={p.sub} />
           <input type="hidden" name={F.fromRole} value={current} />
-          <label className="ak-field">
-            <span>New role</span>
-            <select name={F.toRole} value={toRole} onChange={(e) => setToRole(e.target.value)}>
-              {STANDARD_GROUPS.map((r) => (
-                <option key={r} value={r} disabled={!choices.includes(r)}>
-                  {roleLabel(r)}
-                  {choices.includes(r) ? '' : ADMIN_ROLE_RANK[r] >= ADMIN_ROLE_RANK.admin ? ' · owners only' : r === current ? ' · current' : ''}
-                </option>
-              ))}
-              <option value={MEMBER_ROLE} disabled={!choices.includes(MEMBER_ROLE)}>
-                Member (no admin role)
-              </option>
-            </select>
-          </label>
+          {isOwner ? (
+            <p className="ak-note ak-warn">
+              {(props.ownerCount ?? 0) > 1
+                ? `This site has ${props.ownerCount} owners; it should have one. Changing this owner’s role brings it back toward one.`
+                : 'This is the site’s owner. The owner’s role changes only by Transfer ownership.'}
+            </p>
+          ) : null}
+          <RolePicker
+            name={F.toRole}
+            legend="New role"
+            options={options}
+            value={toRole}
+            onChange={setToRole}
+            ownerAction={ownerAction}
+            {...(props.resourceAccessHref !== undefined && { resourceAccessHref: props.resourceAccessHref })}
+            {...(props.resourceAccess !== undefined && { resourceAccess: props.resourceAccess })}
+          />
           <label className="ak-field">
             <span>Reason (required; goes in the audit log)</span>
             <textarea name={F.reason} required minLength={3} maxLength={500} rows={2} />
           </label>
           <ActionExplainer detail={detail} />
           {toRole === 'superadmin' ? (
-            <p className="ak-note ak-warn">{OWNER_GRANT_NOTE}</p>
+            <p className="ak-note ak-warn">{SUPERADMIN_GRANT_NOTE}</p>
           ) : promotion ? (
             <p className="ak-note">Granting a higher role needs a sign-in in the last few minutes.</p>
           ) : null}
-          {lastOwner ? <p className="ak-note ak-warn">Each site keeps at least one owner. Add another owner first.</p> : null}
           <div className="ak-dialog-buttons">
             <button type="button" className="ak-button" onClick={() => dialog.current?.close()}>
               Cancel
             </button>
-            <button type="submit" className="ak-button ak-button-primary" disabled={pending || choices.length === 0}>
+            <button type="submit" className="ak-button ak-button-primary" disabled={pending || first === undefined}>
               {pending ? 'Working…' : 'Change role'}
             </button>
           </div>
           <ActionResultMessage result={result} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
         </form>
       </dialog>
+      {transferCheck?.ok && props.transferAction ? (
+        <TransferOwnershipForm
+          dialogRef={transferDialog}
+          person={p}
+          action={props.transferAction}
+          {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+// ---- Transfer ownership -------------------------------------------------------------------------
+
+export interface TransferOwnershipDialogProps {
+  /** Who becomes the owner. */
+  person: PersonRow;
+  action: FormAction;
+  /** Where "Sign in again to confirm" goes: `signInUrl('/admin/people', { reauth: true })`. */
+  stepUpHref?: string;
+}
+
+function TransferOwnershipForm(props: TransferOwnershipDialogProps & { dialogRef: RefObject<HTMLDialogElement | null> }): ReactNode {
+  const { person: p } = props;
+  const [result, run, pending] = useActionState(props.action, null);
+  const detail = peopleActionDetails().transferOwnership;
+  return (
+    <dialog ref={props.dialogRef} className="ak-dialog" aria-labelledby={`ak-transfer-${p.sub}`}>
+      <form action={run}>
+        <h3 id={`ak-transfer-${p.sub}`}>Transfer ownership to {p.name ?? p.email}</h3>
+        <input type="hidden" name={F.sub} value={p.sub} />
+        <p className="ak-note ak-warn">{TRANSFER_OWNERSHIP_NOTE}</p>
+        <label className="ak-field">
+          <span>Type {p.email} to confirm</span>
+          <input type="text" name={F.confirmEmail} required autoComplete="off" spellCheck={false} />
+        </label>
+        <label className="ak-field">
+          <span>Reason (required; goes in the audit log)</span>
+          <textarea name={F.reason} required minLength={3} maxLength={500} rows={2} />
+        </label>
+        <ActionExplainer detail={detail} />
+        <div className="ak-dialog-buttons">
+          <button type="button" className="ak-button" onClick={() => props.dialogRef.current?.close()}>
+            Cancel
+          </button>
+          <button type="submit" className="ak-button ak-button-danger" disabled={pending}>
+            {pending ? 'Working…' : 'Transfer ownership'}
+          </button>
+        </div>
+        <ActionResultMessage result={result} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+      </form>
+    </dialog>
+  );
+}
+
+/**
+ * The owner's "Transfer ownership…": they become the owner, you become Super admin, both of you are
+ * emailed. Needs their address typed out, a reason, and a recent sign-in; the server re-checks all of
+ * it (owner only, to an enabled account that has signed in).
+ */
+export function TransferOwnershipDialog(props: TransferOwnershipDialogProps): ReactNode {
+  const dialog = useRef<HTMLDialogElement>(null);
+  return (
+    <section className="ak-action">
+      <button type="button" className="ak-button" onClick={() => dialog.current?.showModal()}>
+        Transfer ownership…
+      </button>
+      <TransferOwnershipForm dialogRef={dialog} {...props} />
     </section>
   );
 }
@@ -422,19 +712,28 @@ export interface InviteFormProps {
   inviteMode?: InviteMode;
   /** Where "Sign in again to confirm" goes: `signInUrl('/admin/people', { reauth: true })`. */
   stepUpHref?: string;
+  /** Links the note under the role picker to where item access is explained. */
+  resourceAccessHref?: string;
+  /** Shown under that note: the site's resource-access section, when it has one. */
+  resourceAccess?: ReactNode;
 }
 
-/** Invite someone: email, role, and (for admins and owners) a reason. The address is shown back before sending. */
+/**
+ * Invite someone: email, role, and (for Admin – content & people and Super admin) a reason. The
+ * address is shown back before sending. Member is the default: the least access.
+ */
 export function InviteForm(props: InviteFormProps): ReactNode {
-  const roles = [...grantableRoles(props.viewer.groups), ...(props.appRoles ?? []), MEMBER_ROLE];
+  const standard = roleOptions(props.viewer.groups);
+  const member = standard.filter((o) => o.role === MEMBER_ROLE);
+  const options: RolePickerOption[] = [...standard.filter((o) => o.role !== MEMBER_ROLE), ...(props.appRoles ?? []).map(appRoleOption), ...member];
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<string>(roles.includes('editor') ? 'editor' : (roles[0] ?? MEMBER_ROLE));
+  const [role, setRole] = useState<string>(MEMBER_ROLE);
   const [result, run, pending] = useActionState(props.action, null);
   const detail = peopleActionDetails(props.inviteMode).invite;
   const domain = email.includes('@') ? email.slice(email.lastIndexOf('@') + 1).toLowerCase() : '';
   const domains = (props.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
   const outside = domain !== '' && domains.length > 0 && !domains.includes(domain);
-  const needsReason = roleRank(role) >= ADMIN_ROLE_RANK.admin;
+  const needsReason = roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'];
   return (
     <form action={run} className="ak-invite">
       <label className="ak-field">
@@ -445,17 +744,16 @@ export function InviteForm(props: InviteFormProps): ReactNode {
         <span>Name (optional)</span>
         <input type="text" name={F.name} maxLength={100} autoComplete="off" />
       </label>
-      <label className="ak-field">
-        <span>Role</span>
-        <select name={F.role} value={role} onChange={(e) => setRole(e.target.value)}>
-          {roles.map((r) => (
-            <option key={r} value={r}>
-              {r === MEMBER_ROLE ? 'Member (no admin role)' : roleLabel(r)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <ReasonField required={needsReason} {...(needsReason && { label: 'Reason (required for admins and owners; goes in the audit log)' })} />
+      <RolePicker
+        name={F.role}
+        options={options}
+        value={role}
+        onChange={setRole}
+        ownerAction={<p className="ak-note ak-muted">To make someone the owner, invite them first; once they’ve signed in, the owner can transfer ownership to them.</p>}
+        {...(props.resourceAccessHref !== undefined && { resourceAccessHref: props.resourceAccessHref })}
+        {...(props.resourceAccess !== undefined && { resourceAccess: props.resourceAccess })}
+      />
+      <ReasonField required={needsReason} {...(needsReason && { label: `Reason (required for ${roleLabel(role)}; goes in the audit log)` })} />
       {outside ? (
         <label className="ak-field ak-warn">
           <input type="checkbox" name={F.confirmOutsideDomain} required />
@@ -466,7 +764,7 @@ export function InviteForm(props: InviteFormProps): ReactNode {
       ) : null}
       <ActionExplainer detail={detail} />
       {role === 'superadmin' ? (
-        <p className="ak-note ak-warn">{OWNER_GRANT_NOTE}</p>
+        <p className="ak-note ak-warn">{SUPERADMIN_GRANT_NOTE}</p>
       ) : roleRank(role) > 0 ? (
         <p className="ak-note">Granting a role needs a sign-in in the last few minutes.</p>
       ) : null}
@@ -523,7 +821,7 @@ export function ActivityLog(props: ActivityLogProps): ReactNode {
   return (
     <div className="ak-activity">
       <p className="ak-note">
-        Append-only: nobody can edit or delete entries, owners included. Each change is logged before it’s made, then its result.
+        Append-only: nobody can edit or delete entries, the owner included. Each change is logged before it’s made, then its result.
       </p>
       {entries.length === 0 ? (
         <p className="ak-muted">No entries match.</p>

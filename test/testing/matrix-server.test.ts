@@ -28,12 +28,12 @@ async function freshBundle(): Promise<MatrixServerModule> {
 
 const PERSONAS = {
   member: {},
-  admin: { groups: ['admin'] },
-  owner: { groups: ['superadmin'] },
+  admin: { groups: ['admin-content-people'] },
+  owner: { groups: ['owner'] },
   noAuthenticator: { factors: { configured: ['PASSWORD'], mfa: [] } },
-  demotedAdmin: { groups: ['admin'], liveGroups: [] },
-  disabledAdmin: { groups: ['admin'], enabled: false },
-  revokedSession: { groups: ['editor'], sessionRevoked: true },
+  demotedAdmin: { groups: ['admin-content-people'], liveGroups: [] },
+  disabledAdmin: { groups: ['admin-content-people'], enabled: false },
+  revokedSession: { groups: ['admin-content'], sessionRevoked: true },
 };
 
 function matrixEnv(fixture: MatrixFixture | string | undefined, nodeEnv = 'development', flag = '1') {
@@ -100,7 +100,7 @@ describe('the fixture', () => {
   it('lists every problem with a malformed fixture', () => {
     const fixture = valid();
     fixture.version = 2 as never;
-    fixture.users.push({ ...fixture.users[0]!, groups: 'admin' as never, extra: 1 } as never);
+    fixture.users.push({ ...fixture.users[0]!, groups: 'admin-content-people' as never, extra: 1 } as never);
     fixture.users.push({ username: '', sub: '', groups: [], enabled: 'no', factors: { configured: [] } } as never);
     const error = (() => {
       try {
@@ -144,7 +144,7 @@ describe('while the matrix runs, the app’s own auth answers from the fixture',
     as('member');
     await expect(auth.requireUser()).resolves.toMatchObject({ sub: personas.member.sub, groups: [] });
     as('admin');
-    expect((await auth.requireCan('people.manage')).groups).toEqual(['admin']);
+    expect((await auth.requireCan('people.manage')).groups).toEqual(['admin-content-people']);
   });
 
   it('refuses a token signed by any other key as 401, without fetching the real pool’s keys', async () => {
@@ -221,7 +221,7 @@ describe('the People page and audit log while the matrix runs', () => {
     const bySub = new Map(list.people.map((p) => [p.sub, p]));
     expect(bySub.size).toBe(Object.keys(PERSONAS).length);
     expect(bySub.get(personas.owner.sub)).toMatchObject({ email: 'owner@matrix.test' });
-    expect(JSON.stringify(bySub.get(personas.demotedAdmin.sub))).not.toMatch(/"admin"/);
+    expect(JSON.stringify(bySub.get(personas.demotedAdmin.sub))).not.toMatch(/"admin-content-people"/);
   });
 
   it('changes no accounts and sends no email: a write is refused and nothing is reported as changed', async () => {
