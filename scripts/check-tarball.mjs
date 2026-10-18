@@ -33,6 +33,9 @@ for (const path of ['dist/lambda/invite-expiry/index.mjs', 'dist/lambda/unverifi
 }
 for (const file of files) {
   if (/^(src|test|scripts|\.github)\//.test(file)) problems.push(`${file} shouldn't be published`);
+  // Source maps would embed src/; dated reviews would read as current in every site's node_modules.
+  if (file.endsWith('.map')) problems.push(`${file}: no source maps in the package (they embed src/)`);
+  if (/^docs\/reviews\//.test(file)) problems.push(`${file}: dated reviews stay in the repo, not the package`);
 }
 for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack']) {
   if (pkg.scripts?.[hook]) problems.push(`package.json has a "${hook}" script; installs must run nothing`);

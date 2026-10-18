@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { defineConfig } from 'tsup';
 
 // Entries that are React client modules. Rollup's tree-shaking pass drops module-level directives,
-// so `'use client'` is put back after the build (and the source map shifted by that one line).
+// so `'use client'` is put back after the build.
 const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui'];
 
 async function restoreUseClient(): Promise<void> {
@@ -11,9 +11,6 @@ async function restoreUseClient(): Promise<void> {
     const code = await readFile(file, 'utf8');
     if (code.startsWith("'use client';")) continue;
     await writeFile(file, `'use client';\n${code}`);
-    const map = JSON.parse(await readFile(`${file}.map`, 'utf8')) as { mappings: string };
-    map.mappings = `;${map.mappings}`;
-    await writeFile(`${file}.map`, JSON.stringify(map));
   }
 }
 
@@ -51,7 +48,9 @@ export default defineConfig({
   platform: 'node',
   // tsup's declaration build sets `baseUrl`, which TypeScript 6 deprecates.
   dts: { compilerOptions: { ignoreDeprecations: '6.0' } },
-  sourcemap: true,
+  // No source maps in the package: they'd embed all of src/ (the tarball check refuses .map files).
+  // The build is unminified ESM, so stack traces stay readable without them.
+  sourcemap: false,
   clean: true,
   splitting: true,
   treeshake: true,
