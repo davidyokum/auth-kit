@@ -8,6 +8,16 @@
  * - a password reset code: "Reset your {Site} password" (§5.2c);
  * - the code to a new address before an email change: "Confirm your new {Site} email address" (§5.2l).
  *
+ * **It's also a security control, so every pool must have it** (the preset fails synthesis without
+ * it). Cognito lets a signed-in person change their own email with its public API
+ * (`UpdateUserAttributes`, then `VerifyUserAttribute`), which would skip the site's recent-sign-in
+ * check, its domain list, its audit log, and its notice to the old address. Both steps need this
+ * trigger to send the code (`CustomMessage_UpdateUserAttribute`, and `CustomMessage_VerifyUserAttribute`
+ * for a resent code), and Cognito fails the call when the trigger throws. So the handler refuses both
+ * unless the call came from the admin API, which only the site's server makes (`callerContext.clientId`
+ * is `CLIENT_ID_NOT_APPLICABLE` for Admin* calls): an email change happens only through auth-kit's
+ * server route (`createSelfServiceActions`) or an admin (ADR 0023).
+ *
  * Each says how long the code works from the same `codeLifetimeMinutes` the preset gives the pool.
  * Cognito's temporary-password invite (the admin pool) keeps the pool's own template. No AWS SDK
  * imports, so it bundles small.
@@ -29,6 +39,8 @@ import { type AuthTheme, type ThemeFamily, helpAddressProblems, resolveTheme } f
 /** The fields of Cognito's custom message event this handler reads and writes. */
 export interface CustomMessageTriggerEvent {
   triggerSource: string;
+  /** Who made the call. Cognito sends `clientId` as `CLIENT_ID_NOT_APPLICABLE` for the admin API. */
+  callerContext?: { clientId?: string; awsSdkVersion?: string };
   request: {
     userAttributes: Record<string, string | undefined>;
     codeParameter?: string;
@@ -41,6 +53,24 @@ export interface CustomMessageOptions extends Omit<EmailSite, 'theme'> {
   theme: AuthTheme | ThemeFamily;
   /** The pool's code lifetime (the preset's `codeLifetimeMinutes`). Default 3. */
   codeLifetimeMinutes?: number;
+}
+
+/**
+ * The `callerContext.clientId` Cognito sends when the admin API (`AdminUpdateUserAttributes`, …) made
+ * the call, rather than an app client. Confirm the literal on the first sandbox deploy (ADR 0023).
+ */
+export const ADMIN_API_CLIENT_ID = 'CLIENT_ID_NOT_APPLICABLE';
+
+/** The trigger sources that send a code to confirm a changed attribute (the new email address). */
+export const ATTRIBUTE_CHANGE_SOURCES: readonly string[] = Object.freeze(['CustomMessage_UpdateUserAttribute', 'CustomMessage_VerifyUserAttribute']);
+
+/** Thrown (and so returned to the caller by Cognito, failing the call) for an attribute change through Cognito's public API. */
+export const SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED =
+  'auth-kit: change your email address on the site (My account), not through Cognito directly. This call was refused and no code was sent.';
+
+/** True when this event came from the admin API, which only the site's server can call. */
+export function isAdminApiCall(event: Pick<CustomMessageTriggerEvent, 'callerContext'>): boolean {
+  return event.callerContext?.clientId === ADMIN_API_CLIENT_ID;
 }
 
 /** Which email a trigger source gets, given the account's attributes. */
@@ -79,6 +109,11 @@ export function customMessageHandler(options: CustomMessageOptions) {
   const site: EmailSite = { ...options, theme: resolveTheme(options.theme) };
 
   return <E extends CustomMessageTriggerEvent>(event: E): Promise<E> => {
+    // An email change through Cognito's public API: refuse it, so Cognito fails the call and sends no
+    // code (ADR 0023). The site's server route uses AdminUpdateUserAttributes, which passes.
+    if (ATTRIBUTE_CHANGE_SOURCES.includes(event.triggerSource) && !isAdminApiCall(event)) {
+      return Promise.reject(new Error(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED));
+    }
     const kind = customMessageKind(event);
     if (kind === null) return Promise.resolve(event);
     // Cognito replaces the placeholder with the code; the message must contain it.

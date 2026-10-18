@@ -27,9 +27,20 @@ const BASE: AuthStandardOptions = {
 /** `none` = plain CDK, no Amplify context. */
 type DeploymentType = 'branch' | 'sandbox' | 'standalone' | 'none';
 
+/** Every pool needs the custom message trigger (ADR 0023): a stand-in function wired as the site would. */
+function addCustomMessageTrigger(auth: AmplifyAuth, stack: Stack) {
+  const fn = new LambdaFunction(stack, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;') });
+  (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, fn);
+}
+
 function synth(
   options: AuthStandardOptions,
-  { type = 'branch', branch = 'main', beforeApply }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void } = {},
+  {
+    type = 'branch',
+    branch = 'main',
+    beforeApply,
+    customMessage = true,
+  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean } = {},
 ) {
   const context: Record<string, string> = {};
   if (type !== 'none') context['amplify-backend-type'] = type;
@@ -38,6 +49,7 @@ function synth(
   const app = new App({ context });
   const stack = new Stack(app, 'AuthStack');
   const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options) as unknown as AuthProps);
+  if (customMessage) addCustomMessageTrigger(auth, stack);
   beforeApply?.(auth, stack);
   const applied = applyAuthStandard(auth, options);
   return { app, stack, auth, applied, template: () => Template.fromStack(stack) };
@@ -404,6 +416,20 @@ describe('account creation (ADR 0023)', () => {
   ] as const)("keeps Cognito's own SignUp off in mode %s", (_mode, accountCreation) => {
     const t = synth({ ...BASE, accountCreation }, { beforeApply: preSignUpTrigger }).template();
     t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
+  });
+
+  it('fails synthesis on every pool without the custom message trigger, which refuses public-API email changes (H1)', () => {
+    for (const options of [BASE, { ...BASE, adminPool: true, tier: 3 as const }, { ...BASE, accountCreation: { mode: 'request' as const } }]) {
+      const { template } = synth(options, { customMessage: false });
+      expect(() => template()).toThrow(/no custom message trigger/);
+    }
+    expect(() => synth(BASE).template()).not.toThrow();
+  });
+
+  it('reads the trigger from the rendered pool: an override that removes it still fails synthesis', () => {
+    const { template, auth } = synth(BASE);
+    auth.resources.cfnResources.cfnUserPool.addPropertyOverride('LambdaConfig.CustomMessage', undefined);
+    expect(() => template()).toThrow(/no custom message trigger/);
   });
 
   it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {

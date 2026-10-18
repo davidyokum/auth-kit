@@ -62,20 +62,39 @@ const SIGN_UP_ENABLED =
   "auth-kit: Cognito's own SignUp is on for this pool (AdminCreateUserConfig.AllowAdminCreateUserOnly isn't true in the template). " +
   "auth-kit keeps it off in every accountCreation mode (ADR 0023): sign-up is a server route that creates the account like an invite. Remove whatever turns it back on.";
 
+const NO_CUSTOM_MESSAGE_TRIGGER =
+  'auth-kit: this pool has no custom message trigger. Every pool needs it (ADR 0023): besides the code emails\' words, it refuses email changes made ' +
+  "through Cognito's public API (UpdateUserAttributes with a user's token), which would skip the site's recent-sign-in check, domain list, audit log, and notice " +
+  'to the old address. Add triggers: { customMessage } built with customMessageHandler from auth-kit/amplify/custom-message.';
+
+/** The pool's properties as they'll be deployed, read from the rendered resource when CDK allows it. */
+interface RenderedPool {
+  AdminCreateUserConfig?: { AllowAdminCreateUserOnly?: unknown };
+  LambdaConfig?: { PreSignUp?: unknown; CustomMessage?: unknown };
+}
+
 /**
- * True when the pool's synthesized properties, overrides included, keep Cognito's own SignUp off.
- * Reads the rendered resource (`_toCloudFormation`, which applies every override), so a later
- * override or property set anywhere in the app is caught at synth.
+ * The pool's synthesized properties, overrides included. Reads the rendered resource
+ * (`_toCloudFormation`, which applies every override), so a later override or property set anywhere in
+ * the app is caught at synth; falls back to the typed properties if that internal ever goes away.
  */
-function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
+function renderedPool(stack: Stack, pool: CfnUserPool): RenderedPool {
   const render = (pool as unknown as { _toCloudFormation?: () => unknown })._toCloudFormation;
   if (typeof render === 'function') {
-    const rendered = stack.resolve(render.call(pool)) as { Resources?: Record<string, { Properties?: { AdminCreateUserConfig?: { AllowAdminCreateUserOnly?: unknown } } }> };
-    const resource = Object.values(rendered.Resources ?? {})[0];
-    return resource?.Properties?.AdminCreateUserConfig?.AllowAdminCreateUserOnly === true;
+    const rendered = stack.resolve(render.call(pool)) as { Resources?: Record<string, { Properties?: RenderedPool }> };
+    return Object.values(rendered.Resources ?? {})[0]?.Properties ?? {};
   }
   const config = stack.resolve(pool.adminCreateUserConfig) as { allowAdminCreateUserOnly?: unknown; AllowAdminCreateUserOnly?: unknown } | undefined;
-  return config?.allowAdminCreateUserOnly === true || config?.AllowAdminCreateUserOnly === true;
+  const lambda = stack.resolve(pool.lambdaConfig) as { preSignUp?: unknown; PreSignUp?: unknown; customMessage?: unknown; CustomMessage?: unknown } | undefined;
+  return {
+    AdminCreateUserConfig: { AllowAdminCreateUserOnly: config?.allowAdminCreateUserOnly ?? config?.AllowAdminCreateUserOnly },
+    LambdaConfig: { PreSignUp: lambda?.preSignUp ?? lambda?.PreSignUp, CustomMessage: lambda?.customMessage ?? lambda?.CustomMessage },
+  };
+}
+
+/** True when the pool's synthesized properties, overrides included, keep Cognito's own SignUp off. */
+function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
+  return renderedPool(stack, pool).AdminCreateUserConfig?.AllowAdminCreateUserOnly === true;
 }
 
 /** The callback URL CDK fills in when a client has OAuth on and no callback of its own. */
@@ -153,11 +172,15 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPool.node.addValidation({
     validate: () => (signUpStaysOff(stack, cfnUserPool) ? [] : [SIGN_UP_ENABLED]),
   });
+  // The custom message trigger is a security control on every pool, not only wording: it refuses an
+  // email change made through Cognito's public API (ADR 0023, H1). Synthesis fails without it.
+  cfnUserPool.node.addValidation({
+    validate: () => (renderedPool(stack, cfnUserPool).LambdaConfig?.CustomMessage ? [] : [NO_CUSTOM_MESSAGE_TRIGGER]),
+  });
   if (o.accountCreation.mode === 'domains') {
     cfnUserPool.node.addValidation({
       validate: () => {
-        const lambdaConfig = stack.resolve(cfnUserPool.lambdaConfig) as { PreSignUp?: unknown; preSignUp?: unknown } | undefined;
-        return lambdaConfig?.PreSignUp || lambdaConfig?.preSignUp
+        return renderedPool(stack, cfnUserPool).LambdaConfig?.PreSignUp
           ? []
           : [
               "auth-kit: accountCreation mode 'domains' needs the preSignUp trigger, which re-checks the domain list on accounts the sign-up route creates " +

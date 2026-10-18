@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { type CustomMessageTriggerEvent, customMessageHandler, customMessageKind } from '../../src/amplify/custom-message.js';
+import { ADMIN_API_CLIENT_ID, type CustomMessageTriggerEvent, SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED, customMessageHandler, customMessageKind } from '../../src/amplify/custom-message.js';
 
 const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'help@example.org', codeLifetimeMinutes: 10 });
 
-function event(triggerSource: string, userAttributes: Record<string, string> = { email: 'a@example.org', email_verified: 'true' }): CustomMessageTriggerEvent {
-  return { triggerSource, request: { userAttributes, codeParameter: '{####}', usernameParameter: null }, response: {} };
+/** The app client's ID, as Cognito sends it for a call made with a user's token (a placeholder). */
+const APP_CLIENT_ID = '1example23456789abcdefghij';
+
+function event(
+  triggerSource: string,
+  userAttributes: Record<string, string> = { email: 'a@example.org', email_verified: 'true' },
+  clientId: string = APP_CLIENT_ID,
+): CustomMessageTriggerEvent {
+  return { triggerSource, callerContext: { awsSdkVersion: 'aws-sdk-unknown-unknown', clientId }, request: { userAttributes, codeParameter: '{####}', usernameParameter: null }, response: {} };
 }
 
 describe('the custom message trigger (ADR 0024)', () => {
@@ -26,8 +33,44 @@ describe('the custom message trigger (ADR 0024)', () => {
 
   it('words a reset and a new-address confirmation', async () => {
     expect((await handler(event('CustomMessage_ForgotPassword'))).response.emailSubject).toBe('Reset your Example Reports password');
-    expect((await handler(event('CustomMessage_UpdateUserAttribute'))).response.emailSubject).toBe('Confirm your new Example Reports email address');
+    expect((await handler(event('CustomMessage_UpdateUserAttribute', undefined, ADMIN_API_CLIENT_ID))).response.emailSubject).toBe('Confirm your new Example Reports email address');
     expect(customMessageKind(event('CustomMessage_VerifyUserAttribute'))).toBe('confirm-new-email');
+  });
+});
+
+describe('the custom message trigger refuses email changes through Cognito’s public API (H1, ADR 0023)', () => {
+  it('pins the admin API’s caller client ID', () => {
+    expect(ADMIN_API_CLIENT_ID).toBe('CLIENT_ID_NOT_APPLICABLE');
+  });
+
+  it('refuses UpdateUserAttributes made with a user’s token: Cognito fails the call and sends no code', async () => {
+    const e = event('CustomMessage_UpdateUserAttribute', { email: 'attacker@evil.example', email_verified: 'false' });
+    await expect(handler(e)).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    // Nothing was written into the message: no code could go out even if Cognito used the event.
+    expect(e.response.emailMessage).toBeUndefined();
+    expect(e.response.emailSubject).toBeUndefined();
+  });
+
+  it('refuses a resent verification code (GetUserAttributeVerificationCode) made with a user’s token', async () => {
+    await expect(handler(event('CustomMessage_VerifyUserAttribute'))).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+  });
+
+  it('refuses an event with no caller context, or any client ID but the admin API’s', async () => {
+    const bare: CustomMessageTriggerEvent = { triggerSource: 'CustomMessage_UpdateUserAttribute', request: { userAttributes: { email: 'a@example.org' }, codeParameter: '{####}' }, response: {} };
+    await expect(handler(bare)).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    for (const clientId of ['', 'client_id_not_applicable', 'CLIENT_ID_NOT_APPLICABLE ', 'CLIENT_ID_NOT_APPLICABLEx']) {
+      await expect(handler(event('CustomMessage_UpdateUserAttribute', undefined, clientId)), clientId).rejects.toThrow(SELF_SERVICE_ATTRIBUTE_CHANGE_REFUSED);
+    }
+  });
+
+  it('lets the site’s server route through (AdminUpdateUserAttributes)', async () => {
+    const e = await handler(event('CustomMessage_UpdateUserAttribute', { email: 'new@example.org', email_verified: 'false' }, ADMIN_API_CLIENT_ID));
+    expect(e.response.emailMessage).toContain('{####}');
+  });
+
+  it('still sends sign-in and reset codes requested with the app client', async () => {
+    expect((await handler(event('CustomMessage_Authentication'))).response.emailSubject).toBe('Your Example Reports sign-in code');
+    expect((await handler(event('CustomMessage_ForgotPassword'))).response.emailSubject).toBe('Reset your Example Reports password');
   });
 
   it("leaves Cognito's own template for the admin pool's temporary password, and anything else", async () => {
