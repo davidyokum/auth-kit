@@ -25,8 +25,8 @@ export const ripplesV1 = defineVersion({
     top: toHex(mix(p.page, p.mist, 0.55)),
     bottom: p.page,
     light: rgba(p.glow, 0.5),
-    ink: [0.06, 0.1, 0.16, 0.23, 0.32].map((a) => rgba(p.ink, a)),
-    accent: [0.1, 0.17, 0.26, 0.37, 0.52].map((a) => rgba(mix(p.primary, p.secondary, 0.3), a)),
+    ink: [0.07, 0.12, 0.18, 0.26, 0.36].map((a) => rgba(p.ink, a)),
+    accent: [0.12, 0.2, 0.3, 0.42, 0.58].map((a) => rgba(mix(p.primary, p.secondary, 0.3), a)),
   }),
   create(setup, c) {
     const { width: w, height: h, card } = setup;
@@ -55,7 +55,7 @@ export const ripplesV1 = defineVersion({
       period[s] = place.range(11, 17);
       speed[s] = place.range(9, 14);
       phase[s] = place.range(0, 20);
-      strength[s] = place.range(0.6, 1);
+      strength[s] = place.range(0.75, 1);
       gap[s] = place.range(8, 13);
       accent[s] = s === 0 || place.chance(0.3) ? 1 : 0;
     }
