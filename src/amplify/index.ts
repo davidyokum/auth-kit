@@ -22,7 +22,14 @@
  * ```
  */
 export { standardAuthProps, type DefineAuthProps, type StandardAuthExtras } from './props.js';
-export { applyAuthStandard, formatSender, type AppliedAuthStandard, type AppliedWaf, type AuthResourceLike } from './apply.js';
+export {
+  applyAuthStandard,
+  formatSender,
+  CLIENT_WRITABLE_STANDARD_ATTRIBUTES,
+  type AppliedAuthStandard,
+  type AppliedWaf,
+  type AuthResourceLike,
+} from './apply.js';
 export {
   normalizeOptions,
   AuthStandardConfigError,
@@ -34,17 +41,38 @@ export {
   type WafRuleMode,
   type NormalizedWafOptions,
   type SelfSignUpOptions,
+  SELF_SIGN_UP_REMOVED,
   type NormalizedAuthStandardOptions,
 } from './options.js';
+export {
+  ACCOUNT_CREATION_MODES,
+  INVITE_ONLY,
+  AccountCreationConfigError,
+  normalizeAccountCreation,
+  emailDomainAllowed,
+  allowsSelfSignUp,
+  takesAccessRequests,
+  mayCreateOwnAccount,
+  SIGN_UP_ORIGIN_ATTRIBUTE,
+  SIGN_UP_ORIGIN_VALUE,
+  type AccountCreationMode,
+  type AccountCreationSettings,
+  type NormalizedAccountCreation,
+} from '../shared/account-creation.js';
 export {
   createAuthWebAcl,
   createSharedAuthWebAcl,
   associateAuthWebAcl,
   COGNITO_OPERATION_HEADERS,
   SIGN_IN_OPERATIONS,
+  ACCOUNT_CREATION_ROUTES,
+  accountCreationWafRules,
+  createSiteWebAcl,
   type AuthWebAcl,
   type AuthWebAclProps,
   type SharedAuthWebAclProps,
+  type AccountCreationWafOptions,
+  type SiteWebAclProps,
 } from './waf.js';
 export {
   STANDARD_GROUPS,
@@ -54,6 +82,9 @@ export {
   SESSION_POLICY,
   PASSWORD_POLICY,
   WAF_POLICY,
+  CODE_LIFETIME_POLICY,
+  ACCOUNT_CREATION_POLICY,
+  codeLifetimeMinutes,
   AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY,
   type AuthTier,
   type StandardGroup,

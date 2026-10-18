@@ -1,6 +1,7 @@
 import { Annotations, ArnFormat, Stack, Tags, Token } from 'aws-cdk-lib';
 import type { CfnIdentityPool, CfnUserPool, CfnUserPoolClient, CfnUserPoolGroup, IUserPool } from 'aws-cdk-lib/aws-cognito';
 import type { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
+import { SIGN_UP_ORIGIN_ATTRIBUTE } from '../shared/account-creation.js';
 import {
   AMPLIFY_DEPLOYMENT_TYPE_CONTEXT_KEY,
   type AmplifyDeploymentType,
@@ -51,9 +52,76 @@ export interface AppliedAuthStandard {
   userPoolTier: 'ESSENTIALS' | 'PLUS';
   tags: Record<string, string>;
   waf: AppliedWaf;
+  /** The sign-in session (and so an emailed code's lifetime), in minutes. */
+  codeLifetimeMinutes: number;
+  /** What the app client lets people change about themselves (never `email`). */
+  writeAttributes: string[];
   /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
   hostedUiOAuth: boolean;
 }
+
+const SIGN_UP_ENABLED =
+  "auth-kit: Cognito's own SignUp is on for this pool (AdminCreateUserConfig.AllowAdminCreateUserOnly isn't true in the template). " +
+  "auth-kit keeps it off in every accountCreation mode (ADR 0023): sign-up is a server route that creates the account like an invite. Remove whatever turns it back on.";
+
+/**
+ * True when the pool's synthesized properties, overrides included, keep Cognito's own SignUp off.
+ * Reads the rendered resource (`_toCloudFormation`, which applies every override), so a later
+ * override or property set anywhere in the app is caught at synth.
+ */
+function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
+  const render = (pool as unknown as { _toCloudFormation?: () => unknown })._toCloudFormation;
+  if (typeof render === 'function') {
+    const rendered = stack.resolve(render.call(pool)) as { Resources?: Record<string, { Properties?: { AdminCreateUserConfig?: { AllowAdminCreateUserOnly?: unknown } } }> };
+    const resource = Object.values(rendered.Resources ?? {})[0];
+    return resource?.Properties?.AdminCreateUserConfig?.AllowAdminCreateUserOnly === true;
+  }
+  const config = stack.resolve(pool.adminCreateUserConfig) as { allowAdminCreateUserOnly?: unknown; AllowAdminCreateUserOnly?: unknown } | undefined;
+  return config?.allowAdminCreateUserOnly === true || config?.AllowAdminCreateUserOnly === true;
+}
+
+/**
+ * Standard attributes a person may set on their own account. Not `email` (changed by the server or
+ * an admin, then verified), `phone_number`, or `preferred_username` (a sign-in alias in some pools).
+ */
+export const CLIENT_WRITABLE_STANDARD_ATTRIBUTES = [
+  'name',
+  'given_name',
+  'family_name',
+  'middle_name',
+  'nickname',
+  'profile',
+  'picture',
+  'website',
+  'gender',
+  'birthdate',
+  'zoneinfo',
+  'locale',
+  'address',
+  'updated_at',
+] as const;
+
+/** The standard ones above, plus the pool's own mutable custom attributes (never auth-kit's sign-up mark). */
+function clientWriteAttributes(stack: Stack, pool: CfnUserPool): string[] {
+  const schema = (stack.resolve(pool.schema) as { name?: string; Name?: string; mutable?: boolean; Mutable?: boolean }[] | undefined) ?? [];
+  const custom = schema
+    .map((a) => ({ name: a.name ?? a.Name ?? '', mutable: a.mutable ?? a.Mutable ?? true }))
+    .filter((a) => a.name !== '' && a.mutable !== false && !(STANDARD_ATTRIBUTE_NAMES as readonly string[]).includes(a.name))
+    .map((a) => (a.name.startsWith('custom:') ? a.name : `custom:${a.name}`))
+    .filter((name) => name !== SIGN_UP_ORIGIN_ATTRIBUTE);
+  return [...CLIENT_WRITABLE_STANDARD_ATTRIBUTES, ...custom];
+}
+
+/** Cognito's standard attribute names (custom attributes are everything else in the schema). */
+const STANDARD_ATTRIBUTE_NAMES = [
+  ...CLIENT_WRITABLE_STANDARD_ATTRIBUTES,
+  'email',
+  'email_verified',
+  'phone_number',
+  'phone_number_verified',
+  'preferred_username',
+  'sub',
+] as const;
 
 /** The callback URL CDK fills in when a client has OAuth on and no callback of its own. */
 const CDK_PLACEHOLDER_CALLBACK = 'https://example.com';
@@ -121,19 +189,32 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   }
 
   // ---- Identity and lifecycle -------------------------------------------------------------------
-  // Invite-only: Gen 2 leaves self-registration on unless it's switched off here. The exception is a
-  // documented preSignUp domain allowlist, checked at synth.
-  cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', o.selfSignUp === null);
-  if (o.selfSignUp) {
+  // Cognito's own SignUp is always off (ADR 0023). Gen 2 leaves it on unless it's switched off here.
+  // Every account is made on the server with AdminCreateUser: an admin's invite, or auth-kit's
+  // sign-up route on a site whose accountCreation mode allows it. The app client ID is public, so a
+  // SignUp left on would let anyone skip the domain list, the rate limits, and the bot check, and
+  // would answer UsernameExistsException for an address that already has an account.
+  cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', true);
+  cfnUserPool.node.addValidation({
+    validate: () => (signUpStaysOff(stack, cfnUserPool) ? [] : [SIGN_UP_ENABLED]),
+  });
+  if (o.accountCreation.mode === 'domains') {
     cfnUserPool.node.addValidation({
       validate: () => {
         const lambdaConfig = stack.resolve(cfnUserPool.lambdaConfig) as { PreSignUp?: unknown; preSignUp?: unknown } | undefined;
         return lambdaConfig?.PreSignUp || lambdaConfig?.preSignUp
           ? []
-          : ['auth-kit: selfSignUp needs the preSignUp allowlist trigger (triggers: { preSignUp }).'];
+          : [
+              "auth-kit: accountCreation mode 'domains' needs the preSignUp trigger, which re-checks the domain list on accounts the sign-up route creates " +
+                '(triggers: { preSignUp }, built with preSignUpForAccountCreation from auth-kit/amplify/pre-sign-up).',
+            ];
       },
     });
   }
+
+  // An email change takes effect only once the new address is verified; until then the old address
+  // keeps working (D4; members change their own address on sign-up sites).
+  cfnUserPool.userAttributeUpdateSettings = { attributesRequireVerificationBeforeUpdate: ['email'] };
 
   const deletionProtection = isSandbox && !o.deletionProtectionInSandbox ? 'INACTIVE' : 'ACTIVE';
   cfnUserPool.deletionProtection = deletionProtection;
@@ -210,7 +291,13 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPoolClient.idTokenValidity = SESSION_POLICY.idTokenMinutes;
   cfnUserPoolClient.refreshTokenValidity = o.refreshTokenMinutes;
   cfnUserPoolClient.tokenValidityUnits = { accessToken: 'minutes', idToken: 'minutes', refreshToken: 'minutes' };
-  cfnUserPoolClient.authSessionValidity = SESSION_POLICY.authSessionMinutes;
+  // The sign-in session is also an emailed code's lifetime (register A7): one setting, also passed to the screens.
+  cfnUserPoolClient.authSessionValidity = o.codeLifetimeMinutes;
+  // What a signed-in person may change about themselves with their own token: their name and profile
+  // details, never their email address (on sign-up sites the server changes it after a recent sign-in,
+  // D4; elsewhere admins do), nor auth-kit's sign-up mark.
+  const writeAttributes = clientWriteAttributes(stack, cfnUserPool);
+  cfnUserPoolClient.writeAttributes = writeAttributes;
 
   // Sign-in happens in the app (USER_AUTH), not through the hosted UI's OAuth redirect. Amplify still
   // turns the authorization-code flow on, and CDK fills in its placeholder callback
@@ -287,5 +374,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     tags,
     waf,
     hostedUiOAuth,
+    codeLifetimeMinutes: o.codeLifetimeMinutes,
+    writeAttributes,
   };
 }

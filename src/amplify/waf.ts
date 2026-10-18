@@ -1,6 +1,6 @@
 import { CfnWebACL, CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
 import type { Construct } from 'constructs';
-import { type WafRuleSettings, validateWafRules, wafRuleSettings } from './options.js';
+import { type WafRuleMode, type WafRuleSettings, validateWafRules, wafRuleSettings } from './options.js';
 
 export interface AuthWebAclProps {
   /** ARN of the user pool to protect. */
@@ -171,4 +171,107 @@ export function associateAuthWebAcl(
   props: { userPoolArn: string; webAclArn: string },
 ): CfnWebACLAssociation {
   return new CfnWebACLAssociation(scope, id, { resourceArn: props.userPoolArn, webAclArn: props.webAclArn });
+}
+
+// ---- The site's own routes: sign-up and request access (ADR 0023) -------------------------------
+
+/** The routes auth-kit's account-creation handlers are usually mounted on (`auth-kit/accounts`). */
+export const ACCOUNT_CREATION_ROUTES = ['/api/auth/sign-up', '/api/auth/request-access'] as const;
+
+export interface AccountCreationWafOptions {
+  /** URI paths of the sign-up and request routes. Default `ACCOUNT_CREATION_ROUTES`. */
+  paths?: readonly string[];
+  /** Metric name prefix. Default `auth-kit-account-creation`. */
+  metricPrefix?: string;
+  /** First priority to use (the rules take this and the next). Default 0. */
+  priority?: number;
+  /** How long a solved challenge counts, in seconds (AWS WAF's immunity time). Default 300. */
+  challengeImmunitySeconds?: number;
+  /** POSTs to those routes per IP per window before WAF blocks. Default 50 (the app's own per-IP limits sit behind it). */
+  rateLimit?: number;
+  /** Window in seconds: 60, 120, 300 (default), or 600. */
+  evaluationWindowSec?: 60 | 120 | 300 | 600;
+  /** The rate rule's mode. Default `block`. */
+  rateRule?: WafRuleMode;
+}
+
+function postTo(paths: readonly string[]): CfnWebACL.StatementProperty {
+  const methodIsPost: CfnWebACL.StatementProperty = {
+    byteMatchStatement: { fieldToMatch: { method: {} }, positionalConstraint: 'EXACTLY', searchString: 'POST', textTransformations: [{ priority: 0, type: 'NONE' }] },
+  };
+  const path = (p: string): CfnWebACL.StatementProperty => ({
+    byteMatchStatement: { fieldToMatch: { uriPath: {} }, positionalConstraint: 'STARTS_WITH', searchString: p, textTransformations: [{ priority: 0, type: 'NONE' }] },
+  });
+  const onPaths = paths.length === 1 ? path(paths[0]!) : { orStatement: { statements: paths.map(path) } };
+  return { andStatement: { statements: [methodIsPost, onPaths] } };
+}
+
+/**
+ * Two rules for the site's sign-up and request routes (D3: "a silent WAF check and rate limits"),
+ * to add to a CLOUDFRONT-scope web ACL associated with the Amplify app:
+ *
+ * - **A silent challenge** (`challenge`): AWS WAF answers a POST to those routes without a valid token
+ *   with a challenge the browser solves in the background, no puzzle. A `fetch` can't solve one by
+ *   itself, so the sign-up and request pages load AWS WAF's JavaScript integration (the ACL's
+ *   application integration URL), and auth-kit's `SignUp` and `RequestAccess` send through
+ *   `window.AwsWafIntegration.fetch` when it's there, which attaches the token.
+ * - **A per-IP rate rule** on the same POSTs (WAF sees the real client IP; the app's own per-IP limit
+ *   reads a forwarded header).
+ *
+ * Optional: the routes keep their own per-address and per-IP limits either way.
+ */
+export function accountCreationWafRules(options: AccountCreationWafOptions = {}): CfnWebACL.RuleProperty[] {
+  const paths = [...(options.paths ?? ACCOUNT_CREATION_ROUTES)];
+  if (paths.length === 0 || paths.some((p) => !p.startsWith('/'))) throw new Error('auth-kit: account-creation WAF paths must be absolute paths like "/api/auth/sign-up".');
+  const prefix = options.metricPrefix ?? 'auth-kit-account-creation';
+  const priority = options.priority ?? 0;
+  const window = options.evaluationWindowSec ?? 300;
+  if (![60, 120, 300, 600].includes(window)) throw new Error('auth-kit: evaluationWindowSec must be 60, 120, 300, or 600.');
+  const limit = options.rateLimit ?? 50;
+  if (!Number.isInteger(limit) || limit < 10) throw new Error("auth-kit: rateLimit must be a whole number of at least 10 (AWS WAF's minimum).");
+  const immunity = options.challengeImmunitySeconds ?? 300;
+  if (!Number.isInteger(immunity) || immunity < 60) throw new Error('auth-kit: challengeImmunitySeconds must be a whole number of at least 60.');
+  const scope = postTo(paths);
+  return [
+    {
+      name: 'auth-kit-account-creation-challenge',
+      priority,
+      action: { challenge: {} },
+      challengeConfig: { immunityTimeProperty: { immunityTime: immunity } },
+      statement: scope,
+      visibilityConfig: { cloudWatchMetricsEnabled: true, sampledRequestsEnabled: true, metricName: metricName(prefix, 'challenge') },
+    },
+    {
+      name: 'auth-kit-account-creation-per-ip',
+      priority: priority + 1,
+      action: ruleAction(options.rateRule ?? 'block'),
+      statement: { rateBasedStatement: { aggregateKeyType: 'IP', limit, evaluationWindowSec: window, scopeDownStatement: scope } },
+      visibilityConfig: { cloudWatchMetricsEnabled: true, sampledRequestsEnabled: true, metricName: metricName(prefix, 'per-ip') },
+    },
+  ];
+}
+
+export interface SiteWebAclProps extends AccountCreationWafOptions {
+  /** The web ACL's name, unique per account. Default `auth-kit-site-routes`. */
+  name?: string;
+}
+
+/**
+ * A CLOUDFRONT-scope web ACL with `accountCreationWafRules`, for the Amplify app that serves the
+ * sign-up and request routes. Deploy it in `us-east-1` (CloudFront ACLs live there), then associate it
+ * with the app in the Amplify console (Hosting → Firewall) or its API. Separate from the shared
+ * REGIONAL ACL on the user pools (`createSharedAuthWebAcl`): that one sees Cognito's API, not the
+ * site's routes. Optional (ADR 0023).
+ */
+export function createSiteWebAcl(scope: Construct, id: string, props: SiteWebAclProps = {}): CfnWebACL {
+  const name = props.name ?? 'auth-kit-site-routes';
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(name)) throw new Error(`auth-kit: web ACL name "${name}" may use only letters, digits, _ and - (1-128).`);
+  return new CfnWebACL(scope, id, {
+    name,
+    scope: 'CLOUDFRONT',
+    description: "auth-kit: a silent challenge and a per-IP limit on the site's sign-up and request routes",
+    defaultAction: { allow: {} },
+    visibilityConfig: { cloudWatchMetricsEnabled: true, sampledRequestsEnabled: true, metricName: metricName(name) },
+    rules: accountCreationWafRules(props),
+  });
 }

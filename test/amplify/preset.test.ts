@@ -386,29 +386,81 @@ describe('admin pool', () => {
   });
 });
 
-describe('self sign-up allowlist', () => {
-  const options: AuthStandardOptions = { ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } };
+describe('account creation (ADR 0023)', () => {
+  const preSignUpTrigger = (auth: AmplifyAuth, stack: Stack) => {
+    const fn = new LambdaFunction(stack, 'PreSignUp', {
+      runtime: Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: Code.fromInline('exports.handler = async (e) => e;'),
+    });
+    (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.PRE_SIGN_UP, fn);
+  };
 
-  it('refuses to synthesize without the preSignUp trigger', () => {
-    const { template } = synth(options);
-    expect(() => template()).toThrow(/preSignUp allowlist trigger/);
+  it.each([
+    ['invite', { mode: 'invite' }],
+    ['request', { mode: 'request' }],
+    ['domains', { mode: 'domains', domains: ['example.edu'] }],
+    ['open', { mode: 'open' }],
+  ] as const)("keeps Cognito's own SignUp off in mode %s", (_mode, accountCreation) => {
+    const t = synth({ ...BASE, accountCreation }, { beforeApply: preSignUpTrigger }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
   });
 
-  it('opens sign-up only with the trigger attached', () => {
-    const t = synth(options, {
-      beforeApply: (auth, stack) => {
-        const fn = new LambdaFunction(stack, 'PreSignUp', {
-          runtime: Runtime.NODEJS_22_X,
-          handler: 'index.handler',
-          code: Code.fromInline('exports.handler = async (e) => e;'),
-        });
-        (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.PRE_SIGN_UP, fn);
-      },
-    }).template();
-    t.hasResourceProperties('AWS::Cognito::UserPool', {
-      AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: false }),
-      LambdaConfig: Match.objectLike({ PreSignUp: Match.anyValue() }),
-    });
+  it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {
+    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } });
+    expect(() => template()).toThrow(/preSignUpForAccountCreation/);
+  });
+
+  it('fails synthesis when anything turns Cognito SignUp back on', () => {
+    const { template, auth } = synth(BASE);
+    auth.resources.cfnResources.cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', false);
+    expect(() => template()).toThrow(/Cognito's own SignUp is on/);
+    const typed = synth(BASE);
+    typed.auth.resources.cfnResources.cfnUserPool.adminCreateUserConfig = { allowAdminCreateUserOnly: false };
+    typed.auth.resources.cfnResources.cfnUserPool.addPropertyOverride('AdminCreateUserConfig', { AllowAdminCreateUserOnly: false });
+    expect(() => typed.template()).toThrow(/Cognito's own SignUp is on/);
+  });
+
+  it('marks sign-up accounts with an immutable attribute only on sign-up sites', () => {
+    const schema = (t: Template) =>
+      (Object.values(t.findResources('AWS::Cognito::UserPool'))[0] as { Properties: { Schema?: { Name: string; Mutable?: boolean }[] } }).Properties.Schema ?? [];
+    const open = schema(synth({ ...BASE, accountCreation: { mode: 'open' } }).template());
+    expect(open.find((a) => a.Name === 'authkit_origin')).toMatchObject({ Mutable: false, AttributeDataType: 'String' });
+    for (const accountCreation of [undefined, { mode: 'request' as const }]) {
+      expect(schema(synth({ ...BASE, ...(accountCreation && { accountCreation }) }).template()).some((a) => a.Name === 'authkit_origin')).toBe(false);
+    }
+    expect(() => standardAuthProps(BASE, { userAttributes: { 'custom:authkit_origin': { dataType: 'String', mutable: true } } })).toThrow(/auth-kit owns it/);
+  });
+
+  it('never lets a person change their own email address or sign-up mark with their token', () => {
+    const { applied, template } = synth({ ...BASE, accountCreation: { mode: 'open' } });
+    const client = Object.values(template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: { WriteAttributes: string[] } };
+    expect(client.Properties.WriteAttributes).toEqual(applied.writeAttributes);
+    expect(client.Properties.WriteAttributes).toEqual(expect.arrayContaining(['name', 'given_name', 'family_name']));
+    for (const forbidden of ['email', 'email_verified', 'phone_number', 'custom:authkit_origin']) expect(client.Properties.WriteAttributes).not.toContain(forbidden);
+  });
+
+  it("keeps a site's own mutable custom attributes writable", () => {
+    const options = { ...BASE };
+    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main' } });
+    const stack = new Stack(app, 'S');
+    const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options, {
+      userAttributes: { 'custom:team': { dataType: 'String', mutable: true }, 'custom:fixed': { dataType: 'String', mutable: false } },
+    }) as unknown as AuthProps);
+    const applied = applyAuthStandard(auth, options);
+    expect(applied.writeAttributes).toContain('custom:team');
+    expect(applied.writeAttributes).not.toContain('custom:fixed');
+  });
+
+  it('sets the code lifetime once, as the sign-in session', () => {
+    const t = synth({ ...BASE, codeLifetimeMinutes: 10 }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 10 });
+    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(3);
+  });
+
+  it('refuses the removed selfSignUp with an explanation', () => {
+    expect(() => normalizeOptions({ ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } })).toThrow(/selfSignUp was removed in auth-kit 0.1.8 \(ADR 0023\)/);
+    expect(() => normalizeOptions({ ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } })).toThrow(/accountCreation/);
   });
 });
 
@@ -620,8 +672,16 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['admin pool with self sign-up', { adminPool: true, selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /never allow self sign-up/],
-    ['empty self sign-up list', { selfSignUp: { allowedEmailDomains: [] } }, /at least one domain/],
+    ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
+    ['an admin pool with sign-up', { adminPool: true, accountCreation: { mode: 'open' } }, /admin pool is invite only/],
+    ['an empty domain list', { accountCreation: { mode: 'domains', domains: [] } }, /at least one domain/],
+    ['a domain list outside domains mode', { accountCreation: { mode: 'open', domains: ['example.edu'] } }, /applies only to mode 'domains'/],
+    ['requestsAlso outside domains mode', { accountCreation: { mode: 'request', requestsAlso: true } }, /requestsAlso applies only/],
+    ['an unknown account-creation mode', { accountCreation: { mode: 'anyone' as 'open' } }, /mode must be/],
+    ['a malformed approved domain', { accountCreation: { mode: 'domains', domains: ['not a domain'] } }, /isn't a domain/],
+    ['a code lifetime below Cognito’s range', { codeLifetimeMinutes: 2 }, /3 to 15/],
+    ['a code lifetime above Cognito’s range', { codeLifetimeMinutes: 16 }, /3 to 15/],
+    ['a fractional code lifetime', { codeLifetimeMinutes: 4.5 }, /whole number/],
     ['WAF limit below 10', { waf: { signInLimit: 5 } }, /from 10/],
     ['WAF window not allowed', { waf: { evaluationWindowSec: 30 as 60 } }, /60, 120, 300, or 600/],
     ['WAF rule mode not allowed', { waf: { overallRule: 'allow' as 'block' } }, /overallRule must be "block" or "count"/],

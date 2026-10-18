@@ -41,6 +41,10 @@
       "types": "./dist/amplify/pre-sign-up.d.ts",
       "import": "./dist/amplify/pre-sign-up.js"
     },
+    "./amplify/custom-message": {
+      "types": "./dist/amplify/custom-message.d.ts",
+      "import": "./dist/amplify/custom-message.js"
+    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
@@ -106,6 +110,11 @@
     "./backdrops/picker": {
       "types": "./dist/backdrops/picker.d.ts",
       "import": "./dist/backdrops/picker.js"
+    },
+    "./themes": {
+      "types": "./dist/themes/index.d.ts",
+      "import": "./dist/themes/index.js",
+      "default": "./dist/themes/index.js"
     },
     "./package.json": "./package.json"
   },

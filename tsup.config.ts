@@ -23,6 +23,7 @@ export default defineConfig({
   entry: {
     'amplify/index': 'src/amplify/index.ts',
     'amplify/pre-sign-up': 'src/amplify/pre-sign-up.ts',
+    'amplify/custom-message': 'src/amplify/custom-message.ts',
     'server/index': 'src/server/index.ts',
     'proxy/index': 'src/proxy/index.ts',
     'testing/index': 'src/testing/index.ts',
@@ -40,6 +41,7 @@ export default defineConfig({
     'backdrops/react': 'src/backdrops/react.tsx',
     // Dev only: carries the backdrop picker marker that check-prod-build looks for.
     'backdrops/picker': 'src/backdrops/picker.tsx',
+    themes: 'src/themes/index.ts',
     // The `auth-kit` command (not a subpath).
     'bin/auth-kit': 'src/dev/bin.ts',
   },
