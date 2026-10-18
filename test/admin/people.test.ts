@@ -1,6 +1,7 @@
 import { AdminCreateUserCommand, type AdminCreateUserCommandInput } from '@aws-sdk/client-cognito-identity-provider';
 import { describe, expect, it } from 'vitest';
 import { createInviteExpirySweep, createMemoryAuditLog, createPeopleActions, PEOPLE_FORM_FIELDS } from '../../src/admin/index.js';
+import { OWNER_GROUP } from '../../src/shared/policy.js';
 import { awsError, DAY, fakeUserPool, NOW, setup } from './people-fixture.js';
 
 const OWNER = { sub: 'owner-1', groups: ['superadmin'] };
@@ -578,12 +579,12 @@ describe('invite expiry sweep', () => {
 
   it('as an admin: never disables the last owner, warns them through the mailer, and says so', async () => {
     const t = setup({ actor: ADMIN });
-    t.pool.add({ sub: 'o-1', email: 'olivia@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'superadmin');
+    t.pool.add({ sub: 'o-1', email: 'olivia@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, OWNER_GROUP);
     t.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'editor');
     const result = await t.people.expireStaleInvites();
     expect(result).toMatchObject({ disabled: ['old'], failed: [], skipped: [{ sub: 'o-1', reason: 'last-owner', warned: ['owner'], problems: [] }] });
     expect(t.pool.get('o-1')).toMatchObject({ enabled: true });
-    expect([...t.pool.get('o-1')!.groups]).toEqual(['superadmin']);
+    expect([...t.pool.get('o-1')!.groups]).toEqual([OWNER_GROUP]);
     expect(t.ownerWarnings).toEqual([
       expect.objectContaining({ siteName: 'Example Reports', signInUrl: 'https://reports.example.org/sign-in', to: { email: 'olivia@example.org', kind: 'owner' } }),
     ]);

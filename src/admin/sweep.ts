@@ -4,17 +4,18 @@
  * calls → result. Run by an admin (`people.expireStaleInvites`) or on a schedule with no signed-in
  * person (`createInviteExpirySweep`, which `InviteExpirySweep` in `auth-kit/admin/cdk` deploys).
  *
- * One exception (ADR 0019): the sweep never disables, or strips roles from, the site's last owner,
- * even one who never signed in. An expired owner invite is disabled only while another enabled owner
- * remains (read live, not counting anyone this run has disabled). Otherwise it's skipped: the skip is
- * logged as a refusal ("skipped: last owner"), and the owner, and an optional fallback address, are
- * warned. When the owner count can't be read, the owner is skipped too, and the run reports a failure.
+ * One exception (ADR 0019): the sweep never disables, or strips roles from, the site's last owner
+ * (the last enabled member of `OWNER_GROUP`, from the shared policy), even one who never signed in.
+ * An expired owner invite is disabled only while another enabled owner remains (read live, not
+ * counting anyone this run has disabled). Otherwise it's skipped: the skip is logged as a refusal
+ * ("skipped: last owner"), and the owner, and an optional fallback address, are warned. When the
+ * owner count can't be read, the owner is skipped too, and the run reports a failure.
  *
  * Kept apart from the People module so the scheduled Lambda's bundle holds only the AWS SDK clients
  * it calls: no Next.js, no React.
  */
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
-import { INVITE_EXPIRY_DAYS } from '../shared/policy.js';
+import { INVITE_EXPIRY_DAYS, OWNER_GROUP } from '../shared/policy.js';
 import { type AuditLogStore, runAudited } from './audit.js';
 import { PEOPLE_AUDIT_ACTIONS } from './audit-actions.js';
 import { describeAwsError } from './aws-errors.js';
@@ -189,9 +190,9 @@ export function sweepFor(deps: {
     }
 
     for (const person of due) {
-      let groups: ReturnType<typeof adminGroupsOf>;
+      let held: string[];
       try {
-        groups = adminGroupsOf(await deps.cognito.groupsOf(person.username));
+        held = await deps.cognito.groupsOf(person.username);
       } catch (error) {
         // Without their roles there's no telling whether they're the last owner: fail closed.
         result.failed.push({
@@ -200,14 +201,17 @@ export function sweepFor(deps: {
         });
         continue;
       }
+      const isOwner = held.includes(OWNER_GROUP);
+      // The roles a disable removes: every admin role, and the owner role whichever group holds it.
+      const groups: string[] = [...new Set<string>([...(isOwner ? [OWNER_GROUP] : []), ...adminGroupsOf(held)])];
       const before = { enabled: true, invite: 'expired', createdAt: isoOrNull(person.createdAt), groups };
 
-      if (groups.includes('superadmin')) {
-        const ownerBefore = { adminRole: 'superadmin', ...before };
+      if (isOwner) {
+        const ownerBefore = { adminRole: OWNER_GROUP, ...before };
         let others: number;
         try {
           // Read live for each owner, so the window for a concurrent change stays as small as it can.
-          others = (await deps.cognito.listGroupMembers('superadmin')).filter(
+          others = (await deps.cognito.listGroupMembers(OWNER_GROUP)).filter(
             (o) => o.enabled && o.sub !== person.sub && !attempted.has(o.sub),
           ).length;
         } catch (error) {

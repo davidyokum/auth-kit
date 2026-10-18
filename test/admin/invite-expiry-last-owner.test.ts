@@ -1,7 +1,8 @@
 /**
  * The invite-expiry sweep never disables a site's last owner (ADR 0019): it skips them, logs the skip
  * as a refusal ("skipped: last owner"), and warns the owner and an optional fallback address. An
- * owner count it can't read is a skip too (fail closed), reported as a failure. Cognito is the fake
+ * owner count it can't read is a skip too (fail closed), reported as a failure. The owner role is
+ * `OWNER_GROUP` from the shared policy, never a literal, so these tests follow it if it changes. Cognito is the fake
  * pool; the audit log is in memory; the notifier records what it was asked to send.
  */
 import { AdminDisableUserCommand, AdminRemoveUserFromGroupCommand } from '@aws-sdk/client-cognito-identity-provider';
@@ -15,6 +16,7 @@ import {
   type OwnerInviteWarningNotifier,
 } from '../../src/admin/index.js';
 import { lastOwnerWarningDue } from '../../src/admin/sweep.js';
+import { OWNER_GROUP } from '../../src/shared/policy.js';
 import { awsError, DAY, fakeUserPool, NOW } from './people-fixture.js';
 
 const MINUTE = 60 * 1000;
@@ -65,7 +67,7 @@ const activeOwner = (sub: string) => ({ sub, email: `${sub}@example.org`, emailV
 describe('the sole owner, who never signed in', () => {
   it('is not disabled and keeps the owner role; the skip is logged and the owner and fallback are warned', async () => {
     const w = world({ fallbackEmail: 'ops@example.org' });
-    w.pool.add({ ...unusedOwner('owner'), name: 'Olivia' }, 'superadmin');
+    w.pool.add({ ...unusedOwner('owner'), name: 'Olivia' }, OWNER_GROUP);
     w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'editor');
 
     const result = await w.sweep();
@@ -74,7 +76,7 @@ describe('the sole owner, who never signed in', () => {
     expect(result).toMatchObject({ disabled: ['old'], failed: [], checked: 2 });
     expect(result.skipped).toEqual([{ sub: 'owner', reason: 'last-owner', warningDue: true, warned: ['owner', 'fallback'], problems: [] }]);
     expect(w.pool.get('owner')).toMatchObject({ enabled: true });
-    expect([...w.pool.get('owner')!.groups]).toEqual(['superadmin']);
+    expect([...w.pool.get('owner')!.groups]).toEqual([OWNER_GROUP]);
     expect(w.disabledUsernames()).toEqual(['old']);
     expect(w.pool.inputsOf(AdminRemoveUserFromGroupCommand).map((i) => i.Username)).toEqual(['old']);
 
@@ -84,7 +86,7 @@ describe('the sole owner, who never signed in', () => {
       action: 'people.expireInvite',
       actor: { sub: 'system:invite-expiry', kind: 'system' },
       target: { sub: 'owner', email: 'owner@example.org' },
-      before: { adminRole: 'superadmin', enabled: true, invite: 'expired', groups: ['superadmin'] },
+      before: { adminRole: OWNER_GROUP, enabled: true, invite: 'expired', groups: [OWNER_GROUP] },
       reason: 'Invite unused for 7 days',
       calls: ['Warning to the owner: ok', 'Warning to the fallback address: ok'],
     });
@@ -114,8 +116,8 @@ describe('the sole owner, who never signed in', () => {
 
   it('another owner who is disabled doesn’t count', async () => {
     const w = world();
-    w.pool.add(unusedOwner('owner'), 'superadmin');
-    w.pool.add({ ...activeOwner('former'), enabled: false }, 'superadmin');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP);
+    w.pool.add({ ...activeOwner('former'), enabled: false }, OWNER_GROUP);
     const result = await w.sweep();
     expect(result.skipped.map((s) => s.sub)).toEqual(['owner']);
     expect(w.disabledUsernames()).toEqual([]);
@@ -123,19 +125,19 @@ describe('the sole owner, who never signed in', () => {
 
   it('an app role or a lower admin role beside an owner doesn’t count as an owner', async () => {
     const w = world();
-    w.pool.add(unusedOwner('owner'), 'superadmin', 'reviewer');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP, 'reviewer');
     w.pool.add(activeOwner('admin'), 'admin');
     const result = await w.sweep();
     expect(result.skipped.map((s) => s.sub)).toEqual(['owner']);
-    expect([...w.pool.get('owner')!.groups].sort()).toEqual(['reviewer', 'superadmin']);
+    expect([...w.pool.get('owner')!.groups].sort()).toEqual(['reviewer', OWNER_GROUP].sort());
   });
 });
 
 describe('more than one owner', () => {
   it('two owners, one never signed in: the unused one is disabled and loses the owner role, with no warning', async () => {
     const w = world({ fallbackEmail: 'ops@example.org' });
-    w.pool.add(activeOwner('olivia'), 'superadmin');
-    w.pool.add(unusedOwner('newbie'), 'superadmin');
+    w.pool.add(activeOwner('olivia'), OWNER_GROUP);
+    w.pool.add(unusedOwner('newbie'), OWNER_GROUP);
     const result = await w.sweep();
     expect(result).toMatchObject({ disabled: ['newbie'], failed: [], skipped: [] });
     expect(w.pool.get('newbie')).toMatchObject({ enabled: false });
@@ -147,18 +149,18 @@ describe('more than one owner', () => {
 
   it('two owners who both never signed in: one is disabled and the other kept, so the site is never left with none', async () => {
     const w = world();
-    w.pool.add(unusedOwner('first', 9), 'superadmin');
-    w.pool.add(unusedOwner('second', 8), 'superadmin');
+    w.pool.add(unusedOwner('first', 9), OWNER_GROUP);
+    w.pool.add(unusedOwner('second', 8), OWNER_GROUP);
     const result = await w.sweep();
     expect(result.disabled).toEqual(['first']);
     expect(result.skipped.map((s) => s.sub)).toEqual(['second']);
-    expect(w.pool.users.filter((u) => u.enabled && u.groups.has('superadmin')).map((u) => u.sub)).toEqual(['second']);
+    expect(w.pool.users.filter((u) => u.enabled && u.groups.has(OWNER_GROUP)).map((u) => u.sub)).toEqual(['second']);
   });
 
   it('a disable that failed still counts as gone: the next owner is kept rather than risk zero', async () => {
     const w = world();
-    w.pool.add(unusedOwner('first', 9), 'superadmin');
-    w.pool.add(unusedOwner('second', 8), 'superadmin');
+    w.pool.add(unusedOwner('first', 9), OWNER_GROUP);
+    w.pool.add(unusedOwner('second', 8), OWNER_GROUP);
     w.pool.failOn('AdminDisableUserCommand', awsError('NotAuthorizedException', 'denied'));
     const result = await w.sweep();
     expect(result.failed.map((f) => f.sub)).toEqual(['first']);
@@ -170,8 +172,8 @@ describe('more than one owner', () => {
 describe('failing closed', () => {
   it('the owner count can’t be read: the owner is skipped, not disabled, and the run reports a failure', async () => {
     const w = world();
-    w.pool.add(activeOwner('olivia'), 'superadmin');
-    w.pool.add(unusedOwner('newbie'), 'superadmin');
+    w.pool.add(activeOwner('olivia'), OWNER_GROUP);
+    w.pool.add(unusedOwner('newbie'), OWNER_GROUP);
     w.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'viewer');
     w.pool.failOn('ListUsersInGroupCommand', awsError('AccessDeniedException', 'not authorized to perform ListUsersInGroup'));
     const result = await w.sweep();
@@ -179,7 +181,7 @@ describe('failing closed', () => {
     expect(result.skipped).toEqual([]);
     expect(result.disabled).toEqual(['old']);
     expect(w.pool.get('newbie')).toMatchObject({ enabled: true });
-    expect([...w.pool.get('newbie')!.groups]).toEqual(['superadmin']);
+    expect([...w.pool.get('newbie')!.groups]).toEqual([OWNER_GROUP]);
     expect(w.disabledUsernames()).toEqual(['old']);
     expect(w.mail.sent).toEqual([]); // not known to be the last owner, so no warning
     const row = w.log.rows.find((r) => r.target?.sub === 'newbie')!;
@@ -189,7 +191,7 @@ describe('failing closed', () => {
 
   it('their roles can’t be read: not disabled (they could be the last owner), reported as a failure', async () => {
     const w = world();
-    w.pool.add(unusedOwner('owner'), 'superadmin');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP);
     w.pool.failOn('AdminListGroupsForUserCommand', awsError('AccessDeniedException', 'not authorized'));
     const result = await w.sweep();
     expect(result.failed).toEqual([{ sub: 'owner', error: expect.stringMatching(/couldn't rule out that they're the site's last owner; not disabled/) }]);
@@ -199,7 +201,7 @@ describe('failing closed', () => {
 
   it('a warning that can’t be sent is a problem to report, never a reason to disable; the fallback still goes out', async () => {
     const w = world({ fallbackEmail: 'ops@example.org' });
-    w.pool.add(unusedOwner('owner'), 'superadmin');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP);
     w.mail.failures.owner = awsError('MessageRejected', 'Email address is not verified.');
     const result = await w.sweep();
     expect(result.skipped).toEqual([
@@ -211,7 +213,7 @@ describe('failing closed', () => {
 
   it('with no warning configured, the owner is still skipped, and the run says nobody was told', async () => {
     const w = world({ warnings: false });
-    w.pool.add(unusedOwner('owner'), 'superadmin');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP);
     const result = await w.sweep();
     expect(result.skipped).toEqual([
       { sub: 'owner', reason: 'last-owner', warningDue: true, warned: [], problems: ['No owner warning is configured (ownerWarnings), so nobody was told.'] },
@@ -222,7 +224,7 @@ describe('failing closed', () => {
 
   it('with the audit log down, the owner is still skipped and warned, and the run says the skip wasn’t logged', async () => {
     const w = world();
-    w.pool.add(unusedOwner('owner'), 'superadmin');
+    w.pool.add(unusedOwner('owner'), OWNER_GROUP);
     w.log.failNextAppends(1);
     const result = await w.sweep();
     expect(result.skipped).toEqual([
@@ -236,7 +238,7 @@ describe('how often the last owner is warned', () => {
   it('on a schedule: the first run after the invite expired, then once a day; the runs between only skip', async () => {
     const w = world({ runEveryMinutes: 60 });
     // Expired 10 minutes before the first run.
-    w.pool.add({ ...unusedOwner('owner'), createdAt: new Date(NOW - 7 * DAY - 10 * MINUTE) }, 'superadmin');
+    w.pool.add({ ...unusedOwner('owner'), createdAt: new Date(NOW - 7 * DAY - 10 * MINUTE) }, OWNER_GROUP);
 
     expect((await w.sweep()).skipped[0]).toMatchObject({ warningDue: true, warned: ['owner'] });
     for (let hour = 1; hour < 24; hour++) {

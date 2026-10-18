@@ -13,6 +13,7 @@ import {
   type SweepSkip,
 } from '../../src/admin/index.js';
 import { INVITE_EXPIRY_ENV, createInviteExpiryHandler, inviteExpiryConfig, redactAddresses } from '../../src/admin/invite-expiry-handler.js';
+import { OWNER_GROUP } from '../../src/shared/policy.js';
 import { DAY, NOW, fakeUserPool } from './people-fixture.js';
 
 const ENV = {
@@ -160,8 +161,8 @@ describe('a run', () => {
     const pool = fakeUserPool({ timeline });
     seedInvites(pool);
     // An expired owner invite beside an owner who signed in: disabled, which needs the owner count.
-    pool.add({ sub: 'owner-new', email: 'owner-new@example.org', emailVerified: false, createdAt: new Date(NOW - 9 * DAY) }, 'superadmin');
-    pool.add({ sub: 'owner-used', email: 'owner-used@example.org', emailVerified: true, createdAt: new Date(NOW - 90 * DAY) }, 'superadmin');
+    pool.add({ sub: 'owner-new', email: 'owner-new@example.org', emailVerified: false, createdAt: new Date(NOW - 9 * DAY) }, OWNER_GROUP);
+    pool.add({ sub: 'owner-used', email: 'owner-used@example.org', emailVerified: true, createdAt: new Date(NOW - 90 * DAY) }, OWNER_GROUP);
     const log = createMemoryAuditLog({ now: () => NOW });
     const handler = createInviteExpiryHandler({
       env: ENV,
