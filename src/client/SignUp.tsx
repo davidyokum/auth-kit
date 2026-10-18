@@ -7,7 +7,7 @@ import { handOffEmail, postAccountForm } from './account-creation-client.js';
 import { confirmCode, fetchAuthFactors, requestEmailCode, saveName } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
-import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP } from './copy.js';
+import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP, STATUS } from './copy.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, needsAuthenticator, normalizeCode } from './ladder.js';
 import type { AuthErrorKind, MessageWords } from './messages.js';
 import { answerSimulatedCode, isFirstFactorUnavailable } from './parity.js';
@@ -145,7 +145,7 @@ export function SignUp(props: SignUpProps) {
         // Anything but a real code challenge reads as "check your email" with nothing sent (ADR 0018).
         return !isFirstFactorUnavailable('email-code', step) && step.step === 'email-code' ? 'sent' : 'simulated';
       },
-      { context: 'sign-in', words, busyStatus: 'Sending a code…' },
+      { context: 'sign-in', words, busyStatus: STATUS.sendingCode },
     );
     if (!result.ok) return false;
     setResendReady(false);
@@ -168,7 +168,7 @@ export function SignUp(props: SignUpProps) {
       setView({ name: 'email', requestAccess: settings.requestsAlso });
       return;
     }
-    set({ busy: true, error: null, field: null, status: 'Sending a code…' });
+    set({ busy: true, error: null, field: null, status: STATUS.sendingCode });
     const outcome = await postAccountForm(props.endpoint ?? '/api/auth/sign-up', { email: typed }, { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address });
     set({ busy: false, status: null });
     if (!outcome.ok) {
@@ -193,7 +193,7 @@ export function SignUp(props: SignUpProps) {
     const result = await fb.run(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : confirmCode(code)), {
       context: 'code',
       words,
-      busyStatus: 'Checking the code…',
+      busyStatus: STATUS.checkingCode,
       onError: (info) => {
         failed.kind = info.kind;
       },
@@ -231,7 +231,7 @@ export function SignUp(props: SignUpProps) {
       fieldRef.current?.focus();
       return;
     }
-    const result = await fb.run(() => saveName({ givenName: given, familyName: family }), { context: 'account', words, busyStatus: 'Saving…' });
+    const result = await fb.run(() => saveName({ givenName: given, familyName: family }), { context: 'account', words, busyStatus: STATUS.saving });
     if (result.ok) go({ name: 'choose' });
   }
 

@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import { postAccountForm, takeHandedOffEmail } from './account-creation-client.js';
-import { type CopyContext, ERRORS, REQUEST, SIGN_IN } from './copy.js';
+import { type CopyContext, ERRORS, REQUEST, SHARED, SIGN_IN, STATUS } from './copy.js';
 import type { SignInHelp } from './SignIn.js';
 import { Actions, Button, Card, ErrorSummary, Field, Glyph, Heading, type HeadingLevel, StatusRegion, type StyleProps, Text, slot, useFeedback, useFocusOnViewChange } from './ui.js';
 
@@ -65,7 +65,7 @@ export function RequestAccess(props: RequestAccessProps) {
     setProblems(found);
     fb.set({ error: null });
     if (found.length > 0) return;
-    fb.set({ busy: true, status: 'Sending your request…' });
+    fb.set({ busy: true, status: STATUS.sendingRequest });
     const outcome = await postAccountForm(
       props.endpoint ?? '/api/auth/request-access',
       { name: name.trim(), email: typed, ...(reason.trim() && { reason: reason.trim() }) },
@@ -138,7 +138,7 @@ export function RequestAccess(props: RequestAccessProps) {
             </label>
             {errorOf('reason') ? (
               <p id={`${ids.reason}-error`} {...slot(classNames, 'fieldError')}>
-                <span data-auth-kit-sr="">Error: </span>
+                <span data-auth-kit-sr="">{SHARED.errorPrefix}</span>
                 {errorOf('reason')}
               </p>
             ) : null}

@@ -1,7 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { registerPasskey, setFirstPassword } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
-import { ERRORS, FIRST_VISIT } from './copy.js';
+import { ERRORS, FIRST_VISIT, SIGN_IN, STATUS } from './copy.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
 import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
@@ -73,7 +73,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
     setPasskeyFailed(false);
     void fb.run(registerPasskey, { context: 'passkey-register' }).then((result) => {
       if (result.ok) {
-        set({ status: 'Passkey saved.' });
+        set({ status: STATUS.passkeySaved });
         props.onDone('passkey');
       } else {
         setPasskeyFailed(true);
@@ -96,7 +96,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
       passwordRef.current?.focus();
       return;
     }
-    set({ busy: true, error: null, field: null, status: 'Checking the password…' });
+    set({ busy: true, error: null, field: null, status: STATUS.checkingPassword });
     const breached = await breachedPasswordProblem(password, props.checkBreachedPassword);
     if (breached) {
       set({ busy: false, error: breached, field: 'password', status: null });
@@ -104,7 +104,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
       return;
     }
     set({ busy: false, status: null });
-    const result = await fb.run(() => setFirstPassword(password), { context: 'set-password', busyStatus: 'Saving…' });
+    const result = await fb.run(() => setFirstPassword(password), { context: 'set-password', busyStatus: STATUS.saving });
     if (result.ok) {
       setPassword('');
       go('add-totp');
@@ -150,10 +150,10 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         />
         <Actions classNames={classNames}>
           <Button type="submit" disabled={fb.busy} classNames={classNames}>
-            Continue
+            {SIGN_IN.continue}
           </Button>
         </Actions>
-        {passkeysEnabled ? <AltLinks links={[{ icon: 'fingerprint', label: 'Use a passkey instead', onClick: () => go('create-passkey'), disabled: fb.busy }]} classNames={classNames} /> : null}
+        {passkeysEnabled ? <AltLinks links={[{ icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: () => go('create-passkey'), disabled: fb.busy }]} classNames={classNames} /> : null}
         <StatusRegion status={fb.status} classNames={classNames} />
       </form>
     );
@@ -168,11 +168,11 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         {passkeyFailed ? null : <Wait label={FIRST_VISIT.waitingForDevice} classNames={classNames} />}
         <Actions classNames={classNames}>
           <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={() => setPasskeyAttempt((n) => n + 1)}>
-            Try again
+            {SIGN_IN.tryAgain}
           </Button>
         </Actions>
         <Text classNames={classNames}>{FIRST_VISIT.passkeyOnPhone}</Text>
-        <AltLinks links={[{ icon: 'password', label: 'Use a password instead', onClick: () => go('create-password'), disabled: fb.busy }]} classNames={classNames} />
+        <AltLinks links={[{ icon: 'password', label: SIGN_IN.usePassword, onClick: () => go('create-password'), disabled: fb.busy }]} classNames={classNames} />
         <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>
       </div>
     );
@@ -200,7 +200,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
           </h2>
           <p>{FIRST_VISIT.passwordOptionText}</p>
           <Button variant="link" classNames={classNames} onClick={() => go('create-password')}>
-            Use a password instead
+            {SIGN_IN.usePassword}
           </Button>
         </section>
         <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>

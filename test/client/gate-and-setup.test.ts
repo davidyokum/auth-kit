@@ -89,7 +89,7 @@ describe('TOTPEnrollmentGate', () => {
       .mockRejectedValueOnce(awsError('NetworkError'))
       .mockResolvedValueOnce({ configured: ['WEB_AUTHN'], mfa: [] });
     gate(loadFactors);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/couldn't check your sign-in settings.*connection/i));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/couldn’t check your sign-in settings.*connection/i));
     expect(isShown('The app')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(isShown('The app')).toBe(true));

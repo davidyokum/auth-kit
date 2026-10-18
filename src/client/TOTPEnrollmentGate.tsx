@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import { fetchAuthFactors } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { MY_ACCOUNT, SIGN_IN } from './copy.js';
 import { type ClientAuthFactors, needsAuthenticator } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import { Actions, Button, type HeadingLevel, LiveRegions, type StyleProps, slot } from './ui.js';
@@ -72,7 +73,7 @@ export function TOTPEnrollmentGate(props: TOTPEnrollmentGateProps) {
         // After a server check, a browser re-check that can't run changes nothing: the server's answer
         // for this render stands, and the next request is checked again on the server.
         if (active && !serverChecked) {
-          setState({ kind: 'error', message: `We couldn't check your sign-in settings. ${describeAuthError(error, 'account').message}` });
+          setState({ kind: 'error', message: MY_ACCOUNT.gateCheckFailed(describeAuthError(error, 'account').message) });
         }
       },
     );
@@ -85,7 +86,7 @@ export function TOTPEnrollmentGate(props: TOTPEnrollmentGateProps) {
   return (
     <div data-auth-kit="totp-gate" data-auth-kit-state={state.kind} {...slot(classNames, 'root', props.className)}>
       {state.kind === 'checking'
-        ? (props.fallback ?? <LiveRegions classNames={classNames} errorId={errorId} error={null} status="Checking your account…" />)
+        ? (props.fallback ?? <LiveRegions classNames={classNames} errorId={errorId} error={null} status={MY_ACCOUNT.gateChecking} />)
         : null}
       {state.kind === 'error' ? (
         <>
@@ -98,7 +99,7 @@ export function TOTPEnrollmentGate(props: TOTPEnrollmentGateProps) {
                 setAttempt((n) => n + 1);
               }}
             >
-              Try again
+              {SIGN_IN.tryAgain}
             </Button>
           </Actions>
         </>
@@ -106,7 +107,7 @@ export function TOTPEnrollmentGate(props: TOTPEnrollmentGateProps) {
       {state.kind === 'enroll' ? (
         <AuthenticatorSetup
           issuer={props.issuer}
-          intro={`You sign in with a password, so ${props.issuer} also needs a code from an authenticator app. Set it up to continue.`}
+          intro={MY_ACCOUNT.gateIntro(props.issuer)}
           headingLevel={props.headingLevel ?? 2}
           onDone={() => {
             setGeneration((n) => n + 1);

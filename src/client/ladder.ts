@@ -2,6 +2,7 @@
  * The sign-in ladder and the rules that decide which screen comes next. Pure: no Amplify, no React.
  */
 import { PASSWORD_POLICY } from '../shared/policy.js';
+import { ERRORS } from './copy.js';
 
 export type SignInMethod = 'passkey' | 'password' | 'email-code';
 
@@ -81,7 +82,7 @@ export function canRemovePasskey(input: { passkeyCount: number; factors: ClientA
   if (input.passkeyCount > 1) return { allowed: true };
   const { factors } = input;
   if (!factors) {
-    return { allowed: false, reason: "We couldn't confirm you have another way to sign in, so this passkey stays for now. Try again in a moment." };
+    return { allowed: false, reason: ERRORS.passkeyRemovalUnconfirmed };
   }
   if (factors.configured.includes('PASSWORD')) return { allowed: true };
   if (factors.configured.includes('EMAIL_OTP') && !hasTotp(factors)) return { allowed: true };

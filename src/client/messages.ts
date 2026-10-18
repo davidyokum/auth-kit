@@ -89,7 +89,7 @@ export function describeAuthError(error: unknown, context: AuthErrorContext = 's
         return info('session-expired', sessionExpired, name);
       }
       if (/attempts exceeded|too many/i.test(message)) return info('rate-limited', RATE_LIMITED, name);
-      if (context === 'change-password') return info('bad-credentials', "Your current password isn't right.", name);
+      if (context === 'change-password') return info('bad-credentials', ERRORS.wrongCurrentPassword, name);
       // An emailed code reads exactly like CodeMismatchException below: whichever of the two Cognito
       // gives (a fake challenge for an unknown address included), the screen is the same (ADR 0018).
       if (context === 'code') return info('wrong-code', wrongEmailCode, name);

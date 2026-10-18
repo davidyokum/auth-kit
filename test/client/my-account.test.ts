@@ -73,7 +73,7 @@ describe('MyAccount', () => {
     auth.listWebAuthnCredentials.mockResolvedValueOnce({ credentials: [MACBOOK, YUBIKEY] }).mockResolvedValueOnce({ credentials: [YUBIKEY] });
     const { user } = setup({ configured: ['WEB_AUTHN'], mfa: [] });
     await user.click(await screen.findByRole('button', { name: 'Remove MacBook' }));
-    expect(screen.getByText(/You won't be able to sign in with it/)).toBeTruthy();
+    expect(screen.getByText(/You won’t be able to sign in with it/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Remove passkey' }));
     expect(auth.deleteWebAuthnCredential).toHaveBeenCalledWith({ credentialId: 'pk-1' });
     await waitFor(() => expect(screen.queryByText('MacBook')).toBeNull());
@@ -111,17 +111,17 @@ describe('MyAccount', () => {
   it('fails closed on the last passkey when factors couldn’t load, and says so instead of showing "no password"', async () => {
     auth.listWebAuthnCredentials.mockResolvedValue({ credentials: [MACBOOK] });
     const { user } = setup(awsError('NetworkError'));
-    expect(await within(section('Password')).findByText(/Couldn't load this/)).toBeTruthy();
-    expect(within(section('Password')).queryByText(/don't have a password/)).toBeNull();
+    expect(await within(section('Password')).findByText(/Couldn’t load this/)).toBeTruthy();
+    expect(within(section('Password')).queryByText(/don’t have a password/)).toBeNull();
     await user.click(await screen.findByRole('button', { name: 'Remove MacBook' }));
-    expect(screen.getAllByRole('alert')[0]!.textContent).toMatch(/couldn't confirm/i);
+    expect(screen.getAllByRole('alert')[0]!.textContent).toMatch(/couldn’t confirm/i);
   });
 
   it('shows a failed passkey list as a failure, not as "No passkeys yet"', async () => {
     auth.listWebAuthnCredentials.mockRejectedValueOnce(awsError('TooManyRequestsException')).mockResolvedValueOnce({ credentials: [MACBOOK] });
     const { user } = setup({ configured: ['WEB_AUTHN'], mfa: [] });
     const passkeys = section('Passkeys');
-    expect(await within(passkeys).findByText(/Couldn't load this. Too many attempts/)).toBeTruthy();
+    expect(await within(passkeys).findByText(/Couldn’t load this. Too many attempts/)).toBeTruthy();
     expect(within(passkeys).queryByText('No passkeys yet.')).toBeNull();
     await user.click(within(passkeys).getByRole('button', { name: 'Try again' }));
     expect(await within(passkeys).findByText('MacBook')).toBeTruthy();
@@ -163,7 +163,7 @@ describe('MyAccount', () => {
     expect(screen.getByLabelText('New password').getAttribute('autocomplete')).toBe('new-password');
     await user.type(current, 'wrong');
     await user.type(screen.getByLabelText('New password'), 'a brand new long password{Enter}');
-    await waitFor(() => expect(screen.getAllByRole('alert').some((a) => a.textContent === "Your current password isn't right.")).toBe(true));
+    await waitFor(() => expect(screen.getAllByRole('alert').some((a) => a.textContent === "Your current password isn’t right.")).toBe(true));
     await user.clear(screen.getByLabelText('Current password'));
     await user.type(screen.getByLabelText('Current password'), 'right');
     await user.type(screen.getByLabelText('New password'), '{Enter}');
@@ -174,7 +174,7 @@ describe('MyAccount', () => {
 
   it('sets a first password, then goes straight to the authenticator', async () => {
     const { user } = setup({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] });
-    expect(await screen.findByText(/You don't have a password/)).toBeTruthy();
+    expect(await screen.findByText(/You don’t have a password/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Set a password' }));
     await user.type(screen.getByLabelText('New password'), 'fourteen chars{Enter}');
     expect(screen.getAllByRole('alert').some((a) => /at least 15/.test(a.textContent ?? ''))).toBe(true);

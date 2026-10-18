@@ -13,7 +13,7 @@ import {
 } from './api.js';
 import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
-import { SELF_SERVICE } from './copy.js';
+import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
 import { describeAuthError } from './messages.js';
@@ -146,37 +146,37 @@ export function MyAccount(props: MyAccountProps) {
   const hasPassword = factorValue?.configured.includes('PASSWORD') ?? false;
 
   async function addPasskey() {
-    const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: 'Waiting for your passkey…' });
+    const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: STATUS.waitingForPasskey });
     if (result.ok) {
-      fb.set({ status: 'Passkey saved.' });
+      fb.set({ status: STATUS.passkeySaved });
       reloadPasskeys();
       reloadFactors();
     }
   }
 
   async function removePasskey(passkey: PasskeyInfo) {
-    const result = await fb.run(() => deletePasskey(passkey.id), { context: 'passkey-remove', busyStatus: 'Removing the passkey…' });
+    const result = await fb.run(() => deletePasskey(passkey.id), { context: 'passkey-remove', busyStatus: STATUS.removingPasskey });
     setConfirmingRemoval(null);
     focusPasskeysHeading();
     if (result.ok) {
-      fb.set({ status: 'Passkey removed.' });
+      fb.set({ status: STATUS.passkeyRemoved });
       reloadPasskeys();
       reloadFactors();
     }
   }
 
   async function signOutAll() {
-    const result = await fb.run(signOutEverywhere, { context: 'account', busyStatus: 'Signing out everywhere…' });
+    const result = await fb.run(signOutEverywhere, { context: 'account', busyStatus: STATUS.signingOutEverywhere });
     if (result.ok) (props.navigate ?? ((path: string) => window.location.assign(path)))(props.signedOutPath ?? '/sign-in');
   }
 
   function unavailable(message: string, retry: () => void) {
     return (
       <>
-        <Text classNames={classNames}>Couldn&apos;t load this. {message}</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.couldntLoad(message)}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} onClick={retry}>
-            Try again
+            {SIGN_IN.tryAgain}
           </Button>
         </Actions>
       </>
@@ -186,25 +186,25 @@ export function MyAccount(props: MyAccountProps) {
   let passkeySection: ReactNode = null;
   if (passkeysEnabled) {
     let list: ReactNode;
-    if (passkeys.state === 'loading') list = <Text classNames={classNames}>Loading your passkeys…</Text>;
+    if (passkeys.state === 'loading') list = <Text classNames={classNames}>{MY_ACCOUNT.loadingPasskeys}</Text>;
     else if (passkeys.state === 'failed') list = unavailable(passkeys.message, reloadPasskeys);
-    else if (passkeys.value.length === 0) list = <Text classNames={classNames}>No passkeys yet.</Text>;
+    else if (passkeys.value.length === 0) list = <Text classNames={classNames}>{MY_ACCOUNT.noPasskeys}</Text>;
     else {
       const count = passkeys.value.length;
       list = (
         <ul {...slot(classNames, 'list')}>
           {passkeys.value.map((passkey) => {
-            const name = passkey.friendlyName ?? 'Passkey';
+            const name = passkey.friendlyName ?? MY_ACCOUNT.passkeyName;
             const check = canRemovePasskey({ passkeyCount: count, factors: factorValue });
             const confirming = confirmingRemoval === passkey.id;
             return (
               <li key={passkey.id} {...slot(classNames, 'listItem')}>
                 <span>{name}</span> {describePasskey(passkey) ? <span>({describePasskey(passkey)})</span> : null}{' '}
                 {confirming ? (
-                  <span role="group" aria-label={`Remove ${name}?`}>
-                    <span>Remove {name}? You won&apos;t be able to sign in with it.</span>{' '}
+                  <span role="group" aria-label={MY_ACCOUNT.removeQuestion(name)}>
+                    <span>{MY_ACCOUNT.removeConfirm(name)}</span>{' '}
                     <Button variant="secondary" classNames={classNames} disabled={fb.busy} autoFocus onClick={() => void removePasskey(passkey)}>
-                      Remove passkey
+                      {MY_ACCOUNT.removePasskey}
                     </Button>{' '}
                     <Button
                       variant="link"
@@ -215,7 +215,7 @@ export function MyAccount(props: MyAccountProps) {
                         focusPasskeysHeading();
                       }}
                     >
-                      Keep it
+                      {MY_ACCOUNT.keepIt}
                     </Button>
                   </span>
                 ) : (
@@ -223,17 +223,17 @@ export function MyAccount(props: MyAccountProps) {
                     variant="link"
                     classNames={classNames}
                     disabled={fb.busy}
-                    aria-label={`Remove ${name}`}
+                    aria-label={MY_ACCOUNT.removeLabel(name)}
                     onClick={() => {
                       if (!check.allowed) {
-                        fb.set({ error: check.reason ?? "This passkey can't be removed right now.", status: null });
+                        fb.set({ error: check.reason ?? MY_ACCOUNT.cantRemove, status: null });
                         return;
                       }
                       fb.set({ error: null });
                       setConfirmingRemoval(passkey.id);
                     }}
                   >
-                    Remove
+                    {MY_ACCOUNT.remove}
                   </Button>
                 )}
               </li>
@@ -246,13 +246,13 @@ export function MyAccount(props: MyAccountProps) {
       <section aria-labelledby={`${errorId}-passkeys`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-passkeys`}>
           <Icon name="fingerprint" />
-          Passkeys
+          {MY_ACCOUNT.passkeysHeading}
         </Heading>
-        <Text classNames={classNames}>Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.passkeysIntro}</Text>
         {list}
         <Actions classNames={classNames}>
           <Button classNames={classNames} disabled={fb.busy} onClick={() => void addPasskey()}>
-            Add a passkey
+            {MY_ACCOUNT.addPasskey}
           </Button>
         </Actions>
       </section>
@@ -265,14 +265,14 @@ export function MyAccount(props: MyAccountProps) {
       <AuthenticatorSetup
         issuer={props.issuer}
         {...(emailValue !== undefined && { accountName: emailValue })}
-        heading={editing === 'authenticator-after-password' ? 'Now add your authenticator' : totp.state === 'ready' && totp.value ? 'Replace your authenticator' : 'Set up your authenticator'}
+        heading={editing === 'authenticator-after-password' ? MY_ACCOUNT.nowAddHeading : totp.state === 'ready' && totp.value ? MY_ACCOUNT.replaceHeading : MY_ACCOUNT.setUpHeading}
         {...(editing === 'authenticator-after-password' && {
-          intro: 'You sign in with a password now, so this site also asks for a code from an authenticator app.',
+          intro: MY_ACCOUNT.nowAddIntro,
         })}
         headingLevel={nextLevel(sub)}
         onDone={() => {
           setEditing(null);
-          fb.set({ status: 'Your authenticator is on.' });
+          fb.set({ status: STATUS.authenticatorOn });
           reloadTotp();
           reloadFactors();
         }}
@@ -282,22 +282,18 @@ export function MyAccount(props: MyAccountProps) {
       />
     );
   } else if (totp.state === 'loading') {
-    authenticatorBody = <Text classNames={classNames}>Loading…</Text>;
+    authenticatorBody = <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>;
   } else if (totp.state === 'failed') {
     authenticatorBody = unavailable(totp.message, reloadTotp);
   } else {
     authenticatorBody = (
       <>
         <Text classNames={classNames}>
-          {totp.value
-            ? 'On. Sign-in with your password also asks for a 6-digit code from it.'
-            : hasPassword
-              ? 'Off. You sign in with a password, so set one up now.'
-              : 'Off. You only need one if you sign in with a password.'}
+          {totp.value ? MY_ACCOUNT.totpOn : hasPassword ? MY_ACCOUNT.totpOffNeeded : MY_ACCOUNT.totpOff}
         </Text>
         <Actions classNames={classNames}>
           <Button variant={totp.value ? 'secondary' : 'primary'} classNames={classNames} disabled={fb.busy} onClick={() => setEditing('authenticator')}>
-            {totp.value ? 'Replace authenticator' : 'Set up authenticator'}
+            {totp.value ? MY_ACCOUNT.replace : MY_ACCOUNT.setUp}
           </Button>
         </Actions>
       </>
@@ -305,22 +301,22 @@ export function MyAccount(props: MyAccountProps) {
   }
 
   let passwordBody: ReactNode;
-  if (factors.state === 'loading') passwordBody = <Text classNames={classNames}>Loading…</Text>;
+  if (factors.state === 'loading') passwordBody = <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>;
   else if (factors.state === 'failed') passwordBody = unavailable(factors.message, reloadFactors);
   else if (editing === 'password') {
     passwordBody = hasPassword ? (
       <PasswordForm
         name="change-password"
-        heading="Change your password"
+        heading={MY_ACCOUNT.changePasswordHeading}
         headingLevel={nextLevel(sub)}
         askCurrent
         {...(emailValue !== undefined && { email: emailValue })}
-        submitLabel="Change password"
+        submitLabel={MY_ACCOUNT.changePassword}
         context="change-password"
         onSubmit={({ currentPassword, newPassword }) => changePassword(currentPassword ?? '', newPassword)}
         onDone={() => {
           setEditing(null);
-          fb.set({ status: 'Password changed.' });
+          fb.set({ status: STATUS.passwordChanged });
         }}
         onCancel={() => setEditing(null)}
         {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
@@ -329,11 +325,11 @@ export function MyAccount(props: MyAccountProps) {
     ) : (
       <PasswordForm
         name="set-password"
-        heading="Set a password"
-        intro="After this you'll add an authenticator app: sign-in with a password always asks for its code too."
+        heading={MY_ACCOUNT.setPassword}
+        intro={MY_ACCOUNT.setPasswordIntro}
         headingLevel={nextLevel(sub)}
         {...(emailValue !== undefined && { email: emailValue })}
-        submitLabel="Save password"
+        submitLabel={MY_ACCOUNT.savePassword}
         context="set-password"
         onSubmit={({ newPassword }) => setFirstPassword(newPassword)}
         onDone={() => {
@@ -350,10 +346,10 @@ export function MyAccount(props: MyAccountProps) {
   } else {
     passwordBody = (
       <>
-        <Text classNames={classNames}>{hasPassword ? 'You have a password.' : "You don't have a password. You don't need one if you use a passkey."}</Text>
+        <Text classNames={classNames}>{hasPassword ? MY_ACCOUNT.hasPassword : MY_ACCOUNT.noPassword}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} disabled={fb.busy || editing !== null} onClick={() => setEditing('password')}>
-            {hasPassword ? 'Change password' : 'Set a password'}
+            {hasPassword ? MY_ACCOUNT.changePassword : MY_ACCOUNT.setPassword}
           </Button>
         </Actions>
       </>
@@ -363,19 +359,19 @@ export function MyAccount(props: MyAccountProps) {
   return (
     <div ref={rootRef} data-auth-kit="my-account" {...slot(classNames, 'root', props.className)}>
       <Heading level={level} classNames={classNames}>
-        My account
+        {MY_ACCOUNT.heading}
       </Heading>
       <LiveRegions classNames={classNames} errorId={errorId} error={fb.error} status={fb.status} />
       <section aria-labelledby={`${errorId}-email`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-email`}>
-          Email
+          {MY_ACCOUNT.emailHeading}
         </Heading>
         {email.state === 'loading' ? (
-          <Text classNames={classNames}>Loading…</Text>
+          <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>
         ) : email.state === 'failed' ? (
           unavailable(email.message, reloadEmail)
         ) : (
-          <Text classNames={classNames}>{email.value ?? 'No email address on this account.'}</Text>
+          <Text classNames={classNames}>{email.value ?? MY_ACCOUNT.noEmail}</Text>
         )}
         {props.selfService ? (
           <EmailChange selfService={props.selfService} level={nextLevel(sub)} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} onChanged={reloadEmail} />
@@ -386,25 +382,25 @@ export function MyAccount(props: MyAccountProps) {
       {passkeySection}
       <section aria-labelledby={`${errorId}-authenticator`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-authenticator`}>
-          Authenticator app
+          {MY_ACCOUNT.authenticatorHeading}
         </Heading>
         {authenticatorBody}
       </section>
       <section aria-labelledby={`${errorId}-password`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-password`}>
           <Icon name="password" />
-          Password
+          {MY_ACCOUNT.passwordHeading}
         </Heading>
         {passwordBody}
       </section>
       <section aria-labelledby={`${errorId}-signout`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-signout`}>
-          Sign out everywhere
+          {MY_ACCOUNT.signOutHeading}
         </Heading>
-        <Text classNames={classNames}>Ends your sessions on every device, including this one. Pages already open elsewhere can keep working for up to an hour.</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.signOutIntro}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} disabled={fb.busy} onClick={() => void signOutAll()}>
-            Sign out everywhere
+            {MY_ACCOUNT.signOut}
           </Button>
         </Actions>
       </section>
@@ -463,7 +459,7 @@ function EmailChange(props: { selfService: MyAccountSelfService; level: HeadingL
     try {
       r = await task();
     } catch {
-      r = { ok: false, code: 'unavailable', error: 'We couldn’t reach the site just now. Try again in a moment.' };
+      r = { ok: false, code: 'unavailable', error: MY_ACCOUNT.unreachable };
     }
     setBusy(false);
     setResult(r);
@@ -572,7 +568,7 @@ function DeleteAccount(props: {
             setBusy(true);
             void props.selfService
               .deleteMyAccount({ confirmEmail: typed.trim() })
-              .catch((): ActionResult => ({ ok: false, code: 'unavailable', error: 'We couldn’t reach the site just now. Try again in a moment.' }))
+              .catch((): ActionResult => ({ ok: false, code: 'unavailable', error: MY_ACCOUNT.unreachable }))
               .then((r) => {
                 setBusy(false);
                 setResult(r);

@@ -1,7 +1,7 @@
 import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 import { type BreachedPasswordCheck, isBreachedPassword } from './breached.js';
 import { NEW_PASSWORD_RULES, SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
-import { ERRORS } from './copy.js';
+import { ERRORS, MY_ACCOUNT, SHARED, STATUS } from './copy.js';
 import type { AuthErrorContext } from './messages.js';
 import { Actions, Button, Field, Heading, type HeadingLevel, HiddenUsername, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
 
@@ -58,7 +58,7 @@ export function PasswordForm(props: PasswordFormProps) {
     event.preventDefault();
     if (fb.busy) return;
     if (props.askCurrent && current === '') {
-      fb.set({ error: 'Enter your current password.', field: 'current', status: null });
+      fb.set({ error: ERRORS.emptyCurrentPassword, field: 'current', status: null });
       currentRef.current?.focus();
       return;
     }
@@ -68,7 +68,7 @@ export function PasswordForm(props: PasswordFormProps) {
       newRef.current?.focus();
       return;
     }
-    fb.set({ busy: true, error: null, field: null, status: 'Checking the password…' });
+    fb.set({ busy: true, error: null, field: null, status: STATUS.checkingPassword });
     const breached = await breachedPasswordProblem(next, props.checkBreachedPassword);
     if (breached) {
       fb.set({ busy: false, error: breached, field: 'new', status: null });
@@ -77,12 +77,12 @@ export function PasswordForm(props: PasswordFormProps) {
     }
     const result = await fb.run(() => props.onSubmit({ newPassword: next, ...(props.askCurrent && { currentPassword: current }) }), {
       context: props.context,
-      busyStatus: 'Saving…',
+      busyStatus: STATUS.saving,
     });
     if (result.ok) {
       setCurrent('');
       setNext('');
-      fb.set({ status: 'Password saved.' });
+      fb.set({ status: STATUS.passwordSaved });
       props.onDone?.();
     }
   }
@@ -98,7 +98,7 @@ export function PasswordForm(props: PasswordFormProps) {
         {props.email !== undefined ? <HiddenUsername email={props.email} /> : null}
         {props.askCurrent ? (
           <Field
-            label="Current password"
+            label={MY_ACCOUNT.currentPasswordLabel}
             type="password"
             name="current-password"
             autoComplete={SIGN_IN_AUTOCOMPLETE.currentPassword}
@@ -111,8 +111,8 @@ export function PasswordForm(props: PasswordFormProps) {
           />
         ) : null}
         <Field
-          label="New password"
-          hint={`At least ${NEW_PASSWORD_RULES.minLength} characters. Your password manager can make one.`}
+          label={MY_ACCOUNT.newPasswordLabel}
+          hint={MY_ACCOUNT.newPasswordHint(NEW_PASSWORD_RULES.minLength)}
           type="password"
           name="new-password"
           autoComplete={SIGN_IN_AUTOCOMPLETE.newPassword}
@@ -131,7 +131,7 @@ export function PasswordForm(props: PasswordFormProps) {
           </Button>
           {props.onCancel ? (
             <Button variant="link" classNames={classNames} onClick={props.onCancel}>
-              Cancel
+              {SHARED.cancel}
             </Button>
           ) : null}
         </Actions>

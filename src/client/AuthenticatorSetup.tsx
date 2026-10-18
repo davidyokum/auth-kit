@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { type AuthenticatorEnrollment, enrollAuthenticator, fetchAccountEmail } from './api.js';
-import { ERRORS, FIRST_VISIT } from './copy.js';
+import { ERRORS, FIRST_VISIT, SHARED, SIGN_IN, STATUS } from './copy.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, normalizeCode } from './ladder.js';
 import { describeAuthError } from './messages.js';
@@ -107,7 +107,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
 
   function retry() {
     setLoadFailed(false);
-    set({ error: null, status: 'Preparing your setup key…' });
+    set({ error: null, status: STATUS.preparingSetupKey });
     setAttempt((n) => n + 1);
   }
 
@@ -133,9 +133,9 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
       codeRef.current?.focus();
       return;
     }
-    const result = await fb.run(() => verify(normalized), { context: 'authenticator-setup', busyStatus: 'Checking the code…' });
+    const result = await fb.run(() => verify(normalized), { context: 'authenticator-setup', busyStatus: STATUS.checkingCode });
     if (result.ok) {
-      set({ status: 'Your authenticator is on.' });
+      set({ status: STATUS.authenticatorOn });
       props.onDone?.();
     } else {
       setCode('');
@@ -153,15 +153,15 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
         {props.heading ?? FIRST_VISIT.addTotpHeading}
       </Heading>
       <Text classNames={classNames}>{props.intro ?? (props.renderQrCode ? FIRST_VISIT.addTotpSub : FIRST_VISIT.addTotpSubNoQr)}</Text>
-      <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? 'Preparing your setup key…' : null)} />
+      <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? STATUS.preparingSetupKey : null)} />
       {loadFailed ? (
         <Actions classNames={classNames}>
           <Button classNames={classNames} onClick={retry}>
-            Try again
+            {SIGN_IN.tryAgain}
           </Button>
           {props.onCancel ? (
             <Button variant="link" classNames={classNames} onClick={props.onCancel}>
-              {props.cancelLabel ?? 'Cancel'}
+              {props.cancelLabel ?? SHARED.cancel}
             </Button>
           ) : null}
         </Actions>
@@ -177,7 +177,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
             <Button variant="secondary" classNames={classNames} onClick={copy}>
               <Icon name="copy" />
               {FIRST_VISIT.copy}
-              <span data-auth-kit-sr=""> setup key</span>
+              <span data-auth-kit-sr="">{SHARED.setupKeySr}</span>
             </Button>
           </p>
           <p {...slot(classNames, 'small')}>
@@ -187,7 +187,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
           </p>
           <Field
             id={codeId}
-            label="6-digit code"
+            label={SIGN_IN.totpLabel}
             name="one-time-code"
             inputMode="numeric"
             autoComplete={SIGN_IN_AUTOCOMPLETE.oneTimeCode}
@@ -200,11 +200,11 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
           />
           <Actions classNames={classNames}>
             <Button type="submit" disabled={fb.busy} classNames={classNames}>
-              {props.submitLabel ?? 'Continue'}
+              {props.submitLabel ?? SIGN_IN.continue}
             </Button>
             {props.onCancel ? (
               <Button variant="link" classNames={classNames} onClick={props.onCancel}>
-                {props.cancelLabel ?? 'Cancel'}
+                {props.cancelLabel ?? SHARED.cancel}
               </Button>
             ) : null}
           </Actions>

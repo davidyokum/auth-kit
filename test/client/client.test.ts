@@ -80,7 +80,7 @@ describe('canRemovePasskey (never the last way in)', () => {
   it('fails closed on the last passkey when factors are unknown', () => {
     const unknown = canRemovePasskey({ passkeyCount: 1, factors: null });
     expect(unknown.allowed).toBe(false);
-    expect(unknown.reason).toMatch(/couldn't confirm/i);
+    expect(unknown.reason).toMatch(/couldn’t confirm/i);
   });
 });
 
@@ -240,7 +240,7 @@ describe('describeAuthError', () => {
   });
 
   it('words errors for their context', () => {
-    expect(describeAuthError(awsError('NotAuthorizedException', 'Incorrect username or password.'), 'change-password').message).toBe("Your current password isn't right.");
+    expect(describeAuthError(awsError('NotAuthorizedException', 'Incorrect username or password.'), 'change-password').message).toBe("Your current password isn’t right.");
     expect(describeAuthError(awsError('InvalidPasswordException', 'Password is compromised')).message).toBe(
       'This password has appeared in a data breach, so it isn’t safe to use. Choose a different one.',
     );

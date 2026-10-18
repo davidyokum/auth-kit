@@ -18,7 +18,7 @@ import {
 import { type AuthTheme, themeCssVariables } from '../themes/index.js';
 import { Icon, type IconName } from './icons.js';
 import { type AuthErrorContext, type MessageWords, describeAuthError } from './messages.js';
-import type { Rich } from './copy.js';
+import { CONTACT, type Rich, SHARED, SIGN_IN } from './copy.js';
 
 export type AuthKitSlot =
   | 'root'
@@ -119,7 +119,7 @@ export function Field({ label, hint, invalid, errorId, error, optional, classNam
     <div {...slot(classNames, 'field')}>
       <label htmlFor={id} {...slot(classNames, 'label')}>
         {label}
-        {optional ? <span> (optional)</span> : null}
+        {optional ? <span> {SHARED.optional}</span> : null}
       </label>
       {hint ? (
         <p id={hintId} {...slot(classNames, 'hint')}>
@@ -128,7 +128,7 @@ export function Field({ label, hint, invalid, errorId, error, optional, classNam
       ) : null}
       {inlineId ? (
         <p id={inlineId} {...slot(classNames, 'fieldError')}>
-          <span data-auth-kit-sr="">Error: </span>
+          <span data-auth-kit-sr="">{SHARED.errorPrefix}</span>
           {error}
         </p>
       ) : null}
@@ -159,8 +159,8 @@ export function PasswordField(props: Omit<FieldProps, 'type' | 'after'>) {
       spellCheck={false}
       after={
         <button type="button" aria-controls={id} aria-pressed={shown} onClick={() => setShown((v) => !v)} {...slot(props.classNames, 'showButton')}>
-          {shown ? 'Hide' : 'Show'}
-          <span data-auth-kit-sr=""> password</span>
+          {shown ? SIGN_IN.hide : SIGN_IN.show}
+          <span data-auth-kit-sr="">{SHARED.passwordSr}</span>
         </button>
       }
     />
@@ -318,7 +318,8 @@ export function Who(props: { lead: string; email: string; onChange: () => void; 
     <p {...slot(props.classNames, 'who')}>
       {props.lead} <strong>{props.email}</strong> <span aria-hidden="true">·</span>{' '}
       <button type="button" disabled={props.disabled} onClick={props.onChange} {...slot(props.classNames, 'linkButton')}>
-        Change<span data-auth-kit-sr=""> email address</span>
+        {SIGN_IN.change}
+        <span data-auth-kit-sr="">{SHARED.changeEmailSr}</span>
       </button>
     </p>
   );
@@ -340,7 +341,7 @@ export function ContactBox(props: { lead: string; address: string; lines: readon
   return (
     <div {...slot(props.classNames, 'contact')}>
       <p>
-        <strong>{props.lead}</strong> Email{' '}
+        <strong>{props.lead}</strong> {CONTACT.email}{' '}
         <a href={`mailto:${props.address}`} {...slot(props.classNames, 'link')}>
           {props.address}
         </a>
@@ -398,7 +399,7 @@ export function Card(props: {
             {b.trouble ? (
               <button type="button" onClick={b.trouble} {...slot(props.classNames, 'linkButton')}>
                 <Icon name="help" />
-                Trouble signing in?
+                {SIGN_IN.trouble}
               </button>
             ) : null}
             {b.back ? (
@@ -417,7 +418,7 @@ export function Card(props: {
         <p {...slot(props.classNames, 'below')}>
           <button type="button" onClick={props.troubleBelow} {...slot(props.classNames, 'linkButton')}>
             <Icon name="help" />
-            Trouble signing in?
+            {SIGN_IN.trouble}
           </button>
         </p>
       ) : null}

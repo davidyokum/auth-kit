@@ -34,18 +34,10 @@ const CONTEXTS: copy.CopyContext[] = THEME_FAMILIES.flatMap((family) => [
 
 // ---- Rendering every string -------------------------------------------------------------------
 
-const GROUPS = {
-  SIGN_IN: copy.SIGN_IN,
-  ACCESS_LINE: copy.ACCESS_LINE,
-  FIRST_VISIT: copy.FIRST_VISIT,
-  TROUBLE: copy.TROUBLE,
-  ACCESS_HELP: copy.ACCESS_HELP,
-  SIGN_UP: copy.SIGN_UP,
-  REQUEST: copy.REQUEST,
-  SELF_SERVICE: copy.SELF_SERVICE,
-  SIGNED_OUT: copy.SIGNED_OUT,
-  ERRORS: copy.ERRORS,
-} as const;
+/** Every group of words the deck exports (SIGN_IN, ERRORS, MY_ACCOUNT, …): a new group is linted without a change here. */
+const GROUPS: Record<string, Record<string, unknown>> = Object.fromEntries(
+  (Object.entries(copy) as [string, unknown][]).filter((entry): entry is [string, Record<string, unknown>] => /^[A-Z][A-Z_]+$/.test(entry[0]) && typeof entry[1] === 'object' && entry[1] !== null),
+);
 
 /**
  * Sample arguments for every function in the copy groups (a list of argument lists per context). A
@@ -77,6 +69,14 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'ERRORS.wrongEmailCode': (c) => [[c]],
   'ERRORS.sessionExpired': (c) => [[c]],
   'ERRORS.network': (c) => [[c], [undefined]],
+  'CONTACT.looksAfter': (c) => [[c]],
+  'MY_ACCOUNT.couldntLoad': () => [['Too many attempts. Wait a minute, then try again.']],
+  'MY_ACCOUNT.removeLabel': () => [['iPhone passkey']],
+  'MY_ACCOUNT.removeQuestion': () => [['iPhone passkey']],
+  'MY_ACCOUNT.removeConfirm': () => [['iPhone passkey']],
+  'MY_ACCOUNT.gateCheckFailed': () => [['Check your connection and try again.']],
+  'MY_ACCOUNT.gateIntro': (c) => [[c.siteName]],
+  'MY_ACCOUNT.newPasswordHint': () => [[15]],
 };
 
 interface Text {
@@ -248,6 +248,32 @@ function sourceTexts(): Text[] {
   return out;
 }
 
+/** JSX attributes and object properties that carry words a person reads. */
+const WORD_ATTRIBUTES = /^(label|aria-label|title|placeholder|heading|intro|submitLabel|cancelLabel|alt|hint|status|busyStatus|error|message|reason)$/;
+
+/**
+ * Words written straight into a component instead of read from the copy deck: JSX text with letters,
+ * and string literals given to a word-carrying attribute or property (`label="…"`, `status: '…'`).
+ */
+function componentWords(): string[] {
+  const dir = join(ROOT, 'src/client');
+  const out: string[] = [];
+  for (const name of readdirSync(dir).filter((n) => n.endsWith('.tsx'))) {
+    const file = join(dir, name);
+    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const at = (node: ts.Node) => `${name}:${source.getLineAndCharacterOfPosition(node.getStart()).line + 1}`;
+    const isWords = (node: ts.Node | undefined): node is ts.StringLiteralLike => node !== undefined && ts.isStringLiteralLike(node) && /[A-Za-z]/.test(node.text);
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxText(node) && /[A-Za-z]/.test(node.text)) out.push(`${at(node)}: ${node.text.replace(/\s+/g, ' ').trim()}`);
+      if (ts.isJsxAttribute(node) && WORD_ATTRIBUTES.test(node.name.getText()) && isWords(node.initializer)) out.push(`${at(node)}: ${node.name.getText()}="${node.initializer.text}"`);
+      if (ts.isPropertyAssignment(node) && WORD_ATTRIBUTES.test(node.name.getText()) && isWords(node.initializer)) out.push(`${at(node)}: ${node.name.getText()}: '${node.initializer.text}'`);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return out;
+}
+
 // ---- The Oxford-comma lint ----------------------------------------------------------------------
 
 /**
@@ -345,6 +371,12 @@ describe('every user-facing string is rendered', () => {
 
   it('every message is a sentence that ends with a full stop', () => {
     for (const { where, text } of messageTexts()) expect(text, where).toMatch(/^[A-Z].*\.$/);
+  });
+});
+
+describe('the screens read their words from the copy deck', () => {
+  it('no component writes words of its own (JSX text, labels, statuses, errors)', () => {
+    expect(componentWords()).toEqual([]);
   });
 });
 

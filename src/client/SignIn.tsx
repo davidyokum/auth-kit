@@ -18,7 +18,7 @@ import {
 } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
-import { ACCESS_HELP, ACCESS_LINE, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, TROUBLE, contactLines, helpScreen } from './copy.js';
+import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode } from './ladder.js';
 import type { AuthErrorContext, AuthErrorInfo, AuthErrorKind, MessageWords } from './messages.js';
@@ -316,7 +316,7 @@ export function SignIn(props: SignInProps) {
           return void afterSignIn();
         case 'choose-method':
           // Never shown: a first-factor request maps it to that factor's own outcome (firstFactor).
-          set({ error: 'That way of signing in isn’t available here. Use another way below.' });
+          set({ error: ERRORS.methodUnavailable });
           return go({ name: 'email' }, { error: true });
         case 'password':
           return go({ name: 'password', challenge: true });
@@ -336,7 +336,7 @@ export function SignIn(props: SignInProps) {
         case 'totp-setup':
           return go({ name: 'totp-setup', secret: step.secret });
         case 'reset-password':
-          set({ status: 'You need to choose a new password before signing in. We can email you a code to do that.' });
+          set({ status: SIGN_IN.mustChooseNewPassword });
           return go({ name: 'help', topic: 'password' });
         case 'select-mfa':
         case 'unsupported':
@@ -414,13 +414,13 @@ export function SignIn(props: SignInProps) {
 
   function sendEmailCode() {
     if (!requireEmail()) return;
-    void attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', 'Sending a code…');
+    void attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', STATUS.sendingCode);
   }
 
   function resendEmailCode() {
     if (!requireEmail()) return;
     void (async () => {
-      const kind = await attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', 'Sending a code…');
+      const kind = await attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', STATUS.sendingCode);
       if (kind === null) setView((v) => (v.name === 'email-code' ? { ...v, resentAt: Date.now() } : v));
     })();
   }
@@ -428,7 +428,7 @@ export function SignIn(props: SignInProps) {
   function sendResetCode() {
     if (!requireEmail()) return;
     void (async () => {
-      const result = await fb.run(() => requestPasswordReset(email), { context: 'reset-password', words, busyStatus: 'Sending a code…' });
+      const result = await fb.run(() => requestPasswordReset(email), { context: 'reset-password', words, busyStatus: STATUS.sendingCode });
       if (result.ok) {
         setResendReady(false);
         go({ name: 'reset-code' });
@@ -714,7 +714,7 @@ export function SignIn(props: SignInProps) {
               return;
             }
             void (async () => {
-              set({ busy: true, error: null, status: 'Checking the password…' });
+              set({ busy: true, error: null, status: STATUS.checkingPassword });
               const breached = await breachedPasswordProblem(secretValue, props.checkBreachedPassword);
               set({ busy: false, status: null });
               if (breached) {
@@ -757,7 +757,7 @@ export function SignIn(props: SignInProps) {
         <AuthenticatorSetup
           issuer={siteName}
           accountName={email.trim()}
-          intro="This account needs an authenticator app. Add it now to finish signing in."
+          intro={FIRST_VISIT.addTotpRequired}
           headingLevel={level}
           enrollment={{
             secret: view.secret,
@@ -820,7 +820,7 @@ export function SignIn(props: SignInProps) {
             }
             const password = secretValue;
             void (async () => {
-              set({ busy: true, error: null, status: 'Checking the password…' });
+              set({ busy: true, error: null, status: STATUS.checkingPassword });
               const breached = await breachedPasswordProblem(password, props.checkBreachedPassword);
               set({ busy: false, status: null });
               if (breached) {
@@ -831,7 +831,7 @@ export function SignIn(props: SignInProps) {
               const result = await fb.run(() => confirmPasswordReset(email, view.code, password), {
                 context: 'reset-password',
                 words,
-                busyStatus: 'Saving…',
+                busyStatus: STATUS.saving,
                 onError: (info) => {
                   failed.kind = info.kind;
                 },
@@ -884,7 +884,7 @@ export function SignIn(props: SignInProps) {
         <AuthenticatorSetup
           issuer={siteName}
           accountName={email.trim()}
-          intro="You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute."
+          intro={FIRST_VISIT.addTotpAfterPassword}
           headingLevel={level}
           onDone={() => void afterSignIn()}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
@@ -936,7 +936,7 @@ export function SignIn(props: SignInProps) {
               onClick={() =>
                 void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then((r) => {
                   if (r.ok) {
-                    set({ status: 'Passkey saved.' });
+                    set({ status: STATUS.passkeySaved });
                     finish();
                   }
                 })
@@ -1015,7 +1015,7 @@ export function SignIn(props: SignInProps) {
     }
     case 'access-help': {
       bottom.back = { label: SIGN_IN.backToSignIn, onClick: backToEmail };
-      const named = c.theme.help.named && c.ownerName ? ` ${c.ownerName} looks after ${siteName}.` : '';
+      const named = CONTACT.looksAfter(c);
       body = (
         <div {...slot(classNames, 'form')}>
           {heading(ACCESS_HELP.heading(c))}
@@ -1026,13 +1026,13 @@ export function SignIn(props: SignInProps) {
               <strong>{ACCESS_HELP.askLead}</strong>
             </p>
             <p>
-              Email{' '}
+              {CONTACT.email}{' '}
               <a href={`mailto:${props.help.address}`} {...slot(classNames, 'link')}>
                 {props.help.address}
               </a>
-              .{named}
+              .{named ? ` ${named}` : ''}
             </p>
-            <p>Never send a password or code.</p>
+            <p>{CONTACT.neverSend}</p>
           </div>
         </div>
       );

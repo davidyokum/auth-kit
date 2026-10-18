@@ -98,6 +98,8 @@ export const SIGN_IN = {
   finishing: 'Signing you in…',
   signedInOneMoment: 'Signed in. One moment…',
 
+  mustChooseNewPassword: 'You need to choose a new password before signing in. We can email you a code to do that.',
+
   offerPasskeyHeading: 'Create a passkey on this device?',
   offerPasskeySub: 'Next time, sign in with your face, fingerprint, or device PIN. Nothing to remember or type.',
   notNow: 'Not now',
@@ -137,6 +139,10 @@ export const FIRST_VISIT = {
 
   addTotpHeading: 'Add an authenticator app',
   addTotpSub: 'Scan the code with your app or password manager, then enter the 6-digit code it shows.',
+  /** Cognito asks for an authenticator during sign-in (MFA_SETUP). */
+  addTotpRequired: 'This account needs an authenticator app. Add it now to finish signing in.',
+  /** The enrollment step after a password sign-in with no authenticator yet. */
+  addTotpAfterPassword: 'You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute.',
   addTotpSubNoQr: 'Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.',
   cantScan: 'Can’t scan it? Enter this setup key in your app instead.',
   setupKeyLabel: 'Setup key',
@@ -243,16 +249,25 @@ export function helpScreen(topic: HelpTopic, c: CopyContext, options: { security
   }
 }
 
+/** The words every contact box shares. */
+export const CONTACT = {
+  /** Before the help address: "Email apps-help@…." */
+  email: 'Email',
+  /** "Jordan Lee looks after Example Reports.", in families that name owners. */
+  looksAfter: (c: CopyContext) => (c.theme.help.named && c.ownerName ? `${c.ownerName} looks after ${c.siteName}.` : null),
+  neverSend: 'Never send a password or code.',
+} as const;
+
 /** The contact box at the foot of every help screen (Card Studio v4's CONTACT). */
 export function contactLines(c: CopyContext, options: { teams?: boolean } = {}): { lead: string; address: string; lines: string[] } {
-  const named = c.theme.help.named && c.ownerName;
+  const named = CONTACT.looksAfter(c);
   return {
     lead: `Need help with your ${c.siteName} account?`,
     address: c.helpAddress,
     lines: [
-      ...(named ? [`${c.ownerName} looks after ${c.siteName}.`] : []),
+      ...(named ? [named] : []),
       ...(options.teams === true && c.theme.help.teamsCheck ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
-      'Never send a password or code.',
+      CONTACT.neverSend,
     ],
   };
 }
@@ -266,6 +281,8 @@ export const ACCESS_HELP = {
 } as const;
 
 // ---- Sign-up and request access ----------------------------------------------------------------
+
+const SHARED_OPTIONAL = '(optional)';
 
 export const SIGN_UP = {
   heading: 'Create your account',
@@ -300,7 +317,7 @@ export const REQUEST = {
   sub: (c: CopyContext) => `${Team(c)} reviews requests. If they approve, you’ll get an email invitation.`,
   nameLabel: 'Name',
   reasonLabel: 'What do you need it for?',
-  optional: '(optional)',
+  optional: SHARED_OPTIONAL,
   privacy: ['We use this only to decide on your request. ', 'Privacy notice'] as const,
   send: 'Send request',
   sentHeading: 'Request sent',
@@ -335,6 +352,90 @@ export const SIGNED_OUT = {
   signInAgain: 'Sign in again',
 } as const;
 
+/** My account (`MyAccount`, `PasswordForm`, `TOTPEnrollmentGate`). */
+export const MY_ACCOUNT = {
+  heading: 'My account',
+  loading: 'Loading…',
+  couldntLoad: (message: string) => `Couldn’t load this. ${message}`,
+  unreachable: 'We couldn’t reach the site just now. Try again in a moment.',
+
+  emailHeading: 'Email',
+  noEmail: 'No email address on this account.',
+
+  passkeysHeading: 'Passkeys',
+  passkeysIntro: 'Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.',
+  loadingPasskeys: 'Loading your passkeys…',
+  noPasskeys: 'No passkeys yet.',
+  /** A passkey with no name of its own. */
+  passkeyName: 'Passkey',
+  addPasskey: 'Add a passkey',
+  remove: 'Remove',
+  removeLabel: (name: string) => `Remove ${name}`,
+  removeQuestion: (name: string) => `Remove ${name}?`,
+  removeConfirm: (name: string) => `Remove ${name}? You won’t be able to sign in with it.`,
+  removePasskey: 'Remove passkey',
+  keepIt: 'Keep it',
+  cantRemove: 'This passkey can’t be removed right now.',
+
+  authenticatorHeading: 'Authenticator app',
+  setUpHeading: 'Set up your authenticator',
+  replaceHeading: 'Replace your authenticator',
+  nowAddHeading: 'Now add your authenticator',
+  nowAddIntro: 'You sign in with a password now, so this site also asks for a code from an authenticator app.',
+  totpOn: 'On. Sign-in with your password also asks for a 6-digit code from it.',
+  totpOffNeeded: 'Off. You sign in with a password, so set one up now.',
+  totpOff: 'Off. You only need one if you sign in with a password.',
+  setUp: 'Set up authenticator',
+  replace: 'Replace authenticator',
+  gateChecking: 'Checking your account…',
+  gateCheckFailed: (message: string) => `We couldn’t check your sign-in settings. ${message}`,
+  gateIntro: (issuer: string) => `You sign in with a password, so ${issuer} also needs a code from an authenticator app. Set it up to continue.`,
+
+  passwordHeading: 'Password',
+  hasPassword: 'You have a password.',
+  noPassword: 'You don’t have a password. You don’t need one if you use a passkey.',
+  changePassword: 'Change password',
+  changePasswordHeading: 'Change your password',
+  setPassword: 'Set a password',
+  setPasswordIntro: 'After this you’ll add an authenticator app: sign-in with a password always asks for its code too.',
+  savePassword: 'Save password',
+  currentPasswordLabel: 'Current password',
+  newPasswordLabel: 'New password',
+  newPasswordHint: (minLength: number) => `At least ${minLength} characters. Your password manager can make one.`,
+
+  signOutHeading: 'Sign out everywhere',
+  signOutIntro: 'Ends your sessions on every device, including this one. Pages already open elsewhere can keep working for up to an hour.',
+  signOut: 'Sign out everywhere',
+} as const;
+
+/** Words the shared pieces use. Screen-reader-only parts start with a space ("Show" + " password"). */
+export const SHARED = {
+  optional: SHARED_OPTIONAL,
+  errorPrefix: 'Error: ',
+  passwordSr: ' password',
+  changeEmailSr: ' email address',
+  setupKeySr: ' setup key',
+  cancel: 'Cancel',
+} as const;
+
+/** Progress and confirmations for the polite live region (never errors). */
+export const STATUS = {
+  sendingCode: 'Sending a code…',
+  sendingRequest: 'Sending your request…',
+  checkingPassword: 'Checking the password…',
+  checkingCode: 'Checking the code…',
+  saving: 'Saving…',
+  preparingSetupKey: 'Preparing your setup key…',
+  waitingForPasskey: 'Waiting for your passkey…',
+  passkeySaved: 'Passkey saved.',
+  removingPasskey: 'Removing the passkey…',
+  passkeyRemoved: 'Passkey removed.',
+  authenticatorOn: 'Your authenticator is on.',
+  passwordSaved: 'Password saved.',
+  passwordChanged: 'Password changed.',
+  signingOutEverywhere: 'Signing out everywhere…',
+} as const;
+
 // ---- Errors and status (REPORT §4.4, Card Studio's states) -------------------------------------
 
 export const ERRORS = {
@@ -351,6 +452,10 @@ export const ERRORS = {
   passkeyRejected: 'We couldn’t sign you in with that passkey. Try again or use another way below.',
   passkeyCreateFailed: 'We couldn’t create your passkey. Try again, or continue without one.',
   passkeyUnsupported: 'This browser can’t use passkeys here. Use another way below.',
+  methodUnavailable: 'That way of signing in isn’t available here. Use another way below.',
+  emptyCurrentPassword: 'Enter your current password',
+  wrongCurrentPassword: 'Your current password isn’t right.',
+  passkeyRemovalUnconfirmed: 'We couldn’t confirm you have another way to sign in, so this passkey stays for now. Try again in a moment.',
   wrongPassword: 'That email address and password don’t match. Try again, or use another way to sign in.',
   wrongTotp: 'That code didn’t work. Codes change every 30 seconds, so enter the newest one.',
   wrongEmailCode: (c: Pick<CopyContext, 'siteName'>) => `That code didn’t work. Check it against the newest email from ${c.siteName}.`,
