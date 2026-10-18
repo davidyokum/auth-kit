@@ -1,7 +1,7 @@
 /**
  * The one list of backdrop styles. Adding a style is a folder under `styles/` plus one line here;
  * removing one from offer is `retired: true` on its module (never delete a style a site may have
- * locked; ADR 0020). Order is the picker's order.
+ * locked; ADR 0021). Order is the picker's order.
  */
 import { aurora } from './aurora/index.js';
 import { constellation } from './constellation/index.js';

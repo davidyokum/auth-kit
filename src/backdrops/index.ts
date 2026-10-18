@@ -1,9 +1,9 @@
 /**
- * `auth-kit/backdrops`: the art behind the sign-in card (ADR 0020).
+ * `auth-kit/backdrops`: the art behind the sign-in card (ADR 0021).
  *
  * The card is the same on every site; a site's identity shows in its family (palette, owner line)
  * and in a backdrop: a seeded, generative picture behind the card. It's for recognition and delight,
- * not security (a picture you "should recognize" protects nobody; ADR 0020 says why). Framework-free:
+ * not security (a picture you "should recognize" protects nobody; ADR 0021 says why). Framework-free:
  * `renderBackdrop(canvas, options)` draws and animates; `auth-kit/backdrops/react` wraps it.
  *
  * A site stores `{ style, seed, styleVersion, locked: true }`. Every style version is frozen once

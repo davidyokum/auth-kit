@@ -2,7 +2,7 @@
  * Backdrop kernel v1: colors. Hex parsing, mixing in OKLab (perceptually even, so a mix of navy and
  * grey doesn't go muddy), CSS strings, and WCAG relative luminance and contrast.
  *
- * FROZEN (see prng.ts and ADR 0020): style versions derive their colors through these functions.
+ * FROZEN (see prng.ts and ADR 0021): style versions derive their colors through these functions.
  * Never edit; add `kernel/v2/` instead.
  */
 

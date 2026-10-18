@@ -1,5 +1,5 @@
 /**
- * magnetic-dots v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * magnetic-dots v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * A hexagonal dot field read as halftone: dot size follows a long, noise-warped wave, so bands of
  * larger dots flow slowly across the page like dunes, and where a second, slower wave crests the

@@ -8,7 +8,7 @@ import { STYLE_MODULES } from '../../src/backdrops/styles/registry.js';
 import type { BackdropPalette, BackdropRect } from '../../src/backdrops/types.js';
 import { RecordingCanvas, type RecordingContext, recordingCanvasFactory, resetCanvasIds } from './recording-canvas.js';
 
-/** A fixed palette, so frozen hashes catch algorithm drift and not brand changes (ADR 0020). */
+/** A fixed palette, so frozen hashes catch algorithm drift and not brand changes (ADR 0021). */
 export const TEST_PALETTE: BackdropPalette = {
   page: '#f2f3f5',
   mist: '#e0e4ea',

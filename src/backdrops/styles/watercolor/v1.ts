@@ -1,5 +1,5 @@
 /**
- * watercolor v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * watercolor v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * Painterly, all in code: each bloom is a polygon deformed by recursive midpoint displacement, then
  * laid down as thirty-odd translucent glazes, each deformed again (Tyler Hobbs's technique), with a

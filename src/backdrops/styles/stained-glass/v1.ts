@@ -1,5 +1,5 @@
 /**
- * stained-glass v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * stained-glass v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * Soft Voronoi glass: relaxed cells (two rounds of Lloyd's algorithm) inset from light leading, with
  * rounded corners, a top-left sheen and a thin bevel. Cell colors follow a slow noise field across

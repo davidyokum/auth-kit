@@ -1,5 +1,5 @@
 /**
- * painted v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * painted v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * A slot for a finished image (a generated watercolor or oil painting): drawn cover-fitted around
  * its focal point. Until it loads, an optional tiny placeholder is drawn enlarged, which reads as a

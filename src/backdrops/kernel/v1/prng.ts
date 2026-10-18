@@ -2,7 +2,7 @@
  * Backdrop kernel v1: string hashing and a seeded random number generator.
  *
  * FROZEN. Every style version that imports this file draws from its exact output, and sites lock a
- * style version (ADR 0020), so a change here would redraw every locked site. Never edit it, not
+ * style version (ADR 0021), so a change here would redraw every locked site. Never edit it, not
  * even to tidy: add `kernel/v2/` beside it and point new style versions at that. The frozen-hash
  * test (test/backdrops/frozen.test.ts) fails if any output changes.
  *

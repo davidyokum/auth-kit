@@ -1,5 +1,5 @@
 /**
- * ripples v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * ripples v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * A still pond: a few sources away from the card send out packets of fine concentric rings that
  * widen and fade, sometimes seen at an angle (the rings flatten into ellipses). The rings are a

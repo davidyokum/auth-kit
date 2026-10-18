@@ -1,5 +1,5 @@
 /**
- * contours v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * contours v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * A topographic map: a fractal noise terrain, softly tinted in terraces (a small image drawn
  * enlarged, so the bands blur into each other), with fine contour lines from marching squares and

@@ -1,7 +1,7 @@
 /**
  * Backdrop kernel v1: small numeric helpers and the composition weight around the card.
  *
- * FROZEN (see prng.ts and ADR 0020): never edit; add `kernel/v2/` instead.
+ * FROZEN (see prng.ts and ADR 0021): never edit; add `kernel/v2/` instead.
  */
 import type { BackdropRect } from '../../types.js';
 

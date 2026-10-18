@@ -1,5 +1,5 @@
 /**
- * Locked backdrops must draw the same picture on every later auth-kit (ADR 0020). Each released
+ * Locked backdrops must draw the same picture on every later auth-kit (ADR 0021). Each released
  * style version, and the kernel it draws with, has a frozen hash in frozen.json: what it asks the
  * canvas to draw for a fixed seed, palette, and script of frames (scenes.ts). A changed hash means a
  * released version changed: put the change in a new version instead.
@@ -59,7 +59,7 @@ describe('frozen style versions', () => {
     }
     for (const [key, hash] of Object.entries(actual)) {
       expect(frozen[key], `${key} has no frozen hash. If it's new, run AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts`).toBeDefined();
-      expect(hash, `${key} changed what it draws. Released versions are frozen (ADR 0020): add a new version instead.`).toBe(frozen[key]);
+      expect(hash, `${key} changed what it draws. Released versions are frozen (ADR 0021): add a new version instead.`).toBe(frozen[key]);
     }
   });
 

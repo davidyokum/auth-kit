@@ -1,7 +1,7 @@
 /**
  * Backdrop kernel v1: seeded simplex noise in two and three dimensions, and fractal sums of it.
  *
- * FROZEN (see prng.ts and ADR 0020): never edit; add `kernel/v2/` instead.
+ * FROZEN (see prng.ts and ADR 0021): never edit; add `kernel/v2/` instead.
  *
  * Stefan Gustavson's simplex noise (public domain), written out here so the package needs no
  * dependency. Every call is allocation-free: lookup tables are typed arrays built once per seed.

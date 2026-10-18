@@ -1,4 +1,4 @@
-# 0020. Backdrops: site identity behind a fixed card
+# 0021. Backdrops: site identity behind a fixed card
 
 - **Status:** Accepted, 2026-10-18
 - **Design:** the sign-in design report (passwords-flow `design/benchmark/REPORT.md`, kept privately): §1.3 "Brand the context, fix the mechanics", §7 "OSBM core, UNC and personal variants"

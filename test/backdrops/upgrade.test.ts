@@ -1,6 +1,6 @@
 /**
  * When a later auth-kit adds a version of a style a site has locked, the site keeps its version and
- * the picker offers the newer one explicitly (ADR 0020). Simulated here by giving aurora a version 2.
+ * the picker offers the newer one explicitly (ADR 0021). Simulated here by giving aurora a version 2.
  */
 import { describe, expect, it, vi } from 'vitest';
 import type * as Registry from '../../src/backdrops/styles/registry.js';

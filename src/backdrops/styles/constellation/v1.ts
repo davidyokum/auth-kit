@@ -1,5 +1,5 @@
 /**
- * constellation v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * constellation v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * Points spread evenly by best-candidate sampling (never gridded), each drifting on its own slow
  * orbit. Faint links join near neighbors, fading with distance; a few

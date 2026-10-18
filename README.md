@@ -21,7 +21,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
-| `auth-kit/backdrops` | Seeded, generative art behind the sign-in card (eight styles and a painted-image slot), in each family's palette, with the contrast check for the card in front of it, variations, defaults, and the lock check ([ADR 0020](docs/decisions/0020-backdrops.md)). Framework-free | **Implemented** |
+| `auth-kit/backdrops` | Seeded, generative art behind the sign-in card (eight styles and a painted-image slot), in each family's palette, with the contrast check for the card in front of it, variations, defaults, and the lock check ([ADR 0021](docs/decisions/0021-backdrops.md)). Framework-free | **Implemented** |
 | `auth-kit/backdrops/react` | `<Backdrop style seed family>`: the client component that sits behind the card | **Implemented** |
 | `auth-kit/backdrops/picker` | The backdrop picker page (nine variations behind the site's real card; "Use this one"). **Dev only; never in a build** | **Implemented** |
 
@@ -497,7 +497,7 @@ The server role needs `peopleAdminPolicy({ userPoolArn, auditTableArn, sesResour
 
 ### 9. Backdrops: `auth-kit/backdrops`
 
-The card is the same on every site; a site's identity lives behind it ([ADR 0020](docs/decisions/0020-backdrops.md)). A backdrop is drawn from `{ style, seed, family }`: the same seed always draws the same picture. It's for recognition and delight, never security: no screen asks anyone to check the picture (security images failed), and the card's heading and the domain still say where you are.
+The card is the same on every site; a site's identity lives behind it ([ADR 0021](docs/decisions/0021-backdrops.md)). A backdrop is drawn from `{ style, seed, family }`: the same seed always draws the same picture. It's for recognition and delight, never security: no screen asks anyone to check the picture (security images failed), and the card's heading and the domain still say where you are.
 
 ```tsx
 // The sign-in page: the card in front, the backdrop behind it.

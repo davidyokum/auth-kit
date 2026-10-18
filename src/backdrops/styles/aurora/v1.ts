@@ -1,5 +1,5 @@
 /**
- * aurora v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * aurora v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * Soft curtains of light: a few silk ribbons, each a brighter core with a crisp lower edge and a long
  * fade upward, wander across the page in slow folds and shift between two brand tints, over two slow

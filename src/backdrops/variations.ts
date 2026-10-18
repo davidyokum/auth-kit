@@ -1,6 +1,6 @@
 /**
  * Choosing a backdrop: nine variations to pick from, a default from the site's name, and the lock
- * check a site's build runs (ADR 0020).
+ * check a site's build runs (ADR 0021).
  *
  * The site's name only ever proposes a default. Once chosen, a site stores the literal choice,
  * `{ style, seed, styleVersion, locked: true }`, so renaming the site, adding styles, or upgrading

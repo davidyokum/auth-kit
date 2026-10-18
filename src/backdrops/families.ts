@@ -7,7 +7,7 @@
  * it). Families change the primary button, the 4px rule, links, and the border's tint.
  *
  * These are brand constants. Changing one changes every site of that family (style versions pin
- * the algorithm, not the brand; ADR 0020), so treat an edit here as a brand decision.
+ * the algorithm, not the brand; ADR 0021), so treat an edit here as a brand decision.
  */
 import type { BackdropCardTheme, BackdropFamily, BackdropPalette } from './types.js';
 

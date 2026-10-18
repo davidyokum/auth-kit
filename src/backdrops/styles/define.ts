@@ -4,7 +4,7 @@
  * (`v1.ts`, `v2.ts`, ...). Register the module in `registry.ts` and it's everywhere: types,
  * variations, the picker, the React component, and the frozen-hash test.
  *
- * Versions are frozen once released (ADR 0020): a site locks `{ style, seed, styleVersion }`, so a
+ * Versions are frozen once released (ADR 0021): a site locks `{ style, seed, styleVersion }`, so a
  * released version must keep drawing exactly what it drew. To change a style's look, add a version.
  * To stop offering a style, mark it `retired` (locked sites keep rendering); never delete it.
  */

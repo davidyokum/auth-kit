@@ -1,5 +1,5 @@
 /**
- * flow-lines v1. FROZEN once released (ADR 0020): add v2.ts for any change to what it draws.
+ * flow-lines v1. FROZEN once released (ADR 0021): add v2.ts for any change to what it draws.
  *
  * Long, fine curves traced through a slowly turning noise field, like iron filings or wind on a
  * map. Most are faint ink; some carry the brand colors; a few broad, pale strokes give depth. Near
