@@ -34,7 +34,7 @@ export const constellationV1 = defineVersion({
     bright: rgba(mix(p.primary, p.secondary, 0.2), 0.85),
     halo: p.glow,
     nebula: mix(p.glow, p.page, 0.25),
-    nebula2: mix(p.mist, p.secondary, 0.12),
+    nebula2: mix(p.glow, p.secondary, 0.25),
   }),
   create(setup, c) {
     const { width: w, height: h, card } = setup;

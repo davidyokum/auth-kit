@@ -8,7 +8,7 @@
  * about a minute and a half: a very slow bleed. Everything is painted once, when it's created; a
  * frame is two image copies.
  */
-import { mix, parseHex, rgba, type Rgb, toHex } from '../../kernel/v1/color.js';
+import { mix, parseHex, rgba, type Rgb, saturate, toHex } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import { createRng, hashParts, type Rng } from '../../kernel/v1/prng.js';
 import { cardDistance, TAU } from '../../kernel/v1/shape.js';
@@ -72,13 +72,14 @@ export const watercolorV1 = defineVersion({
   colors: (p) => ({
     paper: toHex(mix(p.page, p.mist, 0.18)),
     grain: p.ink,
+    // Lightened toward the page, then given back some chroma, so washes stay clear rather than grey.
     pigments: [
-      toHex(mix(p.glow, p.page, 0.1)),
-      toHex(mix(p.primary, p.page, 0.5)),
-      toHex(mix(p.secondary, p.page, 0.45)),
-      toHex(mix(mix(p.primary, p.ink, 0.25), p.page, 0.6)),
-      toHex(mix(p.glow, p.secondary, 0.35)),
-      toHex(mix(mix(p.mist, p.primary, 0.3), p.page, 0.25)),
+      toHex(saturate(mix(p.glow, p.page, 0.1), 1.2)),
+      toHex(saturate(mix(p.primary, p.page, 0.5), 1.25)),
+      toHex(saturate(mix(p.secondary, p.page, 0.45), 1.2)),
+      toHex(saturate(mix(mix(p.primary, p.ink, 0.25), p.page, 0.6), 1.3)),
+      toHex(saturate(mix(p.glow, p.secondary, 0.35), 1.15)),
+      toHex(saturate(mix(mix(p.glow, p.primary, 0.3), p.page, 0.3), 1.2)),
     ],
   }),
   create(setup, c) {
@@ -216,7 +217,6 @@ export const watercolorV1 = defineVersion({
 
     function paint(wet: boolean): Layer {
       const layer = setup.createLayer(w, h, Math.min(1, setup.pixelRatio) * BLOOM_SCALE);
-      const lc = layer.ctx;
       blooms.forEach((bloom, i) => {
         const stream = rng.fork(`bloom-${i}-${wet ? 'wet' : 'dry'}`);
         const color: Rgb = pigments[bloom.pigment] as Rgb;
@@ -225,45 +225,56 @@ export const watercolorV1 = defineVersion({
           base = { xs: base.xs.map((x) => bloom.x + (x - bloom.x) * 1.07), ys: base.ys.map((y) => bloom.y + (y - bloom.y) * 1.07), vs: base.vs };
           base = deform(base, 1, 0.2, stream);
         }
-        lc.globalCompositeOperation = 'source-over';
-        lc.fillStyle = rgba(color, 0.03 * bloom.strength);
+        // Each bloom builds up its coverage alone, in black, then takes its pigment in one step:
+        // thirty faint glazes in color would drift in hue through 8-bit rounding.
+        const reach = bloom.r * 1.8;
+        const own = setup.createLayer(reach * 2, reach * 2, Math.min(1, setup.pixelRatio) * BLOOM_SCALE);
+        const bc = own.ctx;
+        bc.translate(reach - bloom.x, reach - bloom.y);
+        const glaze = rgba('#000000', 0.045 * bloom.strength);
+        bc.fillStyle = glaze;
         for (let g = 0; g < GLAZES; g++) {
-          tracePoly(lc, deform(base, 3, 0.48, stream));
-          lc.fill();
+          tracePoly(bc, deform(base, 3, 0.48, stream));
+          bc.fill();
           if (g % 10 === 9) {
             // Mottle the pigment: lift soft spots so the wash isn't flat.
-            lc.globalCompositeOperation = 'destination-out';
+            bc.globalCompositeOperation = 'destination-out';
             for (let m = 0; m < 24; m++) {
               const a = stream.range(0, TAU);
               const d = Math.sqrt(stream.next()) * bloom.r;
-              lc.fillStyle = rgba('#000000', stream.range(0.02, 0.06));
-              lc.beginPath();
-              lc.arc(bloom.x + Math.cos(a) * d, bloom.y + Math.sin(a) * d, stream.range(6, bloom.r * 0.22), 0, TAU);
-              lc.fill();
+              bc.fillStyle = rgba('#000000', stream.range(0.02, 0.06));
+              bc.beginPath();
+              bc.arc(bloom.x + Math.cos(a) * d, bloom.y + Math.sin(a) * d, stream.range(6, bloom.r * 0.22), 0, TAU);
+              bc.fill();
             }
-            lc.globalCompositeOperation = 'source-over';
-            lc.fillStyle = rgba(color, 0.03 * bloom.strength);
+            bc.globalCompositeOperation = 'source-over';
+            bc.fillStyle = glaze;
           }
         }
         // The pigment edge: pigment gathers where a wash dries.
-        lc.strokeStyle = rgba(color, 0.06 * bloom.strength);
-        lc.lineWidth = 1.2;
+        bc.strokeStyle = rgba('#000000', 0.07 * bloom.strength);
+        bc.lineWidth = 1.2;
         for (let e = 0; e < 2; e++) {
-          tracePoly(lc, deform(base, 3, 0.3, stream));
-          lc.stroke();
+          tracePoly(bc, deform(base, 3, 0.3, stream));
+          bc.stroke();
         }
         // Salt: lifted speckles.
-        lc.globalCompositeOperation = 'destination-out';
+        bc.globalCompositeOperation = 'destination-out';
         const salt = Math.round(bloom.r * 0.25);
         for (let k = 0; k < salt; k++) {
           const a = stream.range(0, TAU);
           const d = Math.sqrt(stream.next()) * bloom.r * 0.85;
-          lc.fillStyle = rgba('#000000', stream.range(0.1, 0.32));
-          lc.beginPath();
-          lc.arc(bloom.x + Math.cos(a) * d, bloom.y + Math.sin(a) * d, stream.range(0.6, 2.2), 0, TAU);
-          lc.fill();
+          bc.fillStyle = rgba('#000000', stream.range(0.1, 0.32));
+          bc.beginPath();
+          bc.arc(bloom.x + Math.cos(a) * d, bloom.y + Math.sin(a) * d, stream.range(0.6, 2.2), 0, TAU);
+          bc.fill();
         }
-        lc.globalCompositeOperation = 'source-over';
+        // The pigment, everywhere the coverage is.
+        bc.setTransform(1, 0, 0, 1, 0, 0);
+        bc.globalCompositeOperation = 'source-in';
+        bc.fillStyle = rgba(color, 1);
+        bc.fillRect(0, 0, own.canvas.width, own.canvas.height);
+        layer.ctx.drawImage(own.canvas, bloom.x - reach, bloom.y - reach, reach * 2, reach * 2);
       });
       return layer;
     }

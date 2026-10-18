@@ -25,8 +25,8 @@ export const ripplesV1 = defineVersion({
     top: toHex(mix(p.page, p.mist, 0.55)),
     bottom: p.page,
     light: rgba(p.glow, 0.5),
-    ink: [0.05, 0.09, 0.14, 0.2, 0.28].map((a) => rgba(p.ink, a)),
-    accent: [0.09, 0.15, 0.23, 0.33, 0.46].map((a) => rgba(mix(p.primary, p.secondary, 0.3), a)),
+    ink: [0.06, 0.1, 0.16, 0.23, 0.32].map((a) => rgba(p.ink, a)),
+    accent: [0.1, 0.17, 0.26, 0.37, 0.52].map((a) => rgba(mix(p.primary, p.secondary, 0.3), a)),
   }),
   create(setup, c) {
     const { width: w, height: h, card } = setup;
@@ -52,14 +52,14 @@ export const ripplesV1 = defineVersion({
       }
       sx[s] = x;
       sy[s] = y;
-      period[s] = place.range(9, 15);
+      period[s] = place.range(7, 12);
       speed[s] = place.range(17, 28);
       phase[s] = place.range(0, 20);
       strength[s] = place.range(0.6, 1);
       gap[s] = place.range(8, 13);
       accent[s] = s === 0 || place.chance(0.3) ? 1 : 0;
     }
-    const rMax = Math.max(w, h) * 0.38;
+    const rMax = Math.max(w, h) * 0.46;
 
     // Still water: a gentle gradient and a soft light over each source.
     const water = setup.createLayer(w, h);
@@ -132,7 +132,7 @@ export const ripplesV1 = defineVersion({
             if (r > rMax) break;
             const fade = 1 - r / rMax;
             const grow = r < 36 ? r / 36 : 1;
-            const a = (strength[s] as number) * Math.pow(fade, 2.4) * grow * grow * (3 - 2 * grow);
+            const a = (strength[s] as number) * fade * fade * grow * grow * (3 - 2 * grow);
             for (let m = 0; m < 3; m++) ring(sx[s] as number, sy[s] as number, r - m * (gap[s] as number), a * (PACKET[m] as number), accent[s] === 1);
           }
         }

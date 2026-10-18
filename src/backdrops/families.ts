@@ -34,7 +34,7 @@ export const BACKDROP_FAMILIES: Readonly<Record<BackdropFamily, BackdropFamilyCo
   personal: Object.freeze({
     label: 'Yokum Lab',
     // Yokum Lab ink and indigo on a warm stone page.
-    palette: Object.freeze({ page: '#f5f3ef', mist: '#e6e1d8', glow: '#c0c6df', primary: '#1c326e', secondary: '#5b6aa3', ink: '#1c1917' }),
+    palette: Object.freeze({ page: '#f5f3ef', mist: '#e7e1d6', glow: '#b6c1e8', primary: '#1c326e', secondary: '#4f63ad', ink: '#1c1917' }),
     card: Object.freeze({ ...CORE_CARD, link: '#1c326e', button: '#1c1917', rule: '#1c326e' }),
   }),
 });
