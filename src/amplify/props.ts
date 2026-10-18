@@ -1,12 +1,16 @@
 import type { defineAuth } from '@aws-amplify/backend';
-import { type AuthStandardOptions, normalizeOptions } from './options.js';
+import { SIGN_UP_ORIGIN_ATTRIBUTE, allowsSelfSignUp } from '../shared/account-creation.js';
+import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions } from './options.js';
 
 /** The props `defineAuth` accepts, taken from the installed `@aws-amplify/backend`. */
 export type DefineAuthProps = Parameters<typeof defineAuth>[0];
 
 /** Pass-throughs for `defineAuth` settings the standard doesn't decide. */
 export interface StandardAuthExtras {
-  /** Lambda triggers, e.g. `{ preSignUp }` for a self-signup allowlist or `{ postAuthentication }`. */
+  /**
+   * Lambda triggers: `{ preSignUp }` (required in `accountCreation` mode `domains`: built with
+   * `preSignUpForAccountCreation`), `{ customMessage }` (auth-kit/amplify/custom-message), or your own.
+   */
   triggers?: DefineAuthProps['triggers'];
   /** IAM grants from the pool to functions, e.g. `allow.resource(fn).to(['listUsers'])`. */
   access?: DefineAuthProps['access'];
@@ -50,6 +54,17 @@ export function standardAuthProps(options: AuthStandardOptions, extras: Standard
     }),
   };
 
+  // Sign-up sites mark the accounts their sign-up route makes, once, at creation (ADR 0023): the
+  // unverified-account sweep deletes only those, the preSignUp trigger re-checks only those, and the
+  // code email can say "your code to create an account". Immutable, so nobody can mark or unmark one later.
+  const signUpSite = allowsSelfSignUp(o.accountCreation);
+  if (extras.userAttributes && Object.hasOwn(extras.userAttributes, SIGN_UP_ORIGIN_ATTRIBUTE)) {
+    throw new AuthStandardConfigError(`userAttributes may not define ${SIGN_UP_ORIGIN_ATTRIBUTE}: auth-kit owns it.`);
+  }
+  const userAttributes: DefineAuthProps['userAttributes'] | undefined = signUpSite
+    ? { ...extras.userAttributes, [SIGN_UP_ORIGIN_ATTRIBUTE]: { dataType: 'String', mutable: false, minLen: 1, maxLen: 16 } }
+    : extras.userAttributes;
+
   const props: DefineAuthProps = {
     ...(extras.name !== undefined && { name: extras.name }),
     loginWith: {
@@ -72,10 +87,10 @@ export function standardAuthProps(options: AuthStandardOptions, extras: Standard
       email: {
         fromEmail: o.email.fromAddress,
         fromName: o.email.fromName,
-        ...(o.email.replyTo !== undefined && { replyTo: o.email.replyTo }),
+        replyTo: o.email.replyTo,
       },
     },
-    ...(extras.userAttributes !== undefined && { userAttributes: extras.userAttributes }),
+    ...(userAttributes !== undefined && { userAttributes }),
     ...(extras.triggers !== undefined && { triggers: extras.triggers }),
     ...(extras.access !== undefined && { access: extras.access }),
   };

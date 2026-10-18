@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type AuthStandardOptions,
   AuthStandardConfigError,
+  CUSTOM_MESSAGE_GATE_ENV,
   applyAuthStandard,
   createSharedAuthWebAcl,
   formatSender,
@@ -27,9 +28,20 @@ const BASE: AuthStandardOptions = {
 /** `none` = plain CDK, no Amplify context. */
 type DeploymentType = 'branch' | 'sandbox' | 'standalone' | 'none';
 
+/** Every pool needs the custom message trigger (ADR 0023): a stand-in function wired as the site would, with the gate's marker. */
+function addCustomMessageTrigger(auth: AmplifyAuth, stack: Stack, environment: Record<string, string> = { ...CUSTOM_MESSAGE_GATE_ENV }) {
+  const fn = new LambdaFunction(stack, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;'), environment });
+  (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, fn);
+}
+
 function synth(
   options: AuthStandardOptions,
-  { type = 'branch', branch = 'main', beforeApply }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void } = {},
+  {
+    type = 'branch',
+    branch = 'main',
+    beforeApply,
+    customMessage = true,
+  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean } = {},
 ) {
   const context: Record<string, string> = {};
   if (type !== 'none') context['amplify-backend-type'] = type;
@@ -38,6 +50,7 @@ function synth(
   const app = new App({ context });
   const stack = new Stack(app, 'AuthStack');
   const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options) as unknown as AuthProps);
+  if (customMessage) addCustomMessageTrigger(auth, stack);
   beforeApply?.(auth, stack);
   const applied = applyAuthStandard(auth, options);
   return { app, stack, auth, applied, template: () => Template.fromStack(stack) };
@@ -386,29 +399,118 @@ describe('admin pool', () => {
   });
 });
 
-describe('self sign-up allowlist', () => {
-  const options: AuthStandardOptions = { ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } };
+describe('account creation (ADR 0023)', () => {
+  const preSignUpTrigger = (auth: AmplifyAuth, stack: Stack) => {
+    const fn = new LambdaFunction(stack, 'PreSignUp', {
+      runtime: Runtime.NODEJS_22_X,
+      handler: 'index.handler',
+      code: Code.fromInline('exports.handler = async (e) => e;'),
+    });
+    (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.PRE_SIGN_UP, fn);
+  };
 
-  it('refuses to synthesize without the preSignUp trigger', () => {
-    const { template } = synth(options);
-    expect(() => template()).toThrow(/preSignUp allowlist trigger/);
+  const SITE_ACL = `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:global/webacl/auth-kit-site-routes/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee`;
+
+  it.each([
+    ['invite', { mode: 'invite' }],
+    ['request', { mode: 'request' }],
+    ['domains', { mode: 'domains', domains: ['example.edu'] }],
+    ['open', { mode: 'open' }],
+  ] as const)("keeps Cognito's own SignUp off in mode %s", (mode, accountCreation) => {
+    const t = synth({ ...BASE, accountCreation, ...(mode === 'open' && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
   });
 
-  it('opens sign-up only with the trigger attached', () => {
-    const t = synth(options, {
-      beforeApply: (auth, stack) => {
-        const fn = new LambdaFunction(stack, 'PreSignUp', {
-          runtime: Runtime.NODEJS_22_X,
-          handler: 'index.handler',
-          code: Code.fromInline('exports.handler = async (e) => e;'),
-        });
-        (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.PRE_SIGN_UP, fn);
-      },
-    }).template();
-    t.hasResourceProperties('AWS::Cognito::UserPool', {
-      AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: false }),
-      LambdaConfig: Match.objectLike({ PreSignUp: Match.anyValue() }),
+  it('fails synthesis on every pool without the custom message trigger, which refuses public-API email changes (H1)', () => {
+    for (const options of [BASE, { ...BASE, adminPool: true, tier: 3 as const }, { ...BASE, accountCreation: { mode: 'request' as const } }]) {
+      const { template } = synth(options, { customMessage: false });
+      expect(() => template()).toThrow(/no custom message trigger/);
+    }
+    expect(() => synth(BASE).template()).not.toThrow();
+  });
+
+  it('fails synthesis when the trigger’s function isn’t auth-kit’s handler or wrapper (no gate marker, N2)', () => {
+    const plain = synth(BASE, { customMessage: false, beforeApply: (auth, stack) => addCustomMessageTrigger(auth, stack, { SOMETHING: 'else' }) });
+    expect(() => plain.template()).toThrow(/doesn't carry AUTH_KIT_CUSTOM_MESSAGE_GATE=v1.*withAuthKitCustomMessage/s);
+    const wrongValue = synth(BASE, { customMessage: false, beforeApply: (auth, stack) => addCustomMessageTrigger(auth, stack, { AUTH_KIT_CUSTOM_MESSAGE_GATE: 'yes' }) });
+    expect(() => wrongValue.template()).toThrow(/doesn't carry/);
+  });
+
+  it('finds the trigger’s function in another stack (Amplify puts functions in their own), and refuses one it can’t see', () => {
+    const app = new App({ context: { 'amplify-backend-type': 'branch', 'amplify-backend-name': 'main', 'amplify-backend-namespace': 'dexampleapp' } });
+    const functions = new Stack(app, 'Functions');
+    const fn = new LambdaFunction(functions, 'CustomMessage', { runtime: Runtime.NODEJS_22_X, handler: 'index.handler', code: Code.fromInline('exports.handler = async (e) => e;'), environment: { ...CUSTOM_MESSAGE_GATE_ENV } });
+    const authStack = new Stack(app, 'Auth');
+    const auth = new AmplifyAuth(authStack, 'auth', standardAuthProps(BASE) as unknown as AuthProps);
+    (auth.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, fn);
+    applyAuthStandard(auth, BASE);
+    expect(() => app.synth()).not.toThrow();
+
+    const imported = synth(BASE, {
+      customMessage: false,
+      beforeApply: (a, stack) => (a.resources.userPool as UserPool).addTrigger(UserPoolOperation.CUSTOM_MESSAGE, LambdaFunction.fromFunctionArn(stack, 'Elsewhere', `arn:aws:lambda:us-east-1:${'1'.repeat(12)}:function:someone-elses`)),
     });
+    expect(() => imported.template()).toThrow(/can't find the function the custom message trigger runs/);
+  });
+
+  it('reads the trigger from the rendered pool: an override that removes it still fails synthesis', () => {
+    const { template, auth } = synth(BASE);
+    auth.resources.cfnResources.cfnUserPool.addPropertyOverride('LambdaConfig.CustomMessage', undefined);
+    expect(() => template()).toThrow(/no custom message trigger/);
+  });
+
+  it('open mode requires the site’s CLOUDFRONT web ACL with the challenge rules (M4)', () => {
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' } })).toThrow(/mode 'open' needs siteWebAclArn.*createSiteWebAcl/s);
+    expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
+    expect(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).applied.siteWebAclArn).toBe(SITE_ACL);
+    // A REGIONAL ACL (the user pool's kind) or another Region can't front CloudFront.
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL.replace(':global/', ':regional/') })).toThrow(/CLOUDFRONT web ACL ARN/);
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL.replace('us-east-1', 'us-west-2') })).toThrow(/CLOUDFRONT web ACL ARN/);
+    // Optional in domains mode; meaningless without a sign-up route.
+    expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'request' }, siteWebAclArn: SITE_ACL })).toThrow(/has none/);
+  });
+
+  it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {
+    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } });
+    expect(() => template()).toThrow(/preSignUpForAccountCreation/);
+  });
+
+  it('fails synthesis when anything turns Cognito SignUp back on', () => {
+    const { template, auth } = synth(BASE);
+    auth.resources.cfnResources.cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', false);
+    expect(() => template()).toThrow(/Cognito's own SignUp is on/);
+    const typed = synth(BASE);
+    typed.auth.resources.cfnResources.cfnUserPool.adminCreateUserConfig = { allowAdminCreateUserOnly: false };
+    typed.auth.resources.cfnResources.cfnUserPool.addPropertyOverride('AdminCreateUserConfig', { AllowAdminCreateUserOnly: false });
+    expect(() => typed.template()).toThrow(/Cognito's own SignUp is on/);
+  });
+
+  it('marks sign-up accounts with an immutable attribute only on sign-up sites', () => {
+    const schema = (t: Template) =>
+      (Object.values(t.findResources('AWS::Cognito::UserPool'))[0] as { Properties: { Schema?: { Name: string; Mutable?: boolean }[] } }).Properties.Schema ?? [];
+    const open = schema(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).template());
+    expect(open.find((a) => a.Name === 'authkit_origin')).toMatchObject({ Mutable: false, AttributeDataType: 'String' });
+    for (const accountCreation of [undefined, { mode: 'request' as const }]) {
+      expect(schema(synth({ ...BASE, ...(accountCreation && { accountCreation }) }).template()).some((a) => a.Name === 'authkit_origin')).toBe(false);
+    }
+    expect(() => standardAuthProps(BASE, { userAttributes: { 'custom:authkit_origin': { dataType: 'String', mutable: true } } })).toThrow(/auth-kit owns it/);
+  });
+
+  it("leaves the app client's write permissions at Cognito's default (every app client can write required attributes such as email anyway)", () => {
+    const client = Object.values(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
+    expect(client.Properties).not.toHaveProperty('WriteAttributes');
+  });
+
+  it('sets the code lifetime once, as the sign-in session', () => {
+    const t = synth({ ...BASE, codeLifetimeMinutes: 10 }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 10 });
+    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(3);
+  });
+
+  it('refuses the removed selfSignUp with an explanation', () => {
+    expect(() => normalizeOptions({ ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } })).toThrow(/selfSignUp was removed in auth-kit 0.1.8 \(ADR 0023\)/);
+    expect(() => normalizeOptions({ ...BASE, selfSignUp: { allowedEmailDomains: ['example.edu'] } })).toThrow(/accountCreation/);
   });
 });
 
@@ -599,10 +701,10 @@ describe('option validation', () => {
     ['tier 1', { tier: 1 }, /tier must be 2 or 3/],
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
-    ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X' } }, /fromAddress/],
+    ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
     ['from name with brackets', { email: { fromAddress: 'a@example.org', fromName: 'X <y>' } }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -620,8 +722,19 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['admin pool with self sign-up', { adminPool: true, selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /never allow self sign-up/],
-    ['empty self sign-up list', { selfSignUp: { allowedEmailDomains: [] } }, /at least one domain/],
+    ['no help address', { email: { fromAddress: 'a@example.org', fromName: 'X' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
+    ['an admin pool with sign-up', { adminPool: true, accountCreation: { mode: 'open' } }, /admin pool is invite only/],
+    ['an empty domain list', { accountCreation: { mode: 'domains', domains: [] } }, /at least one domain/],
+    ['a domain list outside domains mode', { accountCreation: { mode: 'open', domains: ['example.edu'] } }, /applies only to mode 'domains'/],
+    ['requestsAlso outside domains mode', { accountCreation: { mode: 'request', requestsAlso: true } }, /requestsAlso applies only/],
+    ['an unknown account-creation mode', { accountCreation: { mode: 'anyone' as 'open' } }, /mode must be/],
+    ['a malformed approved domain', { accountCreation: { mode: 'domains', domains: ['not a domain'] } }, /isn't a domain/],
+    ['a code lifetime below Cognito’s range', { codeLifetimeMinutes: 2 }, /3 to 15/],
+    ['a code lifetime above Cognito’s range', { codeLifetimeMinutes: 16 }, /3 to 15/],
+    ['a fractional code lifetime', { codeLifetimeMinutes: 4.5 }, /whole number/],
     ['WAF limit below 10', { waf: { signInLimit: 5 } }, /from 10/],
     ['WAF window not allowed', { waf: { evaluationWindowSec: 30 as 60 } }, /60, 120, 300, or 600/],
     ['WAF rule mode not allowed', { waf: { overallRule: 'allow' as 'block' } }, /overallRule must be "block" or "count"/],
@@ -643,7 +756,7 @@ describe('option validation', () => {
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
     expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });

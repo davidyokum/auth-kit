@@ -37,7 +37,12 @@ import {
   roleRank,
 } from './guardrails.js';
 import { InviteMisconfiguredError, createInvitedAccount, removeInvitedAccount, sendInviteEmail } from './invite-core.js';
-import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
+import type { EmailSender, InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier, OwnershipTransferAlert, SuperadminGrantAlert } from './mailer.js';
+import { ACCOUNT_AUDIT_ACTIONS } from './audit-actions.js';
+import { type SignInHelpSource, helpAddressOf } from '../accounts/sign-in-help.js';
+import { type AccessRequest, AccessRequestConflictError, type AccessRequestStore, isRequestId } from '../accounts/stores.js';
+import { requestDeclinedEmail } from '../shared/emails.js';
+import type { AuthTheme, ThemeFamily } from '../themes/index.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
 import { type SweepResult, sweepFor } from './sweep.js';
@@ -58,6 +63,14 @@ import {
   type PersonRow,
   type TargetInput,
   type TransferOwnershipInput,
+  type AccessRequestList,
+  type ApproveRequestInput,
+  type DeclineRequestInput,
+  type DeclineRequestsInput,
+  type DeclineRequestsResult,
+  type DeclineRequestsSkip,
+  type DeclineRequestsSkipStatus,
+  DECLINE_REQUESTS_MAX,
 } from './types.js';
 
 
@@ -107,6 +120,22 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   onChange?: (event: AuditEvent) => void | Promise<void>;
   /** Errors the actions handle without failing (a refused row or an alert that couldn't be written). */
   onError?: (error: unknown, context: string) => void;
+  /** The site's family or theme, for the invite email (colors, footer identity line). Default personal. */
+  theme?: AuthTheme | ThemeFamily;
+  /** The help address in effect (an address, or `createSignInHelp` from `auth-kit/accounts`): the emails' "Help:" line. */
+  help?: SignInHelpSource;
+  /**
+   * The access-request queue (`accountCreation` mode `request`, or `domains` with `requestsAlso`;
+   * ADR 0023): the People page's "Pending requests" tab, approve (the ordinary invite), and decline.
+   */
+  accessRequests?: AccessRequestStore;
+  /**
+   * Send "Your request wasn’t approved" when a request is declined (REPORT §5.2k). Default false:
+   * declining is silent. A bulk decline (`declineRequests`) is silent either way.
+   */
+  notifyOnDecline?: boolean;
+  /** Sends the decline note (`createSesInviteMailer` is one). Default: the mailer, when it can. */
+  emailSender?: EmailSender;
   /** Inject a Cognito client (tests). Default: one for the pool's region, with retries left to auth-kit. */
   cognito?: CognitoIdentityProviderClient;
   quota?: QuotaLimiterOptions;
@@ -150,12 +179,36 @@ export interface PeopleActions {
   expireStaleInvites(): Promise<SweepResult | { error: ActionResult }>;
   /** The Activity page: merged audit entries, newest first. Needs `audit.read`. */
   listActivity(query?: AuditLogQuery): Promise<ActivityPage>;
+  /** Pending access requests, newest first (the badge counts them). Needs `people.manage`. */
+  listAccessRequests(): Promise<AccessRequestList>;
+  /**
+   * Approves a request: the ordinary invite (default Member), then the request is marked approved.
+   * The account's name is the approver's `name` when given, else the one the requester typed. Needs
+   * `people.manage`.
+   */
+  approveRequest(input: ApproveRequestInput): Promise<ActionResult>;
+  /** Declines a request: removed from the queue, silently unless `notifyOnDecline`. Needs `people.manage`. */
+  declineRequest(input: DeclineRequestInput): Promise<ActionResult>;
+  /**
+   * Declines up to 100 pending requests in one go (a flood of junk requests): `people.manage`, checked
+   * live, as a single decline. Each request is settled with the store's conditional write; one that
+   * isn't pending any more is left alone and reported (`skipped`). One audit entry (intent, then
+   * result) lists the requests' IDs and addresses, never what the requesters typed.
+   *
+   * Always silent, even with `notifyOnDecline`: the addresses in a flood are whoever the sender chose,
+   * and mailing them would make the site send mail for an attacker.
+   */
+  declineRequests(input: DeclineRequestsInput): Promise<DeclineRequestsResult>;
   /** The same actions taking FormData, for `useActionState` and `auth-kit/admin/ui`. */
   readonly forms: PeopleFormActions;
 }
 
 export interface PeopleFormActions {
   invite: FormAction;
+  approveRequest: FormAction;
+  declineRequest: FormAction;
+  /** Every `id` field in the form, and `reason`. */
+  declineRequests: FormAction;
   resend: FormAction;
   changeRole: FormAction;
   transferOwnership: FormAction;
@@ -503,6 +556,13 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   // ---- invite ---------------------------------------------------------------------------------
 
+  interface InviteFields {
+    email: string;
+    role: string;
+    name?: string;
+    reason?: string;
+  }
+
   async function invite(input: InviteInput): Promise<ActionResult> {
     const auditAction = PEOPLE_AUDIT_ACTIONS.invite;
     let acting_: Acting<C>;
@@ -512,28 +572,42 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       await logForbidden(auditAction, error);
       return authFailure(error) ?? fail('unavailable', describeAwsError(error));
     }
-    let email: string, role: string, name: string | undefined, reason: string | undefined, confirmOutside: boolean;
+    let fields: InviteFields, confirmOutside: boolean;
     try {
       const raw = record(input);
-      email = emailOf(raw.email);
+      const email = emailOf(raw.email);
       // Role names are taken verbatim: no trimming or case folding (a near-miss is refused, not guessed).
-      role = typeof raw.role === 'string' ? raw.role : '';
+      const role = typeof raw.role === 'string' ? raw.role : '';
       if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
-      name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
-      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      const name = text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
+      const reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      fields = { email, role, ...(name !== undefined && { name }), ...(reason !== undefined && { reason }) };
       confirmOutside = checked(raw.confirmOutsideDomain);
     } catch (error) {
       return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
     }
 
-    if (outsideDomains(email, inviteDomains) && !confirmOutside) {
+    if (outsideDomains(fields.email, inviteDomains) && !confirmOutside) {
       return fail(
         'refused',
-        `${email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
+        `${fields.email} is outside this site's usual domains (${inviteDomains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. Check it, then confirm to send.`,
         { guardrail: 'domain' },
       );
     }
+    return inviteAs(acting_, fields, { auditAction });
+  }
 
+  /**
+   * The invite's checks and audited calls, shared by the invite form and an approved access request
+   * (which is the ordinary invite: same guardrails, same account steps, the approved wording).
+   */
+  async function inviteAs(
+    acting_: Acting<C>,
+    fields: InviteFields,
+    opts: { auditAction: string; approved?: { requestId: string } },
+  ): Promise<ActionResult> {
+    const { auditAction } = opts;
+    const { email, role, name, reason } = fields;
     const g = guard(acting_, 'invite', undefined, { toRole: role, ...(reason !== undefined && { reason }) });
     if (!g.ok) return refuse(acting_, auditAction, { email }, g.code, g.reason, { after: { role }, ...(reason !== undefined && { reason }) });
     if (roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'] && (reason ?? '').length < ADMIN_POLICY.reasonMinLength) {
@@ -553,6 +627,26 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     const blocked = stepUp(acting_, g.requiresRecentSignIn || superadminGrant);
     if (blocked) return blocked;
 
+    let helpEmail: string | undefined;
+    try {
+      helpEmail = config.help !== undefined ? await helpAddressOf(config.help) : undefined;
+    } catch (error) {
+      report(error, 'help address');
+    }
+    // The email names who sent it, and replies go to them: read them from Cognito when the session
+    // carried no ID token (a bearer token), so the invite never says "Someone".
+    let invitedBy: { name?: string; email?: string } = {
+      ...(acting_.user.profile?.name !== undefined && { name: acting_.user.profile.name }),
+      ...(acting_.actor.email !== undefined && { email: acting_.actor.email }),
+    };
+    if (invitedBy.email === undefined) {
+      try {
+        const me = await cognito().findBySub(acting_.user.sub);
+        if (me) invitedBy = { ...(me.name !== undefined && { name: me.name }), ...(me.email && { email: me.email }) };
+      } catch (error) {
+        report(error, 'invite: the inviter’s name');
+      }
+    }
     const plannedExpiry = inviteExpiresAt(new Date(now()));
     const run = await runAudited(
       auditLog,
@@ -562,7 +656,14 @@ export function createPeopleActions<G extends string, C extends string>(config: 
           action: auditAction,
           target: { email },
           before: null,
-          after: { email, ...(name !== undefined && { name }), role, status: 'invited', expiresAt: plannedExpiry.toISOString() },
+          after: {
+            email,
+            ...(name !== undefined && { name }),
+            role,
+            status: 'invited',
+            expiresAt: plannedExpiry.toISOString(),
+            ...(opts.approved && { request: 'approved' }),
+          },
           ...(reason !== undefined && { reason }),
           calls: [...details.invite.calls, ...(superadminGrant ? ['Super admin alert (to the owner)'] : [])],
           ...contextOf(acting_.request),
@@ -595,6 +696,11 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               siteName: config.siteName,
               signInUrl: signInUrl.toString(),
               expiresAt,
+              ...(config.theme !== undefined && { theme: config.theme }),
+              ...(helpEmail !== undefined && { helpEmail }),
+              invitedBy,
+              roleLabel: roleLabel(role),
+              ...(opts.approved && { approved: true }),
             });
           }
           return {
@@ -608,6 +714,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               invitedAt: created.createdAt.toISOString(),
               expiresAt: expiresAt.toISOString(),
               ...(ownerAlert !== undefined && { ownerAlert: { sentTo: ownerAlert } }),
+              ...(opts.approved && { request: 'approved' }),
             },
           };
         },
@@ -626,6 +733,256 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       },
       ({ created }) => ({ sub: created.sub, email }),
     );
+  }
+
+  // ---- access requests (ADR 0023) ---------------------------------------------------------------
+
+  const REQUESTS_OFF = 'This site doesn’t take access requests.';
+
+  async function listAccessRequests(): Promise<AccessRequestList> {
+    if (!config.accessRequests) return { state: 'off' };
+    try {
+      await acting('people.manage');
+    } catch (error) {
+      const f = authFailure(error);
+      return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
+    }
+    try {
+      const at = new Date(now());
+      const { requests, truncated } = await config.accessRequests.list(at);
+      return { state: 'ok', requests: requests.map(requestRow), truncated, fetchedAt: at.toISOString() };
+    } catch (error) {
+      report(error, 'requests: list');
+      return { state: 'unavailable', reason: `Couldn't load requests: ${describeAwsError(error)} This isn't a count of zero.` };
+    }
+  }
+
+  const requestRow = (r: AccessRequest) => ({
+    id: r.id,
+    email: r.email,
+    ...(r.name !== undefined && { name: r.name }),
+    ...(r.reason !== undefined && { reason: r.reason }),
+    createdAt: r.createdAt,
+    expiresAt: r.expiresAt,
+  });
+
+  /** Authorizes and loads a pending request. */
+  async function beginRequest(action: string, input: unknown): Promise<{ who: Acting<C>; request: AccessRequest; raw: Record<string, unknown> } | Fail> {
+    if (!config.accessRequests) return fail('refused', REQUESTS_OFF, { guardrail: 'not_available' });
+    let who: Acting<C>;
+    try {
+      who = await acting('people.manage');
+    } catch (error) {
+      await logForbidden(action, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let raw: Record<string, unknown>;
+    try {
+      raw = record(input);
+      if (!isRequestId(raw.id)) throw new InputError('That request is invalid.');
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    let request: AccessRequest | null;
+    try {
+      request = await config.accessRequests.get(raw.id, new Date(now()));
+    } catch (error) {
+      return fail('unavailable', `Couldn't read the request: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    if (!request) return fail('not_found', 'That request is gone (it was deleted after 30 days).');
+    if (request.status !== 'pending') return fail('stale', request.status === 'expired' ? 'That request expired after 30 days with no answer.' : `That request was already ${request.status}.`);
+    return { who, request, raw };
+  }
+
+  async function approveRequest(input: ApproveRequestInput): Promise<ActionResult> {
+    const start = await beginRequest(ACCOUNT_AUDIT_ACTIONS.approveRequest, input);
+    if ('ok' in start) return start;
+    const { who: w, request, raw } = start;
+    let role: string, reason: string | undefined, name: string | undefined;
+    try {
+      role = typeof raw.role === 'string' && raw.role !== '' ? raw.role : MEMBER_ROLE;
+      if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
+      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+      // The name the approver wrote (the form starts from the typed one): what the requester typed is
+      // the sender's words, and the account's name shows on the People page and in the invite.
+      name = raw.name === undefined ? request.name : text(raw.name, 'Name', ADMIN_POLICY.nameMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    const result = await inviteAs(
+      w,
+      { email: request.email, role, ...(name !== undefined && { name }), ...(reason !== undefined && { reason }) },
+      { auditAction: ACCOUNT_AUDIT_ACTIONS.approveRequest, approved: { requestId: request.id } },
+    );
+    if (!result.ok && result.code === 'refused' && result.guardrail === 'exists') {
+      // Someone made the account another way meanwhile: settle the request so it leaves the queue.
+      await config.accessRequests!.settle(request.id, { status: 'approved', by: w.actor, now: new Date(now()) }).catch((error: unknown) => report(error, 'requests: settle'));
+      return fail('refused', `${request.email} already has an account, so no invite was sent. The request is closed.`, { guardrail: 'exists' });
+    }
+    if (!result.ok) return result;
+    try {
+      await config.accessRequests!.settle(request.id, { status: 'approved', by: w.actor, now: new Date(now()) });
+    } catch (error) {
+      report(error, 'requests: settle after approve');
+      return { ...result, message: `${result.message} The request still shows as pending (${error instanceof AccessRequestConflictError ? error.message : describeAwsError(error)}); decline it to clear it.` };
+    }
+    return { ...result, message: `Approved. ${result.message}` };
+  }
+
+  async function declineRequest(input: DeclineRequestInput): Promise<ActionResult> {
+    const start = await beginRequest(ACCOUNT_AUDIT_ACTIONS.declineRequest, input);
+    if ('ok' in start) return start;
+    const { who: w, request, raw } = start;
+    let note: string | undefined;
+    try {
+      note = text(raw.note, 'Note', ADMIN_POLICY.reasonMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    const sender: EmailSender | undefined = config.emailSender ?? (typeof (config.mailer as Partial<EmailSender> | undefined)?.sendEmail === 'function' ? (config.mailer as unknown as EmailSender) : undefined);
+    const tell = config.notifyOnDecline === true;
+    if (tell && !sender) return fail('refused', 'Declining sends a note (notifyOnDecline), and no email sender is configured. Nothing changed.', { guardrail: 'mailer_unavailable' });
+    const run = await runAudited(auditLog, {
+      intent: {
+        actor: w.actor,
+        action: ACCOUNT_AUDIT_ACTIONS.declineRequest,
+        // The address only: the typed name and reason stay out of the append-only log, so they can be deleted after 30 days.
+        target: { email: request.email },
+        before: { status: 'pending' },
+        after: { status: 'declined', ...(tell && { notified: true }) },
+        calls: ['DynamoDB PutItem request', ...(tell ? ['SES SendEmail'] : [])],
+        ...contextOf(w.request),
+      },
+      run: async (steps) => {
+        await steps.call('DynamoDB PutItem request', () => config.accessRequests!.settle(request.id, { status: 'declined', by: w.actor, now: new Date(now()) }));
+        if (tell && sender) {
+          try {
+            const helpEmail = config.help !== undefined ? await helpAddressOf(config.help) : '';
+            const site = { siteName: config.siteName, signInUrl: signInUrl.toString(), helpEmail, ...(config.theme !== undefined && { theme: config.theme }) };
+            await steps.call('SES SendEmail', () => sender.sendEmail({ to: [request.email], email: requestDeclinedEmail(site, { requestedAt: new Date(request.createdAt), ...(note !== undefined && { note }) }), ...(helpEmail && { replyTo: [helpEmail] }) }));
+          } catch (error) {
+            report(error, 'requests: the decline note');
+          }
+        }
+        return { value: undefined };
+      },
+    });
+    if (run.kind === 'failed' && run.error instanceof AccessRequestConflictError) return fail('stale', run.error.message);
+    return finish(run, { ok: () => (tell ? `Declined. ${request.email} was told.` : `Declined. ${request.email} wasn’t told (declining is silent on this site).`) });
+  }
+
+  const SKIP_WORDS: Readonly<Record<DeclineRequestsSkipStatus, string>> = {
+    approved: 'already approved',
+    declined: 'already declined',
+    expired: 'expired',
+    gone: 'no longer there',
+    changed: 'decided by someone else just now',
+  };
+
+  /** "2 already declined and 1 expired" (the serial comma with three or more). */
+  function skippedInWords(skipped: readonly DeclineRequestsSkip[]): string {
+    const parts = (Object.keys(SKIP_WORDS) as DeclineRequestsSkipStatus[])
+      .map((status) => ({ n: skipped.filter((s) => s.status === status).length, words: SKIP_WORDS[status] }))
+      .filter((p) => p.n > 0)
+      .map((p) => `${p.n} ${p.words}`);
+    return parts.length <= 2 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)!}`;
+  }
+
+  const leftAlone = (skipped: readonly DeclineRequestsSkip[]): string =>
+    skipped.length === 0 ? '' : ` ${skipped.length} ${skipped.length === 1 ? 'wasn’t pending, so it was' : 'weren’t pending, so they were'} left alone: ${skippedInWords(skipped)}.`;
+
+  /** 1 to DECLINE_REQUESTS_MAX well-formed request IDs, without repeats. */
+  function requestIdsOf(value: unknown): string[] {
+    if (!Array.isArray(value) || value.length === 0) throw new InputError('Choose at least one request to decline.');
+    if (value.length > DECLINE_REQUESTS_MAX) throw new InputError(`Decline at most ${DECLINE_REQUESTS_MAX} requests at a time.`);
+    if (!value.every(isRequestId)) throw new InputError('That request is invalid.');
+    return [...new Set(value)];
+  }
+
+  async function declineRequests(input: DeclineRequestsInput): Promise<DeclineRequestsResult> {
+    const action = ACCOUNT_AUDIT_ACTIONS.declineRequests;
+    const store = config.accessRequests;
+    if (!store) return fail('refused', REQUESTS_OFF, { guardrail: 'not_available' });
+    let w: Acting<C>;
+    try {
+      w = await acting('people.manage');
+    } catch (error) {
+      await logForbidden(action, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let ids: string[], reason: string | undefined;
+    try {
+      const raw = record(input);
+      ids = requestIdsOf(raw.ids);
+      reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+
+    const at = new Date(now());
+    let found: (AccessRequest | null)[];
+    try {
+      found = await Promise.all(ids.map((id) => store.get(id, at)));
+    } catch (error) {
+      return fail('unavailable', `Couldn't read the requests: ${describeAwsError(error)} Nothing was changed.`);
+    }
+    const pending: AccessRequest[] = [];
+    const skipped: DeclineRequestsSkip[] = [];
+    ids.forEach((id, i) => {
+      const r = found[i];
+      if (!r) skipped.push({ id, status: 'gone' });
+      else if (r.status === 'pending') pending.push(r);
+      else skipped.push({ id, email: r.email, status: r.status });
+    });
+    if (pending.length === 0) return { ...fail('stale', `None of those requests is pending any more: ${skippedInWords(skipped)}. Nothing changed.`), skipped };
+
+    // IDs and addresses only: what the requesters typed (names, reasons) stays out of the append-only
+    // log, so it's deleted with the requests 30 days after they're settled.
+    const listed = (rs: readonly AccessRequest[]) => rs.map((r) => ({ id: r.id, email: r.email }));
+    const run = await runAudited(
+      auditLog,
+      {
+        intent: {
+          actor: w.actor,
+          action,
+          before: { status: 'pending' },
+          after: { status: 'declined', notified: false, requests: listed(pending), ...(skipped.length > 0 && { skipped }) },
+          ...(reason !== undefined && { reason }),
+          calls: [`DynamoDB PutItem request (×${pending.length})`],
+          ...contextOf(w.request),
+        },
+        run: async (steps) => {
+          const declined: AccessRequest[] = [];
+          const left = [...skipped];
+          for (const r of pending) {
+            try {
+              await steps.call('DynamoDB PutItem request', () => store.settle(r.id, { status: 'declined', by: w.actor, now: new Date(now()) }));
+              declined.push(r);
+            } catch (error) {
+              // Decided by someone else since it was read: leave it, and say so. Anything else stops the run.
+              if (!(error instanceof AccessRequestConflictError)) throw error;
+              left.push({ id: r.id, email: r.email, status: 'changed' });
+            }
+          }
+          return {
+            value: { declined: listed(declined), skipped: left },
+            after: { status: 'declined', notified: false, requests: listed(declined), ...(left.length > 0 && { skipped: left }) },
+          };
+        },
+      },
+      config.sleep ? { sleep: config.sleep } : {},
+    );
+    const result = await finish(run, {
+      ok: ({ declined, skipped: left }) =>
+        `Declined ${declined.length} ${declined.length === 1 ? 'request' : 'requests'}. Nobody was told (declining all at once is always silent).${leftAlone(left)}`,
+      partial: (error) => `${describeAwsError(error)} Some of the requests were declined before it stopped; the Activity page shows which. Reload to see what’s left.`,
+    });
+    if (run.kind !== 'done') return result;
+    const { declined, skipped: left } = run.value;
+    if (declined.length === 0) {
+      return { ...fail('stale', `None of those requests was declined: ${skippedInWords(left)}.`, run.result ? { auditId: run.result.id } : {}), skipped: left };
+    }
+    return { ...result, declined, skipped: left };
   }
 
   // ---- resend ---------------------------------------------------------------------------------
@@ -1175,6 +1532,21 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   const targetFrom = (data: FormData) => ({ sub: field(data, F.sub), reason: field(data, F.reason) });
 
   const forms: PeopleFormActions = {
+    approveRequest: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return approveRequest({ id: field(d, 'id') ?? '', role: field(d, F.role), reason: field(d, F.reason), name: field(d, F.name) });
+    },
+    declineRequest: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return declineRequest({ id: field(d, 'id') ?? '', note: field(d, 'note') });
+    },
+    declineRequests: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return declineRequests({ ids: d.getAll('id').filter((v): v is string => typeof v === 'string'), reason: field(d, F.reason) });
+    },
     invite: (_prev, data) => {
       const d = formOf(data);
       if (!d) return badForm();
@@ -1219,6 +1591,10 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     deleteUser,
     expireStaleInvites,
     listActivity,
+    listAccessRequests,
+    approveRequest,
+    declineRequest,
+    declineRequests,
     forms: Object.freeze(forms),
   });
 }

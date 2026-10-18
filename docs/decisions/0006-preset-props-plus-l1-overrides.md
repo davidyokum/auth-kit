@@ -7,7 +7,7 @@
 Two facts about `@aws-amplify/backend` 1.25 (checked in its source):
 
 1. `defineAuth` records its caller's stack frame and fails synthesis unless the direct caller is `amplify/auth/resource.ts`. A package function that calls `defineAuth` itself would always fail.
-2. `defineAuth` has no setting for deletion protection, token lifetimes, the session lifetime, the password policy's minimum length or composition rules, passkey `FactorConfiguration`, an SES domain identity, a WAF web ACL, or tags; it turns self-registration on; it adds `ALLOW_USER_SRP_AUTH` and `ALLOW_CUSTOM_AUTH`; and it refuses passkeys combined with MFA `REQUIRED`.
+2. `defineAuth` has no setting for deletion protection, token lifetimes, the session lifetime, the password policy's minimum length or composition rules, passkey `FactorConfiguration`, an SES domain identity, a WAF web ACL, or tags; it turns self-registration on (the preset always turns it off: [0023](0023-account-creation.md)); it adds `ALLOW_USER_SRP_AUTH` and `ALLOW_CUSTOM_AUTH`; and it refuses passkeys combined with MFA `REQUIRED`.
 
 ## Decision
 

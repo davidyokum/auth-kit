@@ -1,6 +1,6 @@
 # 0002. MFA optional in the pool; the app requires TOTP of password users
 
-- **Status:** Accepted, 2026-10-17
+- **Status:** Accepted, 2026-10-17; amended 2026-10-18 (admins, below)
 - **Standard:** 03 §2 Sign-in; primer §4 "Requiring the authenticator"
 
 ## Context
@@ -21,3 +21,7 @@ The standard wants every password user to have an authenticator code. Cognito se
 - Token-based lookup also catches revoked sessions and disabled accounts within the cache window.
 - AWS documents that once someone turns on TOTP, Cognito stops offering them emailed-code sign-in. Their backstop is "Forgot password" (the authenticator is still asked), and a lost authenticator needs an admin. That's why password users are also encouraged to save a passkey.
 - Amplify's `defineAuth` rejects passkeys combined with MFA `REQUIRED`, so the admin pool sets `ON` through a CDK override ([0006](0006-preset-props-plus-l1-overrides.md)). Verify on the first sandbox deploy.
+
+## Amendment, 2026-10-18: admins (register A3)
+
+In an admin pool (`MfaConfiguration = ON`), every admin has a password and an authenticator: the password is how a new admin's first sign-in works (a one-time password; there are no emailed codes), and it stays as a second way in beside the passkey they use day to day ([0001](0001-passkey-first.md#amendment-2026-10-18-admins-keep-a-password-plus-authenticator-route-register-a3)). Nothing neutralizes it later.

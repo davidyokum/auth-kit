@@ -8,6 +8,7 @@ import {
   PASSWORD_POLICY,
   SESSION_POLICY,
 } from '../shared/policy.js';
+import { CUSTOM_MESSAGE_GATE_ENV } from './custom-message.js';
 import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions, webAclArnRegion } from './options.js';
 import { associateAuthWebAcl, createAuthWebAcl } from './waf.js';
 
@@ -51,8 +52,106 @@ export interface AppliedAuthStandard {
   userPoolTier: 'ESSENTIALS' | 'PLUS';
   tags: Record<string, string>;
   waf: AppliedWaf;
+  /** The sign-in session (and so an emailed code's lifetime), in minutes. */
+  codeLifetimeMinutes: number;
+  /** The CLOUDFRONT web ACL in front of the sign-up route (required in `open` mode), or null. */
+  siteWebAclArn: string | null;
+
   /** True only when the site configured real OAuth callback URLs (hosted-UI / federated sign-in). */
   hostedUiOAuth: boolean;
+}
+
+const SIGN_UP_ENABLED =
+  "auth-kit: Cognito's own SignUp is on for this pool (AdminCreateUserConfig.AllowAdminCreateUserOnly isn't true in the template). " +
+  "auth-kit keeps it off in every accountCreation mode (ADR 0023): sign-up is a server route that creates the account like an invite. Remove whatever turns it back on.";
+
+const NO_CUSTOM_MESSAGE_TRIGGER =
+  'auth-kit: this pool has no custom message trigger. Every pool needs it (ADR 0023): besides the code emails\' words, it refuses email changes made ' +
+  "through Cognito's public API (UpdateUserAttributes with a user's token), which would skip the site's recent-sign-in check, domain list, audit log, and notice " +
+  'to the old address. Add triggers: { customMessage } built with customMessageHandler from auth-kit/amplify/custom-message.';
+
+/** The pool's properties as they'll be deployed, read from the rendered resource when CDK allows it. */
+interface RenderedPool {
+  AdminCreateUserConfig?: { AllowAdminCreateUserOnly?: unknown };
+  LambdaConfig?: { PreSignUp?: unknown; CustomMessage?: unknown };
+}
+
+/**
+ * The pool's synthesized properties, overrides included. Reads the rendered resource
+ * (`_toCloudFormation`, which applies every override), so a later override or property set anywhere in
+ * the app is caught at synth; falls back to the typed properties if that internal ever goes away.
+ */
+function renderedPool(stack: Stack, pool: CfnUserPool): RenderedPool {
+  const render = (pool as unknown as { _toCloudFormation?: () => unknown })._toCloudFormation;
+  if (typeof render === 'function') {
+    const rendered = stack.resolve(render.call(pool)) as { Resources?: Record<string, { Properties?: RenderedPool }> };
+    return Object.values(rendered.Resources ?? {})[0]?.Properties ?? {};
+  }
+  const config = stack.resolve(pool.adminCreateUserConfig) as { allowAdminCreateUserOnly?: unknown; AllowAdminCreateUserOnly?: unknown } | undefined;
+  const lambda = stack.resolve(pool.lambdaConfig) as { preSignUp?: unknown; PreSignUp?: unknown; customMessage?: unknown; CustomMessage?: unknown } | undefined;
+  return {
+    AdminCreateUserConfig: { AllowAdminCreateUserOnly: config?.allowAdminCreateUserOnly ?? config?.AllowAdminCreateUserOnly },
+    LambdaConfig: { PreSignUp: lambda?.preSignUp ?? lambda?.PreSignUp, CustomMessage: lambda?.customMessage ?? lambda?.CustomMessage },
+  };
+}
+
+const GATE_KEY = Object.keys(CUSTOM_MESSAGE_GATE_ENV)[0]!;
+const GATE_VALUE = Object.values(CUSTOM_MESSAGE_GATE_ENV)[0]!;
+
+/** A Lambda function construct (an L2 `Function`, or Amplify's `defineFunction` one) anywhere in the app. */
+interface FunctionLike {
+  functionArn: string;
+  node: { defaultChild?: unknown; path: string };
+}
+
+function isFunctionLike(c: unknown): c is FunctionLike {
+  const candidate = c as Partial<FunctionLike> | null;
+  const child = candidate?.node?.defaultChild as { cfnResourceType?: unknown } | undefined;
+  return typeof candidate?.functionArn === 'string' && child?.cfnResourceType === 'AWS::Lambda::Function';
+}
+
+/** The function's environment variables as they'll deploy. */
+function environmentOf(fn: FunctionLike): Record<string, unknown> {
+  const cfn = fn.node.defaultChild as { _toCloudFormation?: () => unknown; environment?: unknown };
+  const stack = Stack.of(cfn as never);
+  const render = cfn._toCloudFormation;
+  if (typeof render === 'function') {
+    const rendered = stack.resolve(render.call(cfn)) as { Resources?: Record<string, { Properties?: { Environment?: { Variables?: Record<string, unknown> } } }> };
+    return Object.values(rendered.Resources ?? {})[0]?.Properties?.Environment?.Variables ?? {};
+  }
+  const env = stack.resolve(cfn.environment) as { variables?: Record<string, unknown>; Variables?: Record<string, unknown> } | undefined;
+  return env?.variables ?? env?.Variables ?? {};
+}
+
+/**
+ * Why the custom message trigger can't be trusted to refuse public-API email changes, or `[]`: its
+ * function is found in the app (the one whose ARN, resolved in the pool's stack, is the trigger's)
+ * and must carry `CUSTOM_MESSAGE_GATE_ENV`, the sign it's `customMessageHandler` or
+ * `withAuthKitCustomMessage`.
+ */
+function customMessageGateProblems(stack: Stack, pool: CfnUserPool): string[] {
+  const target = renderedPool(stack, pool).LambdaConfig?.CustomMessage;
+  if (!target) return []; // Reported by the missing-trigger check.
+  const wanted = JSON.stringify(target);
+  const fn = stack.node.root.node.findAll().find((c): c is FunctionLike & typeof c => isFunctionLike(c) && JSON.stringify(stack.resolve(c.functionArn)) === wanted);
+  if (!fn) {
+    return [
+      "auth-kit: can't find the function the custom message trigger runs in this app, so can't check it refuses public-API email changes (ADR 0023). " +
+        'Wire a function defined in this app, built with customMessageHandler or withAuthKitCustomMessage from auth-kit/amplify/custom-message.',
+    ];
+  }
+  return environmentOf(fn)[GATE_KEY] === GATE_VALUE
+    ? []
+    : [
+        `auth-kit: the custom message trigger's function (${fn.node.path}) doesn't carry ${GATE_KEY}=${GATE_VALUE}. It's a security control (it refuses email changes made through ` +
+          "Cognito's public API, ADR 0023): build it with customMessageHandler, or wrap your own wording with withAuthKitCustomMessage, and give the function " +
+          'CUSTOM_MESSAGE_GATE_ENV as its environment.',
+      ];
+}
+
+/** True when the pool's synthesized properties, overrides included, keep Cognito's own SignUp off. */
+function signUpStaysOff(stack: Stack, pool: CfnUserPool): boolean {
+  return renderedPool(stack, pool).AdminCreateUserConfig?.AllowAdminCreateUserOnly === true;
 }
 
 /** The callback URL CDK fills in when a client has OAuth on and no callback of its own. */
@@ -121,19 +220,36 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   }
 
   // ---- Identity and lifecycle -------------------------------------------------------------------
-  // Invite-only: Gen 2 leaves self-registration on unless it's switched off here. The exception is a
-  // documented preSignUp domain allowlist, checked at synth.
-  cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', o.selfSignUp === null);
-  if (o.selfSignUp) {
+  // Cognito's own SignUp is always off (ADR 0023). Gen 2 leaves it on unless it's switched off here.
+  // Every account is made on the server with AdminCreateUser: an admin's invite, or auth-kit's
+  // sign-up route on a site whose accountCreation mode allows it. The app client ID is public, so a
+  // SignUp left on would let anyone skip the domain list, the rate limits, and the bot check, and
+  // would answer UsernameExistsException for an address that already has an account.
+  cfnUserPool.addPropertyOverride('AdminCreateUserConfig.AllowAdminCreateUserOnly', true);
+  cfnUserPool.node.addValidation({
+    validate: () => (signUpStaysOff(stack, cfnUserPool) ? [] : [SIGN_UP_ENABLED]),
+  });
+  // The custom message trigger is a security control on every pool, not only wording: it refuses an
+  // email change made through Cognito's public API (ADR 0023, H1). Synthesis fails without it.
+  cfnUserPool.node.addValidation({
+    validate: () => (renderedPool(stack, cfnUserPool).LambdaConfig?.CustomMessage ? customMessageGateProblems(stack, cfnUserPool) : [NO_CUSTOM_MESSAGE_TRIGGER]),
+  });
+  if (o.accountCreation.mode === 'domains') {
     cfnUserPool.node.addValidation({
       validate: () => {
-        const lambdaConfig = stack.resolve(cfnUserPool.lambdaConfig) as { PreSignUp?: unknown; preSignUp?: unknown } | undefined;
-        return lambdaConfig?.PreSignUp || lambdaConfig?.preSignUp
+        return renderedPool(stack, cfnUserPool).LambdaConfig?.PreSignUp
           ? []
-          : ['auth-kit: selfSignUp needs the preSignUp allowlist trigger (triggers: { preSignUp }).'];
+          : [
+              "auth-kit: accountCreation mode 'domains' needs the preSignUp trigger, which re-checks the domain list on accounts the sign-up route creates " +
+                '(triggers: { preSignUp }, built with preSignUpForAccountCreation from auth-kit/amplify/pre-sign-up).',
+            ];
       },
     });
   }
+
+  // An email change takes effect only once the new address is verified; until then the old address
+  // keeps working (D4; members change their own address on sign-up sites).
+  cfnUserPool.userAttributeUpdateSettings = { attributesRequireVerificationBeforeUpdate: ['email'] };
 
   const deletionProtection = isSandbox && !o.deletionProtectionInSandbox ? 'INACTIVE' : 'ACTIVE';
   cfnUserPool.deletionProtection = deletionProtection;
@@ -191,7 +307,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
       arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
     }),
     from: formatSender(o.email.fromName, o.email.fromAddress),
-    ...(o.email.replyTo !== undefined && { replyToEmailAddress: o.email.replyTo }),
+    replyToEmailAddress: o.email.replyTo,
     ...(o.email.configurationSet !== undefined && { configurationSet: o.email.configurationSet }),
   };
 
@@ -210,7 +326,8 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPoolClient.idTokenValidity = SESSION_POLICY.idTokenMinutes;
   cfnUserPoolClient.refreshTokenValidity = o.refreshTokenMinutes;
   cfnUserPoolClient.tokenValidityUnits = { accessToken: 'minutes', idToken: 'minutes', refreshToken: 'minutes' };
-  cfnUserPoolClient.authSessionValidity = SESSION_POLICY.authSessionMinutes;
+  // The sign-in session is also an emailed code's lifetime (register A7): one setting, also passed to the screens.
+  cfnUserPoolClient.authSessionValidity = o.codeLifetimeMinutes;
 
   // Sign-in happens in the app (USER_AUTH), not through the hosted UI's OAuth redirect. Amplify still
   // turns the authorization-code flow on, and CDK fills in its placeholder callback
@@ -287,5 +404,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     tags,
     waf,
     hostedUiOAuth,
+    codeLifetimeMinutes: o.codeLifetimeMinutes,
+    siteWebAclArn: o.siteWebAclArn,
   };
 }

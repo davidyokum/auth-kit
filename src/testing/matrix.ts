@@ -51,6 +51,22 @@ import { type AppRouteInput, type CompiledRoute, compileAppRoute, resolveAppRout
 export const REQUIRED_PERSONAS = ['anonymous', 'member', 'admin'] as const;
 /** The persona used for the second-member check on record routes. */
 export const SECOND_MEMBER = 'otherMember';
+/**
+ * A freshly signed-up Member (register D4, ADR 0023): an account the sign-up route made a moment ago,
+ * signed in by its first emailed code, with no role, no item access, and no passkey or password yet.
+ * On a sign-up site (`signUpSite: true`) it runs against every route, and it may never get further
+ * than `member`: no check may treat "signed in" as "trusted".
+ */
+export const NEW_MEMBER = 'newMember';
+/**
+ * An account with only emailed codes (no passkey or password yet: closed before "Choose how you'll
+ * sign in next time"). The server refuses it on every route that needs a signed-in person (403
+ * `first_credential_required`, register A1), so unless a row says otherwise (the chooser page), it's
+ * expected to get what an anonymous visitor gets where that's a success or a redirect, and 403
+ * everywhere else. Required on every site whose server enforces the first credential (the default,
+ * `requireFirstCredential`): invitees start this way on invite-only sites too.
+ */
+export const CODE_ONLY_MEMBER = 'codeOnlyMember';
 
 export type MatrixPass = 'with-proxy' | 'without-proxy';
 export const MATRIX_PASSES: readonly MatrixPass[] = ['with-proxy', 'without-proxy'];
@@ -117,6 +133,25 @@ export interface AuthMatrixOptions {
   baseUrl?: string;
   /** Placeholder values shared by all routes (the member's own record IDs). */
   params?: Record<string, string>;
+  /**
+   * The site lets people create their own account (`accountCreation` mode `domains` or `open`): the
+   * `newMember` persona is required, and every route runs as it too, expecting what a member gets
+   * unless the row says otherwise; a row that lets it succeed where a member can't is refused.
+   */
+  signUpSite?: boolean;
+  /**
+   * The server enforces the first credential (`createServerAuth`'s `requireFirstCredential`, on by
+   * default): the `codeOnlyMember` persona is required and runs against every route. Pass `false`
+   * only when the server turns the rule off.
+   */
+  requireFirstCredential?: boolean;
+}
+
+/** What an emailed-code-only account gets on a route by default: an anonymous visitor's success or redirect, else 403. */
+function codeOnlyDefault(expect: Expectations): number | readonly number[] | undefined {
+  const anonymous = expect.anonymous;
+  if (anonymous === undefined) return undefined;
+  return asList(anonymous).some((s) => s < 400) ? anonymous : 403;
 }
 
 export interface MatrixCase {
@@ -164,8 +199,25 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
   const problems: string[] = [];
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
-  for (const p of [...REQUIRED_PERSONAS, ...(needsSecond ? [SECOND_MEMBER] : [])]) {
-    if (!options.personas[p]) problems.push(`persona "${p}" is required but not defined.`);
+  const newMember = options.signUpSite === true || options.personas[NEW_MEMBER] !== undefined;
+  const firstCredentialEnforced = options.requireFirstCredential !== false;
+  const codeOnly = options.signUpSite === true || firstCredentialEnforced || options.personas[CODE_ONLY_MEMBER] !== undefined;
+  const required = [
+    ...REQUIRED_PERSONAS,
+    ...(needsSecond ? [SECOND_MEMBER] : []),
+    ...(options.signUpSite === true ? [NEW_MEMBER] : []),
+    ...(options.signUpSite === true || firstCredentialEnforced ? [CODE_ONLY_MEMBER] : []),
+  ];
+  for (const p of required) {
+    if (!options.personas[p]) {
+      problems.push(
+        p === NEW_MEMBER
+          ? `persona "${NEW_MEMBER}" is required on a sign-up site: a freshly signed-up Member (FRESH_SIGN_UP_MEMBER) must run against every route.`
+          : p === CODE_ONLY_MEMBER
+            ? `persona "${CODE_ONLY_MEMBER}" is required: the server refuses an account with only emailed codes everywhere but the chooser (requireFirstCredential), and invitees start that way, so EMAILED_CODE_ONLY_MEMBER must run against every route (pass requireFirstCredential: false only if the server turns the rule off).`
+            : `persona "${p}" is required but not defined.`,
+      );
+    }
   }
 
   let appRoutes: CompiledRoute[] = [];
@@ -205,7 +257,28 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
         problems.push(`${label}: expectWithoutProxy names "${persona}", which has no expectation in expect.`);
       }
     }
-    const statuses = Object.values(route.expect).flatMap((v) => [...asList(v)]);
+    // A freshly signed-up Member is held to a member's expectations, row by row, and never beyond them.
+    // On a route that takes an item's ID it's someone else's item, so it's held to the second member's.
+    const peer = isRecordRoute(route) && route.expect[SECOND_MEMBER] !== undefined ? SECOND_MEMBER : 'member';
+    let expect: Expectations = newMember && route.expect[NEW_MEMBER] === undefined && route.expect[peer] !== undefined ? { ...route.expect, [NEW_MEMBER]: route.expect[peer] } : route.expect;
+    if (newMember && route.expect[NEW_MEMBER] !== undefined) {
+      const memberSucceeds = asList(route.expect[peer]).some((s) => s < 400);
+      const newMemberSucceeds = asList(route.expect[NEW_MEMBER]).some((s) => s < 400);
+      if (newMemberSucceeds && !memberSucceeds) {
+        problems.push(`${label}: expects "${NEW_MEMBER}" to succeed where "${peer}" can't. A freshly signed-up account gets no more than a member: nothing may treat "signed in" as trusted.`);
+      }
+    }
+    // An account with only emailed codes is refused wherever a signed-in person is needed (M2).
+    if (codeOnly) {
+      if (route.expect[CODE_ONLY_MEMBER] === undefined) {
+        const fallback = route.exists === false ? 404 : codeOnlyDefault(route.expect);
+        if (fallback !== undefined) expect = { ...expect, [CODE_ONLY_MEMBER]: fallback };
+      } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s >= 200 && s < 300) && !asList(route.expect.member).some((s) => s < 400)) {
+        // A redirect (to the chooser) isn't getting in; a 2xx where a member gets nothing is.
+        problems.push(`${label}: expects "${CODE_ONLY_MEMBER}" to succeed where "member" can't. An account with only emailed codes gets no more than a member.`);
+      }
+    }
+    const statuses = Object.values(expect).flatMap((v) => [...asList(v)]);
     if (route.exists === false) {
       if (statuses.some((s) => s !== 404)) problems.push(`${label}: exists: false rows must expect 404 for every persona.`);
     } else if (!statuses.some((s) => s < 400)) {
@@ -236,14 +309,17 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
       }
     }
 
-    for (const [persona, expected] of Object.entries(route.expect)) {
+    for (const [persona, expected] of Object.entries(expect)) {
       if (expected === undefined) continue;
       if (!options.personas[persona]) {
         problems.push(`${label}: expectation for unknown persona "${persona}".`);
         continue;
       }
       for (const pass of MATRIX_PASSES) {
-        const value = pass === 'without-proxy' ? (route.expectWithoutProxy?.[persona] ?? expected) : expected;
+        const value =
+          pass === 'without-proxy'
+            ? (route.expectWithoutProxy?.[persona] ?? (persona === NEW_MEMBER && route.expect[NEW_MEMBER] === undefined ? route.expectWithoutProxy?.[peer] : undefined) ?? expected)
+            : expected;
         cases.push({
           routeIndex,
           route: label,

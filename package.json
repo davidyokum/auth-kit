@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.7-alpha.1",
+  "version": "0.1.8-alpha",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -26,11 +26,14 @@
   },
   "files": [
     "dist",
-    "docs",
+    "docs/decisions",
+    "docs/backdrops",
+    "docs/localhost.md",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "exports": {
     "./amplify": {
@@ -40,6 +43,10 @@
     "./amplify/pre-sign-up": {
       "types": "./dist/amplify/pre-sign-up.d.ts",
       "import": "./dist/amplify/pre-sign-up.js"
+    },
+    "./amplify/custom-message": {
+      "types": "./dist/amplify/custom-message.d.ts",
+      "import": "./dist/amplify/custom-message.js"
     },
     "./server": {
       "types": "./dist/server/index.d.ts",
@@ -72,6 +79,10 @@
     "./admin/cdk": {
       "types": "./dist/admin/cdk.d.ts",
       "import": "./dist/admin/cdk.js"
+    },
+    "./accounts": {
+      "types": "./dist/accounts/index.d.ts",
+      "import": "./dist/accounts/index.js"
     },
     "./resources": {
       "types": "./dist/resources/index.d.ts",
@@ -106,6 +117,11 @@
     "./backdrops/picker": {
       "types": "./dist/backdrops/picker.d.ts",
       "import": "./dist/backdrops/picker.js"
+    },
+    "./themes": {
+      "types": "./dist/themes/index.d.ts",
+      "import": "./dist/themes/index.js",
+      "default": "./dist/themes/index.js"
     },
     "./package.json": "./package.json"
   },

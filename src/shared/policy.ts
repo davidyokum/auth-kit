@@ -368,8 +368,86 @@ export const PASSWORD_POLICY = {
   temporaryPasswordValidityDays: 7,
 } as const;
 
+/**
+ * How long an emailed code works (register A7, Proposed: 3 or 10 minutes). It's Cognito's sign-in
+ * session (`AuthSessionValidity`, 3 to 15 minutes), so one setting drives the pool and every screen and
+ * email that mentions it: pass the same `codeLifetimeMinutes` to the preset, `SignIn`, `SignUp`, and
+ * the custom message trigger.
+ */
+export const CODE_LIFETIME_POLICY = {
+  defaultMinutes: SESSION_POLICY.authSessionMinutes,
+  minMinutes: 3,
+  maxMinutes: 15,
+} as const;
+
+/** The code lifetime, checked: a whole number of minutes from 3 to 15 (Cognito's range). Throws otherwise. */
+export function codeLifetimeMinutes(value: number | undefined, label = 'codeLifetimeMinutes'): number {
+  const minutes = value ?? CODE_LIFETIME_POLICY.defaultMinutes;
+  if (!Number.isInteger(minutes) || minutes < CODE_LIFETIME_POLICY.minMinutes || minutes > CODE_LIFETIME_POLICY.maxMinutes) {
+    throw new Error(`auth-kit: ${label} must be a whole number of minutes from ${CODE_LIFETIME_POLICY.minMinutes} to ${CODE_LIFETIME_POLICY.maxMinutes} (Cognito's sign-in session range).`);
+  }
+  return minutes;
+}
+
 /** An invite with no sign-in after this many days is disabled. */
 export const INVITE_EXPIRY_DAYS = 7;
+
+/** One fixed-window rate limit: at most `limit` attempts per `windowMinutes`. */
+export interface RateLimitRule {
+  limit: number;
+  windowMinutes: number;
+}
+
+/**
+ * Account creation (register D1–D4, ADR 0023): the sign-up and request routes, the unverified-account
+ * sweep, and the request queue.
+ */
+export const ACCOUNT_CREATION_POLICY = {
+  /** A sign-up account whose address is never verified is deleted after this long (there's nothing to keep). */
+  unverifiedAccountHours: 24,
+  /** Accounts the unverified sweep checks a run, a page at a time (never the whole pool in memory). */
+  sweepMaxAccounts: 100_000,
+  /** Deletions the unverified sweep makes a run; past it, the rest wait an hour (the site-wide sign-up limit keeps this far off). */
+  sweepMaxDeletesPerRun: 1_000,
+  /** A request nobody answers expires after this many days. */
+  requestExpiryDays: 30,
+  /** A settled request (approved, declined, or expired) is deleted this many days later: the typed name and reason go with it. */
+  requestRetentionDays: 30,
+  /**
+   * Per-address, per-IP, and site-wide limits on each route. The WAF rules in front of them are the
+   * first line. Addresses are counted by the mailbox they reach (`rateLimitAddress`: no `+tag`, Gmail
+   * without dots), so `victim+1@` and `victim+2@` share one limit.
+   */
+  rateLimits: {
+    signUpPerAddress: { limit: 5, windowMinutes: 60 },
+    signUpPerIp: { limit: 30, windowMinutes: 60 },
+    /**
+     * The site-wide breaker: past this many sign-up attempts an hour, every address gets the same "try
+     * again later" until the window turns. It bounds what an anonymous sender can cost (accounts, audit
+     * rows, code emails) when addresses and IPs are free; the price is that a flood pauses real sign-ups too.
+     */
+    signUpSite: { limit: 300, windowMinutes: 60 },
+    requestPerAddress: { limit: 3, windowMinutes: 24 * 60 },
+    requestPerIp: { limit: 20, windowMinutes: 60 },
+    /**
+     * The queue cap: new requests a day, site-wide. Requests expire after 30 days, so the pending queue
+     * never holds more than 30 times this; past it, every address gets the same "try again later".
+     */
+    requestSite: { limit: 100, windowMinutes: 24 * 60 },
+    emailChangePerAccount: { limit: 5, windowMinutes: 60 },
+    /** Codes sent to one new address an hour, whichever accounts ask (one inbox can't be flooded by many accounts). */
+    emailChangePerTarget: { limit: 5, windowMinutes: 60 },
+  } satisfies Record<string, RateLimitRule>,
+  /**
+   * Every answer from the sign-up and request routes takes at least this long, so a new address and
+   * one with an account (an email instead of an account) don't differ by how fast they come back.
+   */
+  minimumResponseMs: 800,
+  nameMaxLength: 100,
+  reasonMaxLength: 500,
+  /** Pending requests the People page reads (one Query page); more says so. */
+  maxListedRequests: 500,
+} as const;
 
 /** WAF rate limits (requests per IP per evaluation window). */
 export const WAF_POLICY = {

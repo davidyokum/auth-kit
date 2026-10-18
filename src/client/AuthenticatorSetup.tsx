@@ -1,9 +1,11 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { type AuthenticatorEnrollment, enrollAuthenticator, fetchAccountEmail } from './api.js';
+import { ERRORS, FIRST_VISIT, SHARED, SIGN_IN, STATUS } from './copy.js';
+import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, normalizeCode } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import { buildOtpauthUri, formatSetupKey } from './totp.js';
-import { Actions, Button, Field, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
+import { Actions, Button, ErrorSummary, Field, Heading, type HeadingLevel, StatusRegion, type StyleProps, Text, slot, useFeedback } from './ui.js';
 
 export interface AuthenticatorSetupProps extends StyleProps {
   /** The name shown in the authenticator app, usually the site's name. */
@@ -20,9 +22,12 @@ export interface AuthenticatorSetupProps extends StyleProps {
   /** Shows a cancel button. Leave it out where setup is required. */
   onCancel?: () => void;
   cancelLabel?: string;
+  /** Default "Add an authenticator app". */
   heading?: ReactNode;
-  /** A sentence under the heading saying why this is needed. */
+  /** The line under the heading. Default: Card Studio's (with a QR code) or the setup-key wording (without one). */
   intro?: ReactNode;
+  /** The button. Default "Continue". */
+  submitLabel?: string;
   headingLevel?: HeadingLevel;
   /**
    * Renders a QR code for the `otpauth://` link (auth-kit ships none, to stay dependency-free):
@@ -34,14 +39,15 @@ export interface AuthenticatorSetupProps extends StyleProps {
 }
 
 /**
- * Adds an authenticator (TOTP): a setup link and key (and an optional QR code), then one code to
- * confirm. Used on its own (My account, the enrollment gate, the setup page) and inside sign-in.
+ * "Add an authenticator app" (Card Studio v4): a QR code when the site renders one, the setup key as
+ * text with Copy (WCAG 3.3.8), a same-device setup link, then one 6-digit code. Used inside sign-in,
+ * by the enrollment gate, and under My account.
  */
 export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
   const { classNames, issuer, enrollment, deviceName } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
-  const errorId = useId();
+  const uid = useId();
   const fb = useFeedback();
   const [account, setAccount] = useState(props.accountName);
   const [started, setStarted] = useState<AuthenticatorEnrollment | null>(null);
@@ -101,7 +107,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
 
   function retry() {
     setLoadFailed(false);
-    set({ error: null, status: 'Preparing your setup key…' });
+    set({ error: null, status: STATUS.preparingSetupKey });
     setAttempt((n) => n + 1);
   }
 
@@ -109,12 +115,12 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     if (!secret) return;
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
     if (!clipboard) {
-      set({ error: "Couldn't copy here. Select the key and copy it instead." });
+      set({ error: FIRST_VISIT.copyFailed });
       return;
     }
     clipboard.writeText(secret.replace(/\s/g, '')).then(
-      () => set({ status: 'Setup key copied.', error: null }),
-      () => set({ error: "Couldn't copy here. Select the key and copy it instead." }),
+      () => set({ status: FIRST_VISIT.copied, error: null }),
+      () => set({ error: FIRST_VISIT.copyFailed }),
     );
   }
 
@@ -123,13 +129,13 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     if (!verify || fb.busy) return;
     const normalized = normalizeCode(code);
     if (!/^\d{6}$/.test(normalized)) {
-      set({ error: 'Enter the 6-digit code from your authenticator.', field: 'code', status: null });
+      set({ error: ERRORS.totpTooShort, field: 'code', status: null });
       codeRef.current?.focus();
       return;
     }
-    const result = await fb.run(() => verify(normalized), { context: 'authenticator-setup', busyStatus: 'Checking the code…' });
+    const result = await fb.run(() => verify(normalized), { context: 'authenticator-setup', busyStatus: STATUS.checkingCode });
     if (result.ok) {
-      set({ status: 'Your authenticator is on.' });
+      set({ status: STATUS.authenticatorOn });
       props.onDone?.();
     } else {
       setCode('');
@@ -138,61 +144,67 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     }
   }
 
+  const qr = props.renderQrCode && uri ? props.renderQrCode(uri) : null;
+  const codeId = `${uid}-code`;
   return (
     <div ref={rootRef} data-auth-kit="authenticator-setup" {...slot(classNames, 'root', props.className)}>
+      <ErrorSummary error={fb.error} fieldId={fb.field === 'code' ? codeId : undefined} classNames={classNames} />
       <Heading level={props.headingLevel ?? 2} classNames={classNames}>
-        {props.heading ?? 'Set up your authenticator'}
+        {props.heading ?? FIRST_VISIT.addTotpHeading}
       </Heading>
-      {props.intro ? <Text classNames={classNames}>{props.intro}</Text> : null}
-      <LiveRegions classNames={classNames} errorId={errorId} error={fb.error} status={fb.status ?? (!secret && !loadFailed ? 'Preparing your setup key…' : null)} />
+      <Text classNames={classNames}>{props.intro ?? (props.renderQrCode ? FIRST_VISIT.addTotpSub : FIRST_VISIT.addTotpSubNoQr)}</Text>
+      <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? STATUS.preparingSetupKey : null)} />
       {loadFailed ? (
         <Actions classNames={classNames}>
           <Button classNames={classNames} onClick={retry}>
-            Try again
+            {SIGN_IN.tryAgain}
           </Button>
           {props.onCancel ? (
             <Button variant="link" classNames={classNames} onClick={props.onCancel}>
-              {props.cancelLabel ?? 'Cancel'}
+              {props.cancelLabel ?? SHARED.cancel}
             </Button>
           ) : null}
         </Actions>
       ) : null}
       {secret && uri ? (
         <form noValidate onSubmit={(e) => void submit(e)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
-          <ol {...slot(classNames, 'list')}>
-            <li {...slot(classNames, 'listItem')}>
-              Add {issuer} to your authenticator app or password manager.{' '}
-              <a href={uri} {...slot(classNames, 'link')}>
-                Open the setup link
-              </a>
-              {props.renderQrCode ? <> or scan this code: {props.renderQrCode(uri)}</> : null}
-              {', or enter this setup key: '}
-              <code {...slot(classNames, 'code')}>{formatSetupKey(secret)}</code>{' '}
-              <Button variant="secondary" classNames={classNames} onClick={copy}>
-                Copy setup key
-              </Button>
-            </li>
-            <li {...slot(classNames, 'listItem')}>Enter the 6-digit code it shows.</li>
-          </ol>
+          {qr ? <div {...slot(classNames, 'content')}>{qr}</div> : null}
+          {qr ? <Text classNames={classNames}>{FIRST_VISIT.cantScan}</Text> : null}
+          <p {...slot(classNames, 'text')}>
+            <code aria-label={FIRST_VISIT.setupKeyLabel} {...slot(classNames, 'code')}>
+              {formatSetupKey(secret)}
+            </code>{' '}
+            <Button variant="secondary" classNames={classNames} onClick={copy}>
+              <Icon name="copy" />
+              {FIRST_VISIT.copy}
+              <span data-auth-kit-sr="">{SHARED.setupKeySr}</span>
+            </Button>
+          </p>
+          <p {...slot(classNames, 'small')}>
+            <a href={uri} {...slot(classNames, 'link')}>
+              {FIRST_VISIT.openSetupLink}
+            </a>
+          </p>
           <Field
-            label="6-digit code"
+            id={codeId}
+            label={SIGN_IN.totpLabel}
             name="one-time-code"
             inputMode="numeric"
             autoComplete={SIGN_IN_AUTOCOMPLETE.oneTimeCode}
             value={code}
             onChange={(e) => setCode(e.target.value)}
             invalid={fb.field === 'code'}
-            errorId={errorId}
+            error={fb.field === 'code' ? fb.error : null}
             inputRef={codeRef}
             classNames={classNames}
           />
           <Actions classNames={classNames}>
             <Button type="submit" disabled={fb.busy} classNames={classNames}>
-              {enrollment ? 'Continue' : 'Turn on authenticator'}
+              {props.submitLabel ?? SIGN_IN.continue}
             </Button>
             {props.onCancel ? (
               <Button variant="link" classNames={classNames} onClick={props.onCancel}>
-                {props.cancelLabel ?? 'Cancel'}
+                {props.cancelLabel ?? SHARED.cancel}
               </Button>
             ) : null}
           </Actions>

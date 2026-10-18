@@ -1,5 +1,9 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { type RenderedEmail, escapeHtml, inviteEmail } from '../shared/emails.js';
 import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
+import type { AuthTheme, ThemeFamily } from '../themes/index.js';
+
+export type { RenderedEmail } from '../shared/emails.js';
 
 export interface InviteEmail {
   email: string;
@@ -13,6 +17,16 @@ export interface InviteEmail {
    * app's words, and who invited them. Absent for the People page's invite.
    */
   item?: { noun: string; name?: string; role: ResourceRole; invitedBy?: string };
+  /** The site's family or theme (the email's colors and footer identity line). Default personal. */
+  theme?: AuthTheme | ThemeFamily;
+  /** The help address in effect: the footer's "Help:" line. */
+  helpEmail?: string;
+  /** Who sent it: the email names them and replies go to them (REPORT §5.2a). */
+  invitedBy?: { name?: string; email?: string };
+  /** The role given, as screens label it. Default "Member". */
+  roleLabel?: string;
+  /** An approved access request (REPORT §5.2j): the inviter is the approver. */
+  approved?: boolean;
 }
 
 /** Sends the branded invite email (Cognito's own invite is suppressed in `emailed-code` mode). */
@@ -20,50 +34,30 @@ export interface InviteMailer {
   sendInvite(input: InviteEmail): Promise<void>;
 }
 
-export interface RenderedEmail {
-  subject: string;
-  text: string;
-  html: string;
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-}
-
 function longDate(date: Date): string {
   return new Intl.DateTimeFormat('en-US', { dateStyle: 'long', timeZone: 'UTC' }).format(date);
 }
 
 /**
- * The default invite email: where to sign in, that a code is coming, and when the invite expires.
- * It never contains a password or a code, so a forwarded or leaked invite email gives nothing away.
+ * The invite email (Card Studio's `mailHTML('invite')`, REPORT §5.2a; the approved request, §5.2j):
+ * who invited them and with what role, three steps to accept, and the expiry as a clock time. It
+ * never contains a password or a code, so a forwarded or leaked invite gives nothing away.
  */
 export function renderInviteEmail(input: InviteEmail): RenderedEmail {
-  const hello = input.name ? `Hi ${input.name},` : 'Hello,';
-  const expires = longDate(input.expiresAt);
-  const subject = `You're invited to ${input.siteName}`;
   const item = input.item;
-  const what = item ? `${item.name ? `the ${item.noun} “${item.name}”` : `a ${item.noun}`} as ${RESOURCE_ROLE_LABEL[item.role]}` : undefined;
-  const invited = item
-    ? `${item.invitedBy ?? 'Someone'} invited you to ${input.siteName}, with access to ${what}.`
-    : `You've been invited to ${input.siteName}.`;
-  const text = [
-    hello,
-    '',
-    invited,
-    '',
-    `Sign in at ${input.signInUrl} with this email address. We'll email you a one-time code; then save a passkey so next time is one tap.`,
-    '',
-    `This invite expires on ${expires} (UTC). If you weren't expecting it, you can ignore this email.`,
-  ].join('\n');
-  const url = escapeHtml(input.signInUrl);
-  const html = [
-    `<p>${escapeHtml(hello)}</p>`,
-    item ? `<p>${escapeHtml(invited)}</p>` : `<p>You've been invited to <strong>${escapeHtml(input.siteName)}</strong>.</p>`,
-    `<p><a href="${url}">Sign in</a> with this email address. We'll email you a one-time code; then save a passkey so next time is one tap.</p>`,
-    `<p>This invite expires on ${escapeHtml(expires)} (UTC). If you weren't expecting it, you can ignore this email.</p>`,
-  ].join('\n');
-  return { subject, text, html };
+  return inviteEmail(
+    { siteName: input.siteName, signInUrl: input.signInUrl, helpEmail: input.helpEmail ?? '', ...(input.theme !== undefined && { theme: input.theme }) },
+    {
+      email: input.email,
+      ...(input.name !== undefined && { name: input.name }),
+      expiresAt: input.expiresAt,
+      ...(item
+        ? { item: { noun: item.noun, ...(item.name !== undefined && { name: item.name }), roleLabel: RESOURCE_ROLE_LABEL[item.role] }, invitedBy: { ...(item.invitedBy !== undefined && { name: item.invitedBy }), ...input.invitedBy } }
+        : input.invitedBy !== undefined && { invitedBy: input.invitedBy }),
+      ...(input.roleLabel !== undefined && { roleLabel: input.roleLabel }),
+      ...(input.approved === true && { approved: true }),
+    },
+  );
 }
 
 /** A Super admin grant (only the owner grants it): who was granted, by whom, and who's told. */
@@ -100,6 +94,44 @@ export interface OwnerAlertNotifier {
   superadminGranted(alert: SuperadminGrantAlert): Promise<void>;
   /** Ownership moved: tell the previous and the new owner. */
   ownershipTransferred(alert: OwnershipTransferAlert): Promise<void>;
+  /** A Super admin changed the sign-in help address (ADR 0024): tell the owner. Optional: the setting is refused without it. */
+  signInHelpChanged?(alert: SignInHelpChangedAlert): Promise<void>;
+}
+
+/** The help address people are sent to changed (or went back to the site's configured one). */
+export interface SignInHelpChangedAlert {
+  siteName: string;
+  owners: readonly { sub: string; email: string; name?: string }[];
+  /** Every enabled Super admin (besides the owners), told too: a peer sees a change that isn't theirs. */
+  superAdmins?: readonly { sub: string; email: string; name?: string }[];
+  changedBy: { sub: string; email?: string };
+  /** The address in effect before, and after. */
+  from: string;
+  to: string;
+  /** True when the override was removed (back to the configured address). */
+  reverted: boolean;
+  reason: string;
+  at: Date;
+  context?: { ip?: string; userAgent?: string; requestId?: string };
+}
+
+/** The owner's alert: who changed where help requests go, from what to what, and why. */
+export function renderSignInHelpChangedEmail(alert: SignInHelpChangedAlert): RenderedEmail {
+  const who = alert.changedBy.email ?? alert.changedBy.sub;
+  return rendered(`${alert.siteName}: the sign-in help address changed`, [
+    alert.reverted
+      ? `${who} set the sign-in help address for ${alert.siteName} back to the site's configured address, ${alert.to} (it was ${alert.from}).`
+      : `${who} changed the sign-in help address for ${alert.siteName} from ${alert.from} to ${alert.to}.`,
+    '',
+    `When: ${when(alert.at)}`,
+    `Reason given: ${alert.reason}`,
+    ...contextLines(alert.context),
+    '',
+    'The help screens and auth emails now tell people to write to that address about their account. Someone who controls it can be asked to reset authenticators and move accounts to new addresses.',
+    `If you didn't expect it, sign in and change it back under Settings, then check the Activity page.`,
+    '',
+    `Sent to the site's owner${(alert.superAdmins?.length ?? 0) > 0 ? ' and every Super admin' : ''}.`,
+  ]);
 }
 
 function when(at: Date): string {
@@ -282,6 +314,13 @@ export interface SesInviteMailerOptions {
   renderOwnerInviteWarning?: (warning: OwnerInviteWarning) => RenderedEmail;
   /** Your own alert for a Manager's invite to one item. Default `renderResourceInviteAlertEmail`. */
   renderResourceInvite?: (alert: ResourceInviteAlert) => RenderedEmail;
+  /** Your own alert for a changed sign-in help address. Default `renderSignInHelpChangedEmail`. */
+  renderSignInHelpChanged?: (alert: SignInHelpChangedAlert) => RenderedEmail;
+}
+
+/** Sends an already-rendered email (the account-creation and self-service emails). Throw to report a failure. */
+export interface EmailSender {
+  sendEmail(message: { to: readonly string[]; email: RenderedEmail; replyTo?: readonly string[] }): Promise<void>;
 }
 
 /**
@@ -294,7 +333,7 @@ export interface SesInviteMailerOptions {
  */
 export function createSesInviteMailer(
   options: SesInviteMailerOptions,
-): InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier & ResourceInviteNotifier {
+): InviteMailer & Required<OwnerAlertNotifier> & OwnerInviteWarningNotifier & ResourceInviteNotifier & EmailSender {
   if (!options.from) throw new Error('auth-kit: createSesInviteMailer needs a from address.');
   let client = options.client;
   const ses = (): SESv2Client => (client ??= new SESv2Client(options.region ? { region: options.region } : {}));
@@ -303,12 +342,15 @@ export function createSesInviteMailer(
   const renderTransfer = options.renderOwnershipTransfer ?? renderOwnershipTransferEmail;
   const renderWarning = options.renderOwnerInviteWarning ?? renderOwnerInviteWarningEmail;
   const renderResourceInvite = options.renderResourceInvite ?? renderResourceInviteAlertEmail;
-  const send = async (to: string[], email: RenderedEmail) => {
+  const renderHelpChanged = options.renderSignInHelpChanged ?? renderSignInHelpChangedEmail;
+  const send = async (to: readonly string[], email: RenderedEmail, replyTo?: readonly string[]) => {
+    // An email's own Reply-To (an invite: the inviter) wins, then the caller's (the help address), then the mailer's.
+    const reply = email.replyTo ?? replyTo ?? options.replyTo;
     await ses().send(
       new SendEmailCommand({
         FromEmailAddress: options.from,
-        Destination: { ToAddresses: to },
-        ...(options.replyTo !== undefined && { ReplyToAddresses: [...options.replyTo] }),
+        Destination: { ToAddresses: [...to] },
+        ...(reply !== undefined && reply.length > 0 && { ReplyToAddresses: [...reply] }),
         ...(options.configurationSet !== undefined && { ConfigurationSetName: options.configurationSet }),
         Content: {
           Simple: {
@@ -334,6 +376,17 @@ export function createSesInviteMailer(
     async ownerInviteUnused(warning) {
       if (!warning.to.email) throw new Error('auth-kit: the owner warning has no address to go to.');
       await send([warning.to.email], renderWarning(warning));
+    },
+    async signInHelpChanged(alert) {
+      const owners = alert.owners.map((o) => o.email).filter(Boolean);
+      if (owners.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
+      const to = [...new Set([...owners, ...(alert.superAdmins ?? []).map((s) => s.email).filter(Boolean)])];
+      await send(to, renderHelpChanged(alert));
+    },
+    async sendEmail(message) {
+      const to = [...new Set(message.to.filter(Boolean))];
+      if (to.length === 0) throw new Error('auth-kit: an email needs at least one recipient.');
+      await send(to, message.email, message.replyTo);
     },
     async resourceInviteSent(alert) {
       const to = [...new Set(alert.recipients.map((r) => r.email).filter(Boolean))];

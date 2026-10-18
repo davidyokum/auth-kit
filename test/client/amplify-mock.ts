@@ -13,7 +13,7 @@ type AnyMock = Mock<(...args: any[]) => any>;
 export const auth: Record<
   | 'signIn' | 'confirmSignIn' | 'signOut' | 'getCurrentUser' | 'fetchAuthSession' | 'resetPassword' | 'confirmResetPassword'
   | 'associateWebAuthnCredential' | 'listWebAuthnCredentials' | 'deleteWebAuthnCredential' | 'setUpTOTP' | 'verifyTOTPSetup'
-  | 'updateMFAPreference' | 'fetchMFAPreference' | 'fetchUserAttributes' | 'updatePassword',
+  | 'updateMFAPreference' | 'fetchMFAPreference' | 'fetchUserAttributes' | 'updatePassword' | 'updateUserAttributes',
   AnyMock
 > = {
   signIn: vi.fn(),
@@ -32,6 +32,7 @@ export const auth: Record<
   fetchMFAPreference: vi.fn(),
   fetchUserAttributes: vi.fn(),
   updatePassword: vi.fn(),
+  updateUserAttributes: vi.fn(),
 };
 
 export const authModule: typeof auth = auth;
@@ -87,6 +88,7 @@ export function resetAmplifyMocks(): void {
   auth.listWebAuthnCredentials.mockResolvedValue({ credentials: [] });
   auth.fetchMFAPreference.mockResolvedValue({});
   auth.updatePassword.mockResolvedValue(undefined);
+  auth.updateUserAttributes.mockResolvedValue({});
   auth.confirmResetPassword.mockResolvedValue(undefined);
   auth.resetPassword.mockResolvedValue({
     isPasswordReset: false,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement, StrictMode, useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,12 +53,12 @@ describe('TOTPEnrollmentGate', () => {
     const user = userEvent.setup();
     const counter = mountCounter();
     const { onEnrolled } = gate(() => Promise.resolve({ configured: ['PASSWORD', 'EMAIL_OTP'], mfa: [] }), {}, counter.element);
-    await screen.findByRole('heading', { name: 'Set up your authenticator' });
+    await screen.findByRole('heading', { name: 'Add an authenticator app' });
     expect(isShown('The app')).toBe(false);
-    expect(screen.getByText(/Example Reports also needs a code/)).toBeTruthy();
+    expect(screen.getByText('You sign in with a password, so Example Reports also needs a code from an authenticator app. Set it up to continue.')).toBeTruthy();
     await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
     await waitFor(() => expect(isShown('The app')).toBe(true));
-    expect(screen.queryByRole('heading', { name: 'Set up your authenticator' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Add an authenticator app' })).toBeNull();
     expect(onEnrolled).toHaveBeenCalledTimes(1);
     expect(auth.fetchAuthSession).toHaveBeenCalledWith({ forceRefresh: true });
     // Remounted after setup, so children such as MyAccount read the new state.
@@ -89,7 +89,7 @@ describe('TOTPEnrollmentGate', () => {
       .mockRejectedValueOnce(awsError('NetworkError'))
       .mockResolvedValueOnce({ configured: ['WEB_AUTHN'], mfa: [] });
     gate(loadFactors);
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/couldn't check your sign-in settings.*connection/i));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/couldn’t check your sign-in settings.*connection/i));
     expect(isShown('The app')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(isShown('The app')).toBe(true));
@@ -120,7 +120,7 @@ describe('TOTPEnrollmentGate', () => {
 
     it('still switches to setup when the browser says the person needs an authenticator', async () => {
       gate(() => Promise.resolve({ configured: ['PASSWORD'], mfa: [] }), { serverChecked: true });
-      await screen.findByRole('heading', { name: 'Set up your authenticator' });
+      await screen.findByRole('heading', { name: 'Add an authenticator app' });
       expect(isShown('The app')).toBe(false);
     });
 
@@ -135,6 +135,10 @@ describe('TOTPEnrollmentGate', () => {
   });
 });
 
+// Buttons with screen-reader-only words ("Copy<span> setup key</span>"). Browsers keep the span's
+// leading space in the accessible name; jsdom's dom-accessibility-api drops it.
+const COPY = /^Copy ?setup key$/;
+
 describe('AuthenticatorSetup', () => {
   it('starts one setup even under StrictMode, labels it with the account email, and offers the key', async () => {
     const user = userEvent.setup();
@@ -142,21 +146,70 @@ describe('AuthenticatorSetup', () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const onDone = vi.fn();
     render(createElement(StrictMode, null, createElement(AuthenticatorSetup, { issuer: 'Example Reports', onDone })));
-    const link = await screen.findByRole('link', { name: 'Open the setup link' });
+    const link = await screen.findByRole('link', { name: 'On this device? Open the setup link.' });
     await waitFor(() => expect(link.getAttribute('href')).toContain('Example%20Reports:ada%40example.org'));
     expect(auth.setUpTOTP).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP')).toBeTruthy();
+    expect(screen.getByLabelText('Setup key').textContent).toBe('JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP');
 
-    await user.click(screen.getByRole('button', { name: 'Copy setup key' }));
+    await user.click(screen.getByRole('button', { name: COPY }));
     expect(writeText).toHaveBeenCalledWith(TEST_SECRET);
     expect(screen.getByRole('status').textContent).toBe('Setup key copied.');
 
     await user.type(screen.getByLabelText('6-digit code'), '12 34{Enter}');
-    expect(screen.getByRole('alert').textContent).toBe('Enter the 6-digit code from your authenticator.');
-    expect(document.activeElement).toBe(screen.getByLabelText('6-digit code'));
-    await user.type(screen.getByLabelText('6-digit code'), '56{Enter}');
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe('Enter the 6-digit code from your authenticator app');
+    // The summary takes focus and links to the field; the error is repeated by the field.
+    expect(document.activeElement).toBe(alert);
+    const field = screen.getByLabelText('6-digit code');
+    expect(within(alert).getByRole('link').getAttribute('href')).toBe(`#${field.id}`);
+    expect(document.getElementById(`${field.id}-error`)?.textContent).toBe('Error: Enter the 6-digit code from your authenticator app');
+    await user.type(field, '56{Enter}');
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(auth.verifyTOTPSetup).toHaveBeenCalledWith({ code: '123456' });
+  });
+
+  it('Card Studio’s words: "Add an authenticator app", the setup key with Copy, and Continue', async () => {
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+    expect(screen.getByRole('heading', { name: 'Add an authenticator app', level: 2 })).toBeTruthy();
+    // No QR code: the intro speaks of the setup key.
+    expect(screen.getByText('Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.')).toBeTruthy();
+    expect(await screen.findByLabelText('Setup key')).toBeTruthy();
+    expect(screen.getByRole('button', { name: COPY }).textContent).toBe('Copy setup key');
+    expect(screen.queryByText('Can’t scan it? Enter this setup key in your app instead.')).toBeNull();
+    const submit = screen.getByRole('button', { name: 'Continue' });
+    expect(submit.getAttribute('type')).toBe('submit');
+    expect(screen.getByLabelText('6-digit code').getAttribute('autocomplete')).toBe('one-time-code');
+    // Required where it's used: no cancel unless the caller asks for one.
+    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('with a QR code, the intro says to scan it, and the key is the fallback', async () => {
+    const renderQrCode = vi.fn((uri: string) => createElement('img', { alt: 'QR code', 'data-uri': uri }));
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org', renderQrCode }));
+    expect(screen.getByText('Scan the code with your app or password manager, then enter the 6-digit code it shows.')).toBeTruthy();
+    const img = await screen.findByAltText('QR code');
+    expect(img.getAttribute('data-uri')).toMatch(/^otpauth:\/\/totp\/X:ada%40example.org\?secret=/);
+    expect(screen.getByText('Can’t scan it? Enter this setup key in your app instead.')).toBeTruthy();
+    expect(screen.getByLabelText('Setup key')).toBeTruthy();
+  });
+
+  it('a caller’s heading, intro, button, and cancel', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org', heading: 'Replace your authenticator', intro: 'Your old one stops working.', submitLabel: 'Save', onCancel, cancelLabel: 'Keep the old one' }));
+    expect(screen.getByRole('heading', { name: 'Replace your authenticator' })).toBeTruthy();
+    expect(screen.getByText('Your old one stops working.')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Save' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Keep the old one' }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+
+  it('says plainly when the key can’t be copied', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+    await user.click(await screen.findByRole('button', { name: COPY }));
+    expect(screen.getByRole('alert').textContent).toBe('Couldn’t copy here. Select the key and copy it instead.');
   });
 
   it('explains a wrong code and clears the field for the next one', async () => {
@@ -164,7 +217,7 @@ describe('AuthenticatorSetup', () => {
     auth.verifyTOTPSetup.mockRejectedValueOnce(awsError('EnableSoftwareTokenMFAException', 'Code mismatch'));
     render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
     await user.type(await screen.findByLabelText('6-digit code'), '000000{Enter}');
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/isn't right/));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That code didn’t work. Codes change every 30 seconds, so enter the newest one.'));
     expect(screen.getByLabelText<HTMLInputElement>('6-digit code').value).toBe('');
     expect(screen.getByLabelText('6-digit code').getAttribute('aria-invalid')).toBe('true');
   });
@@ -177,12 +230,5 @@ describe('AuthenticatorSetup', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByLabelText('6-digit code')).toBeTruthy();
     expect(auth.setUpTOTP).toHaveBeenCalledTimes(2);
-  });
-
-  it('renders a site-provided QR code for the setup link', async () => {
-    const renderQrCode = vi.fn((uri: string) => createElement('img', { alt: 'QR code', 'data-uri': uri }));
-    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org', renderQrCode }));
-    const img = await screen.findByAltText('QR code');
-    expect(img.getAttribute('data-uri')).toMatch(/^otpauth:\/\/totp\/X:ada%40example.org\?secret=/);
   });
 });

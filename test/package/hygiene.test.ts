@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import tsupConfig from '../../tsup.config.js';
 
@@ -67,12 +67,17 @@ describe('module boundaries', () => {
       .filter((name) => /\.tsx?$/.test(name))
       .map((name) => `src/client/${name}`);
     expect(files.length).toBeGreaterThan(5);
-    // Its own files, shared policy, React, Amplify, and safeRedirect (pure; shared with the server).
-    const allowed = /^(\.\/|\.\.\/shared\/|\.\.\/server\/redirect\.js$|react$|aws-amplify(\/|$))/;
+    // Its own files, shared policy, the themes, React, Amplify, and safeRedirect (pure; shared with the server).
+    const allowed = /^(\.\/|\.\.\/shared\/|\.\.\/themes\/index\.js$|\.\.\/server\/redirect\.js$|react$|aws-amplify(\/|$))/;
     for (const file of files) {
       for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(allowed);
     }
     expect(importsOf('src/server/redirect.ts')).toEqual([]);
+    // The themes are pure: the families' colors and the frozen color math, nothing else.
+    for (const spec of importsOf('src/themes/index.ts')) expect(spec).toMatch(/^\.\.\/backdrops\/(families|types|kernel\/v1\/color)\.js$/);
+    for (const file of ['src/shared/account-creation.ts', 'src/shared/emails.ts', 'src/shared/policy.ts']) {
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\/|\.\.\/themes\/index\.js$)/);
+    }
     expect(importsOf('src/shared/unavailable.ts')).toEqual([]);
     for (const spec of importsOf('src/shared/not-implemented.ts')) expect(spec).toBe('never');
   });
@@ -81,8 +86,23 @@ describe('module boundaries', () => {
     expect(readFileSync(join(ROOT, 'src/client/index.ts'), 'utf8').startsWith("'use client';")).toBe(true);
   });
 
-  it('auth-kit/amplify/pre-sign-up has no imports (small Lambda bundle)', () => {
-    expect(importsOf('src/amplify/pre-sign-up.ts')).toEqual([]);
+  it('auth-kit/amplify/pre-sign-up imports only the pure account-creation rules (small Lambda bundle)', () => {
+    expect(importsOf('src/amplify/pre-sign-up.ts')).toEqual(['../shared/account-creation.js']);
+    expect(importsOf('src/shared/account-creation.ts')).toEqual([]);
+  });
+
+  it('auth-kit/amplify/custom-message imports no AWS SDK, CDK, or React (small Lambda bundle)', () => {
+    const seen = new Set<string>();
+    const walk = (file: string) => {
+      if (seen.has(file)) return;
+      seen.add(file);
+      for (const spec of importsOf(file)) {
+        expect(spec, `${file} imports ${spec}`).toMatch(/^\.\.?\//);
+        walk(join(dirname(file), spec).replace(/\.js$/, '.ts'));
+      }
+    };
+    walk('src/amplify/custom-message.ts');
+    expect(seen.size).toBeGreaterThan(3);
   });
 
   it('auth-kit/backdrops is framework-free: the core imports only its own files', () => {

@@ -1,11 +1,20 @@
 import { Token } from 'aws-cdk-lib';
 import {
+  type AccountCreationSettings,
+  AccountCreationConfigError,
+  type NormalizedAccountCreation,
+  allowsSelfSignUp,
+  normalizeAccountCreation,
+} from '../shared/account-creation.js';
+import {
   type AuthTier,
   SESSION_POLICY,
   STANDARD_GROUPS,
   RETIRED_GROUPS,
   WAF_POLICY,
+  codeLifetimeMinutes,
 } from '../shared/policy.js';
+import { helpAddressProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
 export class AuthStandardConfigError extends Error {
@@ -18,9 +27,15 @@ export class AuthStandardConfigError extends Error {
 export interface AuthEmailOptions {
   /** Address auth email comes from, e.g. `noreply@example.org`. Its domain must be verified in SES. */
   fromAddress: string;
-  /** Display name, e.g. `Example Reports`. */
+  /** Display name, e.g. `Example Reports (NC OSBM)` (`senderDisplayName` from `auth-kit/themes`). */
   fromName: string;
-  replyTo?: string;
+  /**
+   * The site's help address: the family's role-based help mailbox (`theme.help.address`, or the
+   * site's override). Required (ADR 0024): it's the Reply-To on every auth email Cognito sends, and
+   * the address the help screens and email footers name. Synthesis fails while it's missing, a
+   * placeholder (`apps-help@replace-me.invalid`), or a person's own address.
+   */
+  replyTo: string;
   /**
    * The verified SES identity that authorizes `fromAddress`: a domain (the default is `fromAddress`'s
    * domain) or the address itself. Amplify's typed `senders.email` can only point at an address
@@ -106,14 +121,21 @@ export type NormalizedWafOptions =
   | { mode: 'shared'; webAclArn: string; enabledInSandbox: boolean }
   | { mode: 'off' };
 
+/**
+ * @deprecated Removed in 0.1.8: `selfSignUp` turned Cognito's own `SignUp` on. Use `accountCreation`
+ * (ADR 0023): the server creates every account, and Cognito's `SignUp` stays off. Passing
+ * `selfSignUp` throws, explaining the change.
+ */
 export interface SelfSignUpOptions {
-  /**
-   * Email domains that may register themselves, e.g. `['example.edu']`. Wire the matching trigger:
-   * `triggers: { preSignUp }` with a handler built by `preSignUpAllowlist` from
-   * `auth-kit/amplify/pre-sign-up`. The preset refuses to synthesize self-signup without it.
-   */
   allowedEmailDomains: readonly string[];
 }
+
+/** What `selfSignUp` became, said where it's refused. */
+export const SELF_SIGN_UP_REMOVED =
+  "selfSignUp was removed in auth-kit 0.1.8 (ADR 0023). It turned Cognito's own SignUp on, which anyone with the public app client ID can call directly, " +
+  'skipping the rate limits and the bot check, and which tells callers whether an address already has an account. ' +
+  "Use accountCreation: { mode: 'domains', domains: [...] } instead (or 'request' or 'open'): auth-kit's sign-up route creates the account on the server, " +
+  "like an invite, and Cognito's SignUp stays off. Keep the preSignUp trigger (auth-kit/amplify/pre-sign-up's preSignUpForAccountCreation), which re-checks the domain list.";
 
 export interface AuthStandardOptions {
   /** Project slug for tags and metric names, e.g. `reports-portal`. */
@@ -156,7 +178,29 @@ export interface AuthStandardOptions {
   environment?: string;
   /** Keep deletion protection on in sandboxes (blocks `ampx sandbox delete`). Default `false`. */
   deletionProtectionInSandbox?: boolean;
-  /** Self-registration for allowlisted email domains only. Off (admin-create-only) when omitted. */
+  /**
+   * How accounts get created on this site (register D1, ADR 0023). Default invite only. In every mode
+   * Cognito's own `SignUp` stays off (`AllowAdminCreateUserOnly`): sign-up and request access are
+   * auth-kit server routes (`auth-kit/accounts`). In `domains` mode, wire the preSignUp trigger
+   * (`preSignUpForAccountCreation` from `auth-kit/amplify/pre-sign-up`), which re-checks the list.
+   */
+  accountCreation?: AccountCreationSettings;
+  /**
+   * How long an emailed code works, in minutes: Cognito's sign-in session (`AuthSessionValidity`).
+   * Default 3; Cognito allows 3 to 15 (register A7 is choosing between 3 and 10). Pass the same value
+   * to the screens (`SignIn`, `SignUp`) and the custom message trigger, which all say it.
+   */
+  codeLifetimeMinutes?: number;
+  /**
+   * The CLOUDFRONT-scope web ACL in front of the site's sign-up route (`createSiteWebAcl`, with
+   * `accountCreationWafRules`: a silent challenge and a per-IP limit), as a literal ARN
+   * (`arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>`). **Required in `open` mode**
+   * (ADR 0023): anyone may create an account there, so the challenge is the bot check, and synthesis
+   * fails without it. Optional in `domains` mode. Associate it with the Amplify app (Hosting →
+   * Firewall); the sign-up route also refuses requests that didn't pass the challenge.
+   */
+  siteWebAclArn?: string;
+  /** @deprecated Removed in 0.1.8: throws. Use `accountCreation` (ADR 0023). */
   selfSignUp?: SelfSignUpOptions;
 }
 
@@ -165,8 +209,8 @@ export interface NormalizedAuthStandardOptions {
   owner: string;
   tier: AuthTier;
   adminPool: boolean;
-  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity'>> &
-    Pick<AuthEmailOptions, 'replyTo' | 'configurationSet' | 'verification' | 'invitation'>;
+  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'replyTo'>> &
+    Pick<AuthEmailOptions, 'configurationSet' | 'verification' | 'invitation'>;
   passkeys: Required<PasskeyOptions> | null;
   groups: string[];
   appRoles: string[];
@@ -176,7 +220,10 @@ export interface NormalizedAuthStandardOptions {
   guestAccess: boolean;
   environment: string | undefined;
   deletionProtectionInSandbox: boolean;
-  selfSignUp: { allowedEmailDomains: string[] } | null;
+  accountCreation: NormalizedAccountCreation;
+  /** The site's CLOUDFRONT web ACL for the sign-up route (required in `open` mode). */
+  siteWebAclArn: string | null;
+  codeLifetimeMinutes: number;
 }
 
 const EMAIL_RE = /^[^\s@<>"]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
@@ -197,6 +244,9 @@ const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', ...RULE_KEYS]
 // A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
 const WEB_ACL_ARN_RE =
   /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
+
+/** A CLOUDFRONT-scope web ACL: always in us-east-1, with `global` in place of `regional`. */
+const SITE_WEB_ACL_ARN_RE = /^arn:aws(?:-cn|-us-gov)?:wafv2:us-east-1:\d{12}:global\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
 
 /** The Region in a literal web ACL ARN, or undefined for a CDK token (resolved at deploy). */
 export function webAclArnRegion(arn: string): string | undefined {
@@ -330,9 +380,9 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
   const fromName = (email.fromName ?? '').trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
-  if (email.replyTo !== undefined && !EMAIL_RE.test(email.replyTo.trim())) {
-    fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
-  }
+  const helpProblems = helpAddressProblems(email.replyTo);
+  if (helpProblems.length > 0) fail(`email.replyTo is the site's help address (the Reply-To on auth emails, and the address the help screens name). ${helpProblems.join(' ')}`);
+  if (!EMAIL_RE.test(email.replyTo.trim())) fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
   const sesIdentity = (email.sesIdentity ?? domainOf(fromAddress)).trim().toLowerCase();
   if (sesIdentity.includes('@')) {
     if (sesIdentity !== fromAddress.toLowerCase()) {
@@ -397,13 +447,36 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     if (environment === 'sandbox') fail('environment "sandbox" is reserved for Amplify sandboxes, which are detected automatically.');
   }
 
-  let selfSignUp: NormalizedAuthStandardOptions['selfSignUp'] = null;
-  if (o.selfSignUp) {
-    if (o.adminPool) fail('An admin pool can never allow self sign-up.');
-    const domains = [...o.selfSignUp.allowedEmailDomains].map((d) => d.trim().toLowerCase());
-    if (domains.length === 0) fail('selfSignUp.allowedEmailDomains must list at least one domain.');
-    for (const d of domains) if (!DOMAIN_RE.test(d) || !d.includes('.')) fail(`selfSignUp domain "${d}" isn't a valid domain.`);
-    selfSignUp = { allowedEmailDomains: domains };
+  if ((o as Record<string, unknown>).selfSignUp !== undefined) fail(SELF_SIGN_UP_REMOVED);
+  let accountCreation: NormalizedAccountCreation;
+  try {
+    accountCreation = normalizeAccountCreation(o.accountCreation);
+  } catch (error) {
+    if (error instanceof AccountCreationConfigError) throw new AuthStandardConfigError(error.message.replace(/^auth-kit: /, ''));
+    throw error;
+  }
+  if (o.adminPool && accountCreation.mode !== 'invite') {
+    fail(`An admin pool is invite only: accountCreation.mode '${accountCreation.mode}' would let people make their own admin-pool accounts.`);
+  }
+  let siteWebAclArn: string | null = null;
+  if (o.siteWebAclArn !== undefined) {
+    if (typeof o.siteWebAclArn !== 'string' || !SITE_WEB_ACL_ARN_RE.test(o.siteWebAclArn.trim())) {
+      fail(`siteWebAclArn "${String(o.siteWebAclArn)}" isn't a CLOUDFRONT web ACL ARN (arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>); createSiteWebAcl makes one.`);
+    }
+    if (!allowsSelfSignUp(accountCreation)) fail(`siteWebAclArn guards the sign-up route; accountCreation.mode '${accountCreation.mode}' has none.`);
+    siteWebAclArn = o.siteWebAclArn.trim();
+  }
+  if (accountCreation.mode === 'open' && siteWebAclArn === null) {
+    fail(
+      "accountCreation mode 'open' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route " +
+        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Anyone can create an account in open mode, so the challenge is required (ADR 0023).',
+    );
+  }
+  let codeLifetime: number;
+  try {
+    codeLifetime = codeLifetimeMinutes(o.codeLifetimeMinutes);
+  } catch (error) {
+    fail((error as Error).message.replace(/^auth-kit: /, ''));
   }
 
   return {
@@ -415,7 +488,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
       fromAddress,
       fromName,
       sesIdentity,
-      ...(email.replyTo !== undefined && { replyTo: email.replyTo.trim() }),
+      replyTo: email.replyTo.trim().toLowerCase(),
       ...(email.configurationSet !== undefined && { configurationSet: email.configurationSet }),
       ...(email.verification !== undefined && { verification: email.verification }),
       ...(email.invitation !== undefined && { invitation: email.invitation }),
@@ -429,6 +502,8 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     guestAccess: o.guestAccess === true,
     environment,
     deletionProtectionInSandbox: o.deletionProtectionInSandbox === true,
-    selfSignUp,
+    accountCreation,
+    siteWebAclArn,
+    codeLifetimeMinutes: codeLifetime,
   };
 }

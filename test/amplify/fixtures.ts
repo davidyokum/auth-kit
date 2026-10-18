@@ -4,7 +4,7 @@ export const EVERYDAY: AuthStandardOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports' },
+  email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
 };
 

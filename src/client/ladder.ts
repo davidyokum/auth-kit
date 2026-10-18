@@ -2,6 +2,7 @@
  * The sign-in ladder and the rules that decide which screen comes next. Pure: no Amplify, no React.
  */
 import { PASSWORD_POLICY } from '../shared/policy.js';
+import { ERRORS } from './copy.js';
 
 export type SignInMethod = 'passkey' | 'password' | 'email-code';
 
@@ -81,7 +82,7 @@ export function canRemovePasskey(input: { passkeyCount: number; factors: ClientA
   if (input.passkeyCount > 1) return { allowed: true };
   const { factors } = input;
   if (!factors) {
-    return { allowed: false, reason: "We couldn't confirm you have another way to sign in, so this passkey stays for now. Try again in a moment." };
+    return { allowed: false, reason: ERRORS.passkeyRemovalUnconfirmed };
   }
   if (factors.configured.includes('PASSWORD')) return { allowed: true };
   if (factors.configured.includes('EMAIL_OTP') && !hasTotp(factors)) return { allowed: true };
@@ -91,11 +92,9 @@ export function canRemovePasskey(input: { passkeyCount: number; factors: ClientA
 /** Checks a new password against the standard: length only, no composition rules. Returns a message or null. */
 export function newPasswordProblem(password: string): string | null {
   const length = [...password].length;
-  if (length === 0) return 'Enter a new password.';
-  if (length < NEW_PASSWORD_RULES.minLength) {
-    return `Use at least ${NEW_PASSWORD_RULES.minLength} characters. A password manager can make one for you.`;
-  }
-  if (length > NEW_PASSWORD_RULES.maxLength) return `Use at most ${NEW_PASSWORD_RULES.maxLength} characters.`;
+  if (length === 0) return 'Enter a new password';
+  if (length < NEW_PASSWORD_RULES.minLength) return `Choose a password with at least ${NEW_PASSWORD_RULES.minLength} characters`;
+  if (length > NEW_PASSWORD_RULES.maxLength) return `Choose a password with at most ${NEW_PASSWORD_RULES.maxLength} characters`;
   return null;
 }
 

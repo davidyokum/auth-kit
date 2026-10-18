@@ -158,10 +158,10 @@ describe('the invite email for one item', () => {
       expiresAt: new Date('2026-10-24T12:00:00.000Z'),
       item: { noun: 'project', name: 'Q3 plan', role: 'reader', invitedBy: 'ann@example.org' },
     });
-    expect(email.text).toContain('ann@example.org invited you to Example Reports, with access to the project “Q3 plan” as Reader.');
-    expect(email.html).toContain('with access to the project “Q3 plan” as Reader.');
-    expect(email.text).toContain('This invite expires on October 24, 2026 (UTC).');
-    const plain = renderInviteEmail({ email: 'a@example.com', siteName: 'Example Reports', signInUrl: 'https://reports.example.org/sign-in', expiresAt: new Date() });
-    expect(plain.text).toContain("You've been invited to Example Reports.");
+    expect(email.subject).toBe('ann@example.org invited you to Example Reports');
+    expect(email.text).toContain('ann@example.org added you to the project “Q3 plan” as Reader.');
+    expect(email.html).toContain('added you to <strong>the project “Q3 plan”</strong> as Reader.');
+    expect(email.text).toContain('This invitation expires on Saturday, October 24 at 8:00 AM Eastern.');
+    expect(`${email.text}${email.html}`).not.toMatch(/\{####\}|project:/);
   });
 });

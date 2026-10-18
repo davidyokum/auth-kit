@@ -2,6 +2,75 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.8-alpha] - 2026-10-18
+
+Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the sign-in card in the approved words with the families as themes ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)): auth-kit brought in line with the passwords-flow decisions register (A1, A3, A4–A7, D1–D4, E1, E2, E4, E4d, E5, P8, and David's 2026-10-18 decisions on emails, the help route, and the passkey icon). Pre-release. Breaking: see Migration.
+
+### Security
+
+- **Cognito's own `SignUp` is always off**, in every mode, and synthesis fails if anything turns it back on (the rendered pool is checked, overrides included). Sign-up is a server route that creates the account like an invite, so nobody can skip the domain list, the rate limits, or the bot check by calling Cognito directly, and Cognito can no longer be asked who's registered.
+- **Sign-up and request access answer every address alike**, in at least 800 ms; an address with an account gets an email instead of a different screen. Per-address and per-IP rate limits fail closed; an optional CLOUDFRONT web ACL adds a silent challenge and a per-IP limit (`accountCreationWafRules`, `createSiteWebAcl`).
+- **The preSignUp trigger re-checks the domain list** on every account the sign-up route makes (marked with the immutable `custom:authkit_origin`), and refuses Cognito's `SignUp`.
+- **Never-verified sign-ups are deleted after 24 hours** (`UnverifiedAccountSweep`): only marked accounts, never one with a role, never the owner, never an admin's invite (those keep the 7-day disable).
+- **The first credential is required**: no "Not now" after an invite's or a sign-up's first code, so no account is left on emailed codes alone (A1).
+- **Self-service on sign-up sites** needs a recent sign-in: delete my account (never the owner) and change my email (verified before it takes effect; the old address told; the same answer whether or not another account uses the new address).
+- **The help address is required and role-based**: synthesis fails while `email.replyTo` is missing, a placeholder, or a person's own address. A Super admin's override (Settings → "Sign-in help") needs `settings.security` and a recent sign-in, is audited, alerts the owner, and is undone if the alert can't be sent.
+- **Access requests' typed names and reasons** stay out of the append-only audit log and are deleted 30 days after the request is settled.
+
+### Security review fixes (PR #20, 2026-10-18)
+
+- **Email changes through Cognito's public API are refused** (H1): the custom message trigger refuses `CustomMessage_UpdateUserAttribute` and `CustomMessage_VerifyUserAttribute` unless the admin API made the call, and every pool must have the trigger (synthesis fails without it).
+- **The first credential is enforced on the server** (M2): `requireUser` refuses an account with neither a passkey nor a password (403 `first_credential_required`, `FirstCredentialRequiredError`); page guards send it to `firstCredentialPath` (default `/account/sign-in-method`), which passes `allowFirstCredentialEnrollment`. `SignIn` never goes in after a failed factors read.
+- **The per-IP limit can't be dodged by a forged header** (M1): `clientIp` is required; `forwardedForClientIp()` takes the proxy-appended (last) `X-Forwarded-For` entry.
+- **Refused accounts read like unknown addresses** (M3, L5): a disabled account, an expired invite, or one whose password must be reset gets the decoy passkey prompt and the simulated code on those paths, and the wrong-password message on the password path.
+- **Open and domains sign-up can't be used as an amplifier** (M4): per-mailbox limits (`rateLimitAddress`), a site-wide breaker (300 an hour), open mode requires the site web ACL (`siteWebAclArn`) and AWS WAF's token, and the unverified sweep pages through any pool size and re-reads each account before deleting it (L1).
+- **Filing a request is constant work** (M5): a per-address marker item instead of a queue read; at most 100 new requests a day; every answer takes the floor, errors and the exported handlers included (L11).
+- **Request spam stays out of subjects** (M6): count-only digest subjects, at most 25 listed, `people.declineRequests` (up to 100, one audit entry, silent); approving uses the approver's name (L4).
+- **The help-address override stays on allowed domains** (M8): the configured address's domain or the family's (`theme.help.domains`), `allowedDomains` as the escape hatch; every Super admin is alerted with the owner; the local part is a plain mailbox.
+- Audit rows cap request IDs and user agents (L2); email changes are limited per new address (L3); the decoy passkey prompt takes the pool's relying-party ID and timeout (`SignIn`'s `passkey`, L6); link props must be paths or http(s) URLs (I6).
+- Tests refuse any socket or `fetch` beyond this machine, covering the SDK's unsigned Cognito calls (L7). The PR job packs and checks the tarball (M7). No source maps (L8) or dated reviews (L10) in the package; the Lucide notice names the version (L9). `AccessRequestTable` keeps no point-in-time backups by default (I1).
+- Copy: the passkey help's device line uses the theme's `devDesk` ("the device maker's support" on personal sites); "Try again, or use a password instead." when a passkey can't be created; request access's own network message.
+- **From the verification review:** `createSiteWebAcl({ accountCreation })` fails synthesis if the challenge rule doesn't challenge or, in open mode, the per-IP rule doesn't block (N1), with an operator smoke test in the README and ADR 0023; `withAuthKitCustomMessage(handler)` keeps the refusal for sites with their own wording, and synthesis checks the trigger's function carries `CUSTOM_MESSAGE_GATE_ENV` (N2); the matrix requires `codeOnlyMember` wherever the first credential is enforced, and `routesFromNextBuild` fails without the chooser page (N3).
+
+### Added
+
+- `accountCreation: { mode: 'invite' | 'request' | 'domains' | 'open', domains?, requestsAlso? }` on the preset (and `normalizeAccountCreation`, `emailDomainAllowed`, `takesAccessRequests`, … from `auth-kit/amplify` and `auth-kit/accounts`); `codeLifetimeMinutes` (default 3; A7) on the preset, the screens, and the custom message trigger.
+- `auth-kit/accounts`: `createAccountCreationRoutes` (the sign-up and request routes), `createSelfServiceActions`, `createSignInHelp` and `createSignInHelpActions`, the request, rate-limit, and settings stores (memory and DynamoDB), and the jobs' logic.
+- `auth-kit/admin/cdk`: `AccessRequestTable`, `RateLimitTable`, `SiteSettingsTable`, `UnverifiedAccountSweep`, `AccessRequestDigest` (bundled Lambdas, least-privilege roles, alarms). `auth-kit/admin`: `people.listAccessRequests`, `approveRequest` (the ordinary invite), `declineRequest` (silent unless `notifyOnDecline`); `accountCreationAppPolicy`, `siteSettingsAppPolicy`; `renderSignInHelpChangedEmail`; the SES mailer's `sendEmail` and `signInHelpChanged`; every auth email's renderer (`inviteEmail`, `existingAccountEmail`, `requestDeclinedEmail`, `accessRequestDigestEmail`, `emailChangedEmail`, `accountDeletedEmail`, and the code emails).
+- `auth-kit/admin/ui`: `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`, `SignInHelpSettings`.
+- `auth-kit/amplify/pre-sign-up`: `preSignUpForAccountCreation`. `auth-kit/amplify/custom-message`: `customMessageHandler`.
+- `auth-kit/themes`: the families as themes (`FAMILY_THEMES`, `authTheme`, `senderDisplayName`, `themeCssVariables`), the computed card edge (`cardEdge: 'defined' | 'soft'`, `definedCardEdge`, `checkCardEdge`), and `helpAddressProblems`.
+- `auth-kit/client`: `SignUp`, `RequestAccess`, `SignedOutEverywhere`; `MyAccount`'s `selfService`; the copy deck (`SIGN_IN`, `FIRST_VISIT`, `TROUBLE`, `ERRORS`, `helpScreen`, …); `saveName`; `wafAwareFetch`; `AuthCard`; `Icon`.
+- `auth-kit/testing`: `NEW_MEMBER` and `FRESH_SIGN_UP_MEMBER`, and `assertAuthMatrix({ signUpSite: true })`, which runs a freshly signed-up Member against every route.
+- ADR 0023 and ADR 0024; `THIRD_PARTY_NOTICES.md` (Lucide's icons, ISC).
+
+### Changed
+
+- **`SignIn` is the whole card, in the approved words** (Card Studio v4): email first; separate "Use your passkey" (no final button) and "Enter your password" ("for {email} · Change") screens; Continue on the email and password steps and Sign in on the authenticator and emailed-code steps (A6); an error summary that takes focus; "Trouble signing in?" and six help screens (`troubleLink`); the account-creation line (`inviteLine`); the family's footer line, nothing above the heading, no line on top (E4); the fingerprint passkey icon in the family accent and a password-field glyph (E4d). New required prop `help`; new props `theme`, `accountCreation`, `codeLifetimeMinutes`, `securityNotices`, `signUpHref`, `requestAccessHref`. ADR 0018's same screens hold throughout.
+- **`ChooseFirstCredential`** is required: `onSkip` is gone; `onDone` receives `'passkey'` or `'password'`. `AuthenticatorSetup` reads "Add an authenticator app" with Continue.
+- **Messages** use the approved words (`describeAuthError` takes `{ siteName, codeLifetimeMinutes, helpAddress }`).
+- **Every screen word is in the copy deck**, My account's included (`MY_ACCOUNT`, `STATUS`, `SHARED`, `CONTACT` join the exported groups); a test fails when a component writes words of its own. Moved words keep their wording, with the deck's curly apostrophes.
+- auth-kit's own tests refuse any `fetch` beyond this machine (Cognito's token-only user APIs need no AWS credentials, so `AWS_BLOCKED_ENV` alone didn't stop them).
+- **Emails match the card** (David, 2026-10-18): no letterhead; the footer is the card's identity sentence and "Help: {address}." The invite names the inviter and the role and gives the expiry as an Eastern clock time; it replies to the inviter.
+- **`email.replyTo` is required** in the preset (it's the help address).
+- `InviteExpirySweep` shares the scheduled-job helper with the new jobs (its template is unchanged). ADRs 0019 and 0020 say "the owner" (one owner); 0001 and 0002 record that admins keep a password-plus-authenticator route (A3); 0021 drops the owner line.
+
+### Migration
+
+- **`selfSignUp` and `preSignUpAllowlist` throw.** Use `accountCreation` and `preSignUpForAccountCreation`; mount `createAccountCreationRoutes`' handlers at `/api/auth/sign-up` and `/api/auth/request-access`; deploy the tables and jobs your mode needs (README section 11).
+- **Set `email.replyTo`** to the family's help mailbox (or the site's own): a plain, role-based mailbox (letters, digits, dots, plus, hyphen, or underscore before the @).
+- **`SignIn` needs `help={{ address, owner }}`** (read the address in effect on the server with `createSignInHelp(…).effective()`), and renders its own card: drop the site's card wrapper, owner line, footer, and accent rule, and pass `theme`.
+- **`ChooseFirstCredential`**: remove `onSkip`.
+- Pass the same `codeLifetimeMinutes` to the preset and the screens if you change it from 3.
+- **Every pool needs the custom message trigger** (`triggers: { customMessage }` with `customMessageHandler`, or your handler wrapped in `withAuthKitCustomMessage`), and its function needs `environment: { ...CUSTOM_MESSAGE_GATE_ENV }`: synthesis fails without either.
+- **Add the chooser page** at `/account/sign-in-method` (or set `firstCredentialPath`): `pages.requireUser({ allowFirstCredentialEnrollment: true })` and `ChooseFirstCredential`.
+- **`createAccountCreationRoutes` needs `clientIp`** (`forwardedForClientIp()` behind Amplify Hosting). **Open mode needs `siteWebAclArn`** in the preset and AWS WAF's script on the sign-up page. **`createSiteWebAcl` needs `accountCreation`**. After each deploy of an open site, run the WAF smoke test (README section 11).
+- Pass the family to `createSignInHelp({ theme })` so a Super admin's override can use the family's domains.
+- `PendingRequestsTable`'s `actions` gains `declineRequests` (`people.forms.declineRequests`).
+- The screens' link props (`signUpHref`, `requestAccessHref`, `termsUrl`, `privacyNoticeUrl`, `stepUpHref`, `deletedPath`, `signedOutPath`, `signInHref`) must be a site path or an http(s) URL; anything else throws when the screen renders. Pass `SignIn`'s `passkey={{ relyingPartyId }}` once passkeys are on.
+- `AccessRequestTable` keeps no point-in-time backups by default; pass `pointInTimeRecovery: true` only if the privacy notice says backups keep requests longer.
+- **The auth matrix needs a `codeOnlyMember` persona** (`EMAILED_CODE_ONLY_MEMBER`) on every site (pass `requireFirstCredential: false` only if the server turns the rule off), and `routesFromNextBuild` needs the chooser page in the build (or `firstCredentialPath`). Sign-up sites' `FRESH_SIGN_UP_MEMBER` now has a passkey.
+
 ## [0.1.7-alpha.1] - 2026-10-18
 
 Screens name items by the app's noun and the item's name, never by ID (register rule C5; [ADR 0022, amendment](docs/decisions/0022-resource-roles.md#amendment-2026-10-18-items-by-noun-and-name-never-by-id)). A revision of 0.1.7-alpha: 0.1.8 is the next feature release.

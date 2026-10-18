@@ -14,6 +14,8 @@ export {
   bearerPersona,
   REQUIRED_PERSONAS,
   SECOND_MEMBER,
+  NEW_MEMBER,
+  CODE_ONLY_MEMBER,
   MATRIX_PASSES,
   type MatrixPass,
   type AuthMatrixOptions,
@@ -24,6 +26,7 @@ export {
 } from './matrix.js';
 export {
   routesFromNextBuild,
+  DEFAULT_FIRST_CREDENTIAL_PATH,
   compileAppRoute,
   resolveAppRoute,
   type AppRoute,
@@ -52,6 +55,8 @@ export { AWS_BLOCKED_ENV } from './aws-env.js';
 export {
   startMatrixServer,
   matrixFixture,
+  FRESH_SIGN_UP_MEMBER,
+  EMAILED_CODE_ONLY_MEMBER,
   matrixServerEnv,
   type StartMatrixServerOptions,
   type MatrixServer,

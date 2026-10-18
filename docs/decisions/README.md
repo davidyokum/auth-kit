@@ -4,8 +4,8 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 
 | # | Decision |
 |---|---|
-| [0001](0001-passkey-first.md) | Passkey first, then password + authenticator, then emailed code |
-| [0002](0002-mfa-optional-app-enforced-totp.md) | MFA optional in the pool; the app requires TOTP of password users |
+| [0001](0001-passkey-first.md) | Passkey first, then password + authenticator, then emailed code (amended: admins keep a password-plus-authenticator route) |
+| [0002](0002-mfa-optional-app-enforced-totp.md) | MFA optional in the pool; the app requires TOTP of password users (amended: admins) |
 | [0003](0003-capabilities-not-roles.md) | Code checks capabilities, mapped from groups in one file (role list superseded by 0020) |
 | [0004](0004-waf-rate-rule.md) | A WAF rate rule on every user pool |
 | [0005](0005-sandbox-only-admin-password-flow.md) | `ADMIN_USER_PASSWORD_AUTH` on sandbox clients only |
@@ -22,7 +22,9 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0016](0016-matrix-server-mode.md) | The auth matrix's server mode ships in auth-kit |
 | [0017](0017-per-rule-waf-modes.md) | Each WAF rule has its own mode; the sign-in rule counts first |
 | [0018](0018-same-screens-for-every-address.md) | The sign-in screens are the same for every address until a factor is proven |
-| [0019](0019-invite-expiry-sweep.md) | Invite expiry runs hourly, from a Lambda bundled in the package |
+| [0019](0019-invite-expiry-sweep.md) | Invite expiry runs hourly, from a Lambda bundled in the package; never the owner |
 | [0020](0020-site-wide-roles.md) | Site-wide roles: one owner, an explicit admin ladder, members per-item |
 | [0021](0021-backdrops.md) | Backdrops: site identity behind a fixed card, locked and frozen per style version |
 | [0022](0022-resource-roles.md) | Resource roles: Manager, Contributor, Reader, combined with site roles |
+| [0023](0023-account-creation.md) | Account creation: four modes, sign-up as a self-invite, requests in DynamoDB |
+| [0024](0024-sign-in-copy-and-family-themes.md) | Sign-in copy, families as themes, the card edge, the help route, and emails that match the card |

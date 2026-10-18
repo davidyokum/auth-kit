@@ -5,13 +5,16 @@ import {
   AdminDeleteUserCommand,
   AdminDisableUserCommand,
   AdminEnableUserCommand,
+  AdminGetUserCommand,
   AdminListGroupsForUserCommand,
   AdminRemoveUserFromGroupCommand,
+  AdminUpdateUserAttributesCommand,
   AdminUserGlobalSignOutCommand,
   CognitoIdentityProviderClient,
   ListUsersCommand,
   ListUsersInGroupCommand,
   type UserType,
+  VerifyUserAttributeCommand,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
@@ -43,7 +46,16 @@ export interface FakeUser {
   status: string;
   createdAt: Date;
   groups: Set<string>;
+  /** `signup` for an account the sign-up route made (`custom:authkit_origin`). */
+  origin?: string;
+  /** An email change waiting for its code (the pool keeps the old address until then). */
+  pendingEmail?: string;
+  /** When Cognito last changed the account (defaults to its creation). */
+  modifiedAt?: Date;
 }
+
+/** The code the fake pool "sends" to a pending new address. */
+export const PENDING_EMAIL_CODE = '123456';
 
 const WRITE_COMMANDS = new Set([
   'AdminCreateUserCommand',
@@ -53,6 +65,8 @@ const WRITE_COMMANDS = new Set([
   'AdminEnableUserCommand',
   'AdminUserGlobalSignOutCommand',
   'AdminDeleteUserCommand',
+  'AdminUpdateUserAttributesCommand',
+  'VerifyUserAttributeCommand',
 ]);
 
 const awsError = (name: string, message = name) => Object.assign(new Error(message), { name, $metadata: { httpStatusCode: 400 } });
@@ -83,8 +97,9 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
       { Name: 'email', Value: u.email },
       { Name: 'email_verified', Value: String(u.emailVerified) },
       ...(u.name !== undefined ? [{ Name: 'name', Value: u.name }] : []),
+      ...(u.origin !== undefined ? [{ Name: 'custom:authkit_origin', Value: u.origin }] : []),
     ].filter((a) => !only || only.includes(a.Name));
-    return { Username: u.username, Attributes: attrs, Enabled: u.enabled, UserStatus: u.status as never, UserCreateDate: u.createdAt };
+    return { Username: u.username, Attributes: attrs, Enabled: u.enabled, UserStatus: u.status as never, UserCreateDate: u.createdAt, UserLastModifiedDate: u.modifiedAt ?? u.createdAt };
   };
   const page = <T>(list: T[], token: string | undefined, limit: number | undefined) => {
     const size = Math.min(limit ?? 60, options.pageSize ?? 60);
@@ -110,9 +125,14 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
     handle('ListUsersCommand', (input: { Filter?: string; Limit?: number; PaginationToken?: string; AttributesToGet?: string[] }) => {
       let list = users;
       if (input.Filter) {
-        const m = /^(sub|email) = "([^"]*)"$/.exec(input.Filter);
+        const m = /^(sub|email|status) = "([^"]*)"$/.exec(input.Filter);
         if (!m) throw awsError('InvalidParameterException', `bad filter ${input.Filter}`);
-        list = users.filter((u) => (m[1] === 'sub' ? u.sub : u.email) === m[2]);
+        if (m[1] === 'status') {
+          if (m[2] !== 'Enabled' && m[2] !== 'Disabled') throw awsError('InvalidParameterException', `bad status ${m[2]}`);
+          list = users.filter((u) => u.enabled === (m[2] === 'Enabled'));
+        } else {
+          list = users.filter((u) => (m[1] === 'sub' ? u.sub : u.email) === m[2]);
+        }
       }
       const { slice, next } = page(list, input.PaginationToken, input.Limit);
       return { Users: slice.map((u) => toType(u, input.AttributesToGet)), ...(next && { PaginationToken: next }) };
@@ -126,6 +146,12 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
         input.Limit,
       );
       return { Users: slice.map((u) => toType(u)), ...(next && { NextToken: next }) };
+    }),
+  );
+  mock.on(AdminGetUserCommand).callsFake(
+    handle('AdminGetUserCommand', (input: { Username: string }) => {
+      const t = toType(find(input.Username));
+      return { Username: t.Username, UserAttributes: t.Attributes, Enabled: t.Enabled, UserStatus: t.UserStatus, UserCreateDate: t.UserCreateDate, UserLastModifiedDate: t.UserLastModifiedDate };
     }),
   );
   mock.on(AdminListGroupsForUserCommand).callsFake(
@@ -145,11 +171,13 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
       const id = `00000000-0000-4000-8000-${String(++seq).padStart(12, '0')}`;
       const verified = input.UserAttributes?.find((a) => a.Name === 'email_verified')?.Value === 'true';
       const name = input.UserAttributes?.find((a) => a.Name === 'name')?.Value;
+      const origin = input.UserAttributes?.find((a) => a.Name === 'custom:authkit_origin')?.Value;
       const u: FakeUser = {
         username: id,
         sub: id,
         email,
         ...(name !== undefined && { name }),
+        ...(origin !== undefined && { origin }),
         emailVerified: verified,
         enabled: true,
         status: options.passwordless !== false && !input.TemporaryPassword ? 'CONFIRMED' : 'FORCE_CHANGE_PASSWORD',
@@ -169,6 +197,29 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
   mock.on(AdminDisableUserCommand).callsFake(handle('AdminDisableUserCommand', (input: { Username: string }) => void (find(input.Username).enabled = false)));
   mock.on(AdminEnableUserCommand).callsFake(handle('AdminEnableUserCommand', (input: { Username: string }) => void (find(input.Username).enabled = true)));
   mock.on(AdminUserGlobalSignOutCommand).callsFake(handle('AdminUserGlobalSignOutCommand', (input: { Username: string }) => void find(input.Username)));
+  // With AttributesRequireVerificationBeforeUpdate: the new address waits for its code; the old one stays.
+  mock.on(AdminUpdateUserAttributesCommand).callsFake(
+    handle('AdminUpdateUserAttributesCommand', (input: { Username: string; UserAttributes?: { Name?: string; Value?: string }[] }) => {
+      const u = find(input.Username);
+      const email = input.UserAttributes?.find((a) => a.Name === 'email')?.Value;
+      if (email !== undefined) {
+        if (users.some((x) => x !== u && x.email === email)) throw awsError('AliasExistsException', 'An account with the given email already exists.');
+        u.pendingEmail = email;
+      }
+    }),
+  );
+  // The access token's payload names the person (the local test issuer's tokens, as Cognito's do).
+  mock.on(VerifyUserAttributeCommand).callsFake(
+    handle('VerifyUserAttributeCommand', (input: { AccessToken: string; AttributeName: string; Code: string }) => {
+      const payload = JSON.parse(Buffer.from(input.AccessToken.split('.')[1] ?? '', 'base64url').toString('utf8')) as { username?: string; sub?: string };
+      const u = find(payload.username ?? payload.sub ?? '');
+      if (input.AttributeName !== 'email' || !u.pendingEmail) throw awsError('CodeMismatchException', 'Invalid verification code provided, please try again.');
+      if (input.Code !== PENDING_EMAIL_CODE) throw awsError('CodeMismatchException', 'Invalid verification code provided, please try again.');
+      u.email = u.pendingEmail;
+      u.emailVerified = true;
+      delete u.pendingEmail;
+    }),
+  );
   mock.on(AdminDeleteUserCommand).callsFake(
     handle('AdminDeleteUserCommand', (input: { Username: string }) => {
       const u = find(input.Username);

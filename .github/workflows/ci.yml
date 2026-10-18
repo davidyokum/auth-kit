@@ -38,7 +38,7 @@ jobs:
       - run: npm run build
       - name: Every subpath loads from the build
         run: |
-          for s in amplify amplify/pre-sign-up server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk backdrops backdrops/react backdrops/picker; do
+          for s in amplify amplify/pre-sign-up amplify/custom-message server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk accounts resources resources/ui themes backdrops backdrops/react backdrops/picker; do
             node --input-type=module -e "await import('auth-kit/$s')"
           done
       - name: The auth-kit command runs from the build
@@ -47,6 +47,12 @@ jobs:
         run: npx vitest run test/dev/dist.test.ts
         env:
           AUTH_KIT_DIST_TESTS: '1'
+      # The release job's tarball check, on every push and PR, so a missing export, Lambda bundle, or
+      # notices file is caught before it merges, not when a v* tag's release fails.
+      - name: The packed tarball is complete
+        run: |
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+          node scripts/check-tarball.mjs "$RUNNER_TEMP"/auth-kit-*.tgz
       # A fixture app on real Next.js: next build, the auth matrix against next dev, next start.
       - name: End to end on Next.js (test/e2e)
         run: npx vitest run test/e2e

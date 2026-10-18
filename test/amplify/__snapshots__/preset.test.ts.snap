@@ -277,6 +277,14 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
       "EnabledMfas": [
         "SOFTWARE_TOKEN_MFA",
       ],
+      "LambdaConfig": {
+        "CustomMessage": {
+          "Fn::GetAtt": [
+            "CustomMessage7D2CB8D5",
+            "Arn",
+          ],
+        },
+      },
       "MfaConfiguration": "OPTIONAL",
       "Policies": {
         "PasswordPolicy": {

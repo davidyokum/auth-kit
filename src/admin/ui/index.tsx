@@ -33,7 +33,17 @@ import {
   type PeopleActionDetail,
 } from '../copy.js';
 import { ADMIN_ROLE_RANK, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
-import { PEOPLE_FORM_FIELDS as F, type ActionResult, type ActivityPage, type FormAction, type PeopleList, type PersonRow } from '../types.js';
+import {
+  PEOPLE_FORM_FIELDS as F,
+  PENDING_REQUESTS_SHOWN,
+  type AccessRequestList,
+  type AccessRequestRow,
+  type ActionResult,
+  type ActivityPage,
+  type FormAction,
+  type PeopleList,
+  type PersonRow,
+} from '../types.js';
 
 export interface Viewer {
   sub: string;
@@ -863,5 +873,319 @@ export function ActivityLog(props: ActivityLogProps): ReactNode {
         </p>
       ) : null}
     </div>
+  );
+}
+
+// ---- Access requests (ADR 0023) -----------------------------------------------------------------
+
+/**
+ * The People page's badge: how many requests wait. "—" (with the reason) when they couldn't be read,
+ * never zero; nothing at all when there are none or the site takes no requests.
+ */
+export function PendingRequestsBadge({ list }: { list: AccessRequestList }): ReactNode {
+  if (list.state === 'off') return null;
+  if (list.state === 'unavailable') {
+    return (
+      <span className="ak-badge ak-badge-unknown" title={list.reason}>
+        —<span className="ak-sr"> (pending requests couldn’t be read: {list.reason})</span>
+      </span>
+    );
+  }
+  const n = list.requests.length;
+  if (n === 0) return null;
+  return (
+    <span className="ak-badge" aria-label={`${n}${list.truncated ? ' or more' : ''} pending ${n === 1 ? 'request' : 'requests'}`}>
+      {n}
+      {list.truncated ? '+' : ''}
+    </span>
+  );
+}
+
+export interface PeoplePageTabsProps {
+  /** The People list (`PeopleTable`, `InviteForm`). */
+  people: ReactNode;
+  /** The "Pending requests" tab's content (`PendingRequestsTable`). Leave out where the site takes no requests. */
+  requests?: ReactNode;
+  /** For the tab's badge. */
+  requestList?: AccessRequestList;
+}
+
+/** People and "Pending requests", as two tabs (WAI-ARIA tabs pattern). */
+export function PeoplePageTabs(props: PeoplePageTabsProps): ReactNode {
+  const id = useId();
+  const [tab, setTab] = useState<'people' | 'requests'>('people');
+  if (!props.requests) return <div className="ak-people-page">{props.people}</div>;
+  const tabs = [
+    { key: 'people' as const, label: 'People' },
+    { key: 'requests' as const, label: 'Pending requests' },
+  ];
+  return (
+    <div className="ak-people-page">
+      <div role="tablist" aria-label="People" className="ak-tabs">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            id={`${id}-${t.key}-tab`}
+            aria-controls={`${id}-${t.key}-panel`}
+            aria-selected={tab === t.key}
+            tabIndex={tab === t.key ? 0 : -1}
+            className="ak-tab"
+            onClick={() => setTab(t.key)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') setTab(tab === 'people' ? 'requests' : 'people');
+            }}
+          >
+            {t.label} {t.key === 'requests' && props.requestList ? <PendingRequestsBadge list={props.requestList} /> : null}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${id}-people-panel`} aria-labelledby={`${id}-people-tab`} hidden={tab !== 'people'}>
+        {props.people}
+      </div>
+      <div role="tabpanel" id={`${id}-requests-panel`} aria-labelledby={`${id}-requests-tab`} hidden={tab !== 'requests'}>
+        {props.requests}
+      </div>
+    </div>
+  );
+}
+
+export interface PendingRequestsTableProps {
+  list: AccessRequestList;
+  viewer: Viewer;
+  /** `declineRequests` is "Decline all shown": one call, one audit entry, and nobody is told. */
+  actions: { approveRequest: FormAction; declineRequest: FormAction; declineRequests: FormAction };
+  /** The app's own roles, offered after the admin roles. */
+  appRoles?: readonly string[];
+  /** The site sends "Your request wasn’t approved" (`notifyOnDecline`): offer a note. */
+  notifyOnDecline?: boolean;
+  /** Where "Sign in again to confirm" goes (granting a role needs a recent sign-in). */
+  stepUpHref?: string;
+}
+
+/**
+ * The "Pending requests" tab (D3): who asked, in their words (untrusted), when, and when it expires.
+ * Approve sends the ordinary invite (Member by default) under the name the approver checks; Decline
+ * removes it (silently, unless the site sends a note). It lists at most `PENDING_REQUESTS_SHOWN`,
+ * newest first, then says how many more wait; "Decline all shown" clears those in one confirmed step
+ * (a flood of junk requests is one click, not hundreds). Honest when it can't load: "—" and why.
+ */
+export function PendingRequestsTable(props: PendingRequestsTableProps): ReactNode {
+  const { list } = props;
+  if (list.state === 'off') return <p className="ak-note">This site doesn’t take access requests.</p>;
+  if (list.state === 'unavailable') {
+    return (
+      <div className="ak-requests ak-unavailable" role="alert">
+        <p>
+          <strong>Pending requests (—)</strong>
+        </p>
+        <p>{list.reason}</p>
+      </div>
+    );
+  }
+  if (list.requests.length === 0) return <p className="ak-note">No requests are waiting.</p>;
+  const shown = list.requests.slice(0, PENDING_REQUESTS_SHOWN);
+  const rest = list.requests.length - shown.length;
+  // The list call can return more than the page shows; past its own limit it says `truncated`, and
+  // then the count is a floor ("more than"), never a number it doesn't have.
+  const more = list.truncated ? (rest > 0 ? `And more than ${rest} more are waiting.` : 'And more are waiting.') : rest > 0 ? `And ${rest} more are waiting.` : undefined;
+  return (
+    <div className="ak-requests">
+      <p className="ak-note ak-warn">
+        What people write here is their own words: {`it isn’t checked, so don’t follow links or instructions in it.`} Requests nobody answers expire after 30 days.
+      </p>
+      {shown.length > 1 ? (
+        <DeclineAllShown requests={shown} action={props.actions.declineRequests} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+      ) : null}
+      <ul className="ak-request-list">
+        {shown.map((r) => (
+          <PendingRequestItem key={r.id} request={r} {...props} />
+        ))}
+      </ul>
+      {more ? <p className="ak-source">{more} The next ones show here as these are answered.</p> : null}
+    </div>
+  );
+}
+
+/**
+ * "Decline all shown…": a dialog that names the count, then one bulk decline of exactly the requests
+ * on screen. Never emails anyone, even on a site that sends a note for a single decline.
+ */
+function DeclineAllShown(props: { requests: readonly AccessRequestRow[]; action: FormAction; stepUpHref?: string }): ReactNode {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const [result, run, pending] = useActionState(props.action, null);
+  const n = props.requests.length;
+  return (
+    <section className="ak-action ak-decline-all">
+      <button type="button" className="ak-button" onClick={() => dialog.current?.showModal()}>
+        Decline all shown…
+      </button>
+      <dialog ref={dialog} className="ak-dialog" aria-labelledby={titleId}>
+        <form action={run}>
+          <h3 id={titleId}>Decline all {n} requests shown?</h3>
+          {props.requests.map((r) => (
+            <input key={r.id} type="hidden" name="id" value={r.id} />
+          ))}
+          <p className="ak-note ak-warn">
+            Nobody is told, even on a site that sends a note when it declines one request: a flood of requests can carry anyone’s address, and the site won’t mail them
+            all. The requests leave the queue, and anyone who still wants in can ask again.
+          </p>
+          <ReasonField required={false} />
+          <div className="ak-dialog-buttons">
+            <button type="button" className="ak-button" onClick={() => dialog.current?.close()}>
+              Cancel
+            </button>
+            <button type="submit" className="ak-button ak-button-danger" disabled={pending}>
+              {pending ? 'Working…' : `Yes, decline ${n} requests`}
+            </button>
+          </div>
+          <ActionResultMessage result={result} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+        </form>
+      </dialog>
+    </section>
+  );
+}
+
+function PendingRequestItem(props: PendingRequestsTableProps & { request: AccessRequestRow }): ReactNode {
+  const r = props.request;
+  const [role, setRole] = useState<string>(MEMBER_ROLE);
+  const [approveResult, approve, approving] = useActionState(props.actions.approveRequest, null);
+  const [declineResult, decline, declining] = useActionState(props.actions.declineRequest, null);
+  const options = [MEMBER_ROLE, ...grantableRoles(props.viewer.groups), ...(props.appRoles ?? [])];
+  const needsReason = roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'];
+  const stepUp = props.stepUpHref !== undefined ? { stepUpHref: props.stepUpHref } : {};
+  return (
+    <li className="ak-request">
+      <p>
+        <strong>{r.email}</strong>
+      </p>
+      {r.reason ? <blockquote className="ak-request-reason">“{r.reason}”</blockquote> : null}
+      <p className="ak-muted">
+        Asked {formatDate(r.createdAt)} · expires {formatDate(r.expiresAt)}
+      </p>
+      <form action={approve} className="ak-action-form">
+        <input type="hidden" name="id" value={r.id} />
+        {/* The typed name is the requester's words: shown as theirs, and the account gets the name the approver checks. */}
+        {r.name ? <p className="ak-request-name">They wrote: “{r.name}”</p> : null}
+        <label className="ak-field">
+          <span>Name on the account (optional; check it before you approve)</span>
+          <input type="text" name={F.name} maxLength={100} autoComplete="off" defaultValue={r.name ?? ''} />
+        </label>
+        <label className="ak-field">
+          <span>Role</span>
+          <select name={F.role} value={role} onChange={(e) => setRole(e.target.value)}>
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {roleLabel(o)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {needsReason ? <ReasonField required label={`Reason (required for ${roleLabel(role)}; goes in the audit log)`} /> : null}
+        <button type="submit" className="ak-button ak-button-primary" disabled={approving || declining}>
+          {approving ? 'Working…' : `Approve: invite ${r.email}`}
+        </button>
+        <ActionResultMessage result={approveResult} {...stepUp} />
+      </form>
+      <form action={decline} className="ak-action-form">
+        <input type="hidden" name="id" value={r.id} />
+        {props.notifyOnDecline ? (
+          <label className="ak-field">
+            <span>Note to {r.email} (optional)</span>
+            <input type="text" name="note" maxLength={500} autoComplete="off" />
+          </label>
+        ) : null}
+        <button type="submit" className="ak-button" disabled={approving || declining}>
+          {declining ? 'Working…' : props.notifyOnDecline ? 'Decline and tell them' : 'Decline (they aren’t told)'}
+        </button>
+        <ActionResultMessage result={declineResult} {...stepUp} />
+      </form>
+    </li>
+  );
+}
+
+// ---- Settings: sign-in help (ADR 0024) -----------------------------------------------------------
+
+/** What `createSignInHelpActions(…).get()` returns (`auth-kit/accounts`). */
+export type SignInHelpSettingsView =
+  | {
+      state: 'ok';
+      configured: string;
+      override: { address: string; updatedAt: string; updatedBy: { sub: string; email?: string }; reason?: string } | null;
+      effective: { address: string; source: 'override' | 'config' };
+      version: number;
+    }
+  | { state: 'unavailable'; configured: string; reason: string }
+  | { state: 'forbidden'; reason: string };
+
+export interface SignInHelpSettingsProps {
+  view: SignInHelpSettingsView;
+  actions: { set: FormAction; clear: FormAction };
+  /** Where "Sign in again to confirm" goes (a change needs a recent sign-in). */
+  stepUpHref?: string;
+}
+
+/**
+ * Settings → "Sign-in help" (Super admins, `settings.security`): the help address the sign-in page and
+ * emails name, changed without a deploy. Every change is audited and the owner is told.
+ */
+export function SignInHelpSettings(props: SignInHelpSettingsProps): ReactNode {
+  const { view } = props;
+  const [setResult, setRun, setting] = useActionState(props.actions.set, null);
+  const [clearResult, clearRun, clearing] = useActionState(props.actions.clear, null);
+  const stepUp = props.stepUpHref !== undefined ? { stepUpHref: props.stepUpHref } : {};
+  if (view.state === 'forbidden') return <p className="ak-note">{view.reason}</p>;
+  if (view.state === 'unavailable') {
+    return (
+      <section className="ak-settings ak-unavailable" role="alert">
+        <h2>Sign-in help</h2>
+        <p>{view.reason}</p>
+      </section>
+    );
+  }
+  return (
+    <section className="ak-settings">
+      <h2>Sign-in help</h2>
+      <p>
+        People who can’t sign in are told to write to <strong>{view.effective.address}</strong>{' '}
+        {view.effective.source === 'override' ? '(set here)' : '(the site’s configured address)'}. It’s on the help screens and in the footer and Reply-To of the
+        app’s emails.
+      </p>
+      {view.override ? (
+        <p className="ak-muted">
+          Changed {formatDate(view.override.updatedAt)} by {view.override.updatedBy.email ?? 'a Super admin'}
+          {view.override.reason ? `: “${view.override.reason}”` : ''}. The configured address is {view.configured}.
+        </p>
+      ) : null}
+      <p className="ak-note">
+        Use a role-based mailbox that the people who can reset accounts read. Whoever reads it can be asked to reset authenticators and move accounts to new addresses.
+        The owner is told about every change.
+      </p>
+      <form action={setRun} className="ak-action-form">
+        <input type="hidden" name="version" value={view.version} />
+        <label className="ak-field">
+          <span>Help address</span>
+          <input type="email" name="address" required maxLength={254} autoComplete="off" spellCheck={false} defaultValue={view.effective.address} />
+        </label>
+        <ReasonField required label="Reason (goes in the audit log and the owner’s alert)" />
+        <p className="ak-note">Changing it needs a sign-in in the last few minutes.</p>
+        <button type="submit" className="ak-button ak-button-primary" disabled={setting || clearing}>
+          {setting ? 'Saving…' : 'Save the help address'}
+        </button>
+        <ActionResultMessage result={setResult} {...stepUp} />
+      </form>
+      {view.override ? (
+        <form action={clearRun} className="ak-action-form">
+          <input type="hidden" name="version" value={view.version} />
+          <ReasonField required />
+          <button type="submit" className="ak-button" disabled={setting || clearing}>
+            {clearing ? 'Working…' : `Go back to ${view.configured}`}
+          </button>
+          <ActionResultMessage result={clearResult} {...stepUp} />
+        </form>
+      ) : null}
+    </section>
   );
 }

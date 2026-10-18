@@ -11,17 +11,35 @@ import {
   setFirstPassword,
   signOutEverywhere,
 } from './api.js';
+import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
+import { checkedHref, hrefOr } from './href.js';
+import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import { type PasswordCheckOptions, PasswordForm } from './PasswordForm.js';
-import { Actions, Button, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
+import { Actions, Button, Field, Heading, type HeadingLevel, LiveRegions, type StyleProps, Text, slot, useFeedback } from './ui.js';
+
+/** What a self-service server action answers (`ActionResult` from `auth-kit/admin` fits). */
+export type SelfServiceResult = { ok: true; message: string } | { ok: false; code: string; error: string };
+type ActionResult = SelfServiceResult;
+
+/**
+ * A member's own account actions on sign-up sites (register D4): the server actions from
+ * `createSelfServiceActions` in `auth-kit/accounts`, passed through the site's own `'use server'` file.
+ */
+export interface MyAccountSelfService {
+  requestEmailChange(input: { newEmail: string }): Promise<ActionResult>;
+  confirmEmailChange(input: { code: string }): Promise<ActionResult>;
+  deleteMyAccount(input: { confirmEmail: string }): Promise<ActionResult>;
+}
 
 export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   passkeysEnabled: boolean;
   /** The site's name, shown in the authenticator app. */
   issuer: string;
-  /** Where "Sign out everywhere" goes afterwards. Default `/sign-in`. */
+  /** Where "Sign out everywhere" goes afterwards. Default `/sign-in`. A same-site path or an http(s) URL (anything else throws). */
   signedOutPath?: string;
   /** Default: a full page load (`window.location.assign`). */
   navigate?: (path: string) => void;
@@ -30,6 +48,19 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   /** Heading level for the page heading; sections use the next level. Default 1. */
   headingLevel?: HeadingLevel;
   renderQrCode?: (otpauthUri: string) => ReactNode;
+  /**
+   * Sign-up sites (register D4): members change their own email address and delete their own
+   * account. Without it, the email is read-only ("ask the site's admin") and there's no delete.
+   */
+  selfService?: MyAccountSelfService;
+  /** The site's name, for "Delete your {Site} account?". */
+  siteName?: string;
+  /** What happens to a deleted person's items on this site, in one sentence (REPORT §3.1e). */
+  itemsNote?: string;
+  /** Where "Sign in again to confirm" goes when an action needs a recent sign-in: `signInUrl('/account', { reauth: true })`. A path or an http(s) URL. */
+  stepUpHref?: string;
+  /** Where a deleted account goes afterwards. Default `/`. A same-site path or an http(s) URL. */
+  deletedPath?: string;
 }
 
 /** A value that loads, with the failure kept and explained instead of shown as "none". */
@@ -62,8 +93,8 @@ function nextLevel(level: HeadingLevel): HeadingLevel {
 }
 
 function describePasskey(passkey: PasskeyInfo): string {
-  const kind = passkey.authenticatorAttachment === 'platform' ? 'On a device' : passkey.authenticatorAttachment === 'cross-platform' ? 'Security key or phone' : null;
-  const added = passkey.createdAt ? `added ${new Date(passkey.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : null;
+  const kind = passkey.authenticatorAttachment === 'platform' ? MY_ACCOUNT.onDevice : passkey.authenticatorAttachment === 'cross-platform' ? MY_ACCOUNT.securityKeyOrPhone : null;
+  const added = passkey.createdAt ? MY_ACCOUNT.added(new Date(passkey.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })) : null;
   return [kind, added].filter(Boolean).join(', ');
 }
 
@@ -74,6 +105,10 @@ function describePasskey(passkey: PasskeyInfo): string {
  */
 export function MyAccount(props: MyAccountProps) {
   const { classNames, passkeysEnabled } = props;
+  // Checked before anything renders: each ends up in an href or window.location.assign.
+  const signedOutPath = hrefOr('signedOutPath', props.signedOutPath, '/sign-in');
+  const deletedPath = hrefOr('deletedPath', props.deletedPath, '/');
+  const stepUpHref = props.stepUpHref !== undefined ? checkedHref('stepUpHref', props.stepUpHref, '/sign-in?reauth=1') : undefined;
   const level = props.headingLevel ?? 1;
   const sub = nextLevel(level);
   const errorId = useId();
@@ -116,37 +151,37 @@ export function MyAccount(props: MyAccountProps) {
   const hasPassword = factorValue?.configured.includes('PASSWORD') ?? false;
 
   async function addPasskey() {
-    const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: 'Waiting for your passkey…' });
+    const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: STATUS.waitingForPasskey });
     if (result.ok) {
-      fb.set({ status: 'Passkey saved.' });
+      fb.set({ status: STATUS.passkeySaved });
       reloadPasskeys();
       reloadFactors();
     }
   }
 
   async function removePasskey(passkey: PasskeyInfo) {
-    const result = await fb.run(() => deletePasskey(passkey.id), { context: 'passkey-remove', busyStatus: 'Removing the passkey…' });
+    const result = await fb.run(() => deletePasskey(passkey.id), { context: 'passkey-remove', busyStatus: STATUS.removingPasskey });
     setConfirmingRemoval(null);
     focusPasskeysHeading();
     if (result.ok) {
-      fb.set({ status: 'Passkey removed.' });
+      fb.set({ status: STATUS.passkeyRemoved });
       reloadPasskeys();
       reloadFactors();
     }
   }
 
   async function signOutAll() {
-    const result = await fb.run(signOutEverywhere, { context: 'account', busyStatus: 'Signing out everywhere…' });
-    if (result.ok) (props.navigate ?? ((path: string) => window.location.assign(path)))(props.signedOutPath ?? '/sign-in');
+    const result = await fb.run(signOutEverywhere, { context: 'account', busyStatus: STATUS.signingOutEverywhere });
+    if (result.ok) (props.navigate ?? ((path: string) => window.location.assign(path)))(signedOutPath);
   }
 
   function unavailable(message: string, retry: () => void) {
     return (
       <>
-        <Text classNames={classNames}>Couldn&apos;t load this. {message}</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.couldntLoad(message)}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} onClick={retry}>
-            Try again
+            {SIGN_IN.tryAgain}
           </Button>
         </Actions>
       </>
@@ -156,25 +191,25 @@ export function MyAccount(props: MyAccountProps) {
   let passkeySection: ReactNode = null;
   if (passkeysEnabled) {
     let list: ReactNode;
-    if (passkeys.state === 'loading') list = <Text classNames={classNames}>Loading your passkeys…</Text>;
+    if (passkeys.state === 'loading') list = <Text classNames={classNames}>{MY_ACCOUNT.loadingPasskeys}</Text>;
     else if (passkeys.state === 'failed') list = unavailable(passkeys.message, reloadPasskeys);
-    else if (passkeys.value.length === 0) list = <Text classNames={classNames}>No passkeys yet.</Text>;
+    else if (passkeys.value.length === 0) list = <Text classNames={classNames}>{MY_ACCOUNT.noPasskeys}</Text>;
     else {
       const count = passkeys.value.length;
       list = (
         <ul {...slot(classNames, 'list')}>
           {passkeys.value.map((passkey) => {
-            const name = passkey.friendlyName ?? 'Passkey';
+            const name = passkey.friendlyName ?? MY_ACCOUNT.passkeyName;
             const check = canRemovePasskey({ passkeyCount: count, factors: factorValue });
             const confirming = confirmingRemoval === passkey.id;
             return (
               <li key={passkey.id} {...slot(classNames, 'listItem')}>
                 <span>{name}</span> {describePasskey(passkey) ? <span>({describePasskey(passkey)})</span> : null}{' '}
                 {confirming ? (
-                  <span role="group" aria-label={`Remove ${name}?`}>
-                    <span>Remove {name}? You won&apos;t be able to sign in with it.</span>{' '}
+                  <span role="group" aria-label={MY_ACCOUNT.removeQuestion(name)}>
+                    <span>{MY_ACCOUNT.removeConfirm(name)}</span>{' '}
                     <Button variant="secondary" classNames={classNames} disabled={fb.busy} autoFocus onClick={() => void removePasskey(passkey)}>
-                      Remove passkey
+                      {MY_ACCOUNT.removePasskey}
                     </Button>{' '}
                     <Button
                       variant="link"
@@ -185,7 +220,7 @@ export function MyAccount(props: MyAccountProps) {
                         focusPasskeysHeading();
                       }}
                     >
-                      Keep it
+                      {MY_ACCOUNT.keepIt}
                     </Button>
                   </span>
                 ) : (
@@ -193,17 +228,17 @@ export function MyAccount(props: MyAccountProps) {
                     variant="link"
                     classNames={classNames}
                     disabled={fb.busy}
-                    aria-label={`Remove ${name}`}
+                    aria-label={MY_ACCOUNT.removeLabel(name)}
                     onClick={() => {
                       if (!check.allowed) {
-                        fb.set({ error: check.reason ?? "This passkey can't be removed right now.", status: null });
+                        fb.set({ error: check.reason ?? MY_ACCOUNT.cantRemove, status: null });
                         return;
                       }
                       fb.set({ error: null });
                       setConfirmingRemoval(passkey.id);
                     }}
                   >
-                    Remove
+                    {MY_ACCOUNT.remove}
                   </Button>
                 )}
               </li>
@@ -215,13 +250,14 @@ export function MyAccount(props: MyAccountProps) {
     passkeySection = (
       <section aria-labelledby={`${errorId}-passkeys`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-passkeys`}>
-          Passkeys
+          <Icon name="fingerprint" />
+          {MY_ACCOUNT.passkeysHeading}
         </Heading>
-        <Text classNames={classNames}>Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.passkeysIntro}</Text>
         {list}
         <Actions classNames={classNames}>
           <Button classNames={classNames} disabled={fb.busy} onClick={() => void addPasskey()}>
-            Add a passkey
+            {MY_ACCOUNT.addPasskey}
           </Button>
         </Actions>
       </section>
@@ -234,14 +270,14 @@ export function MyAccount(props: MyAccountProps) {
       <AuthenticatorSetup
         issuer={props.issuer}
         {...(emailValue !== undefined && { accountName: emailValue })}
-        heading={editing === 'authenticator-after-password' ? 'Now add your authenticator' : totp.state === 'ready' && totp.value ? 'Replace your authenticator' : 'Set up your authenticator'}
+        heading={editing === 'authenticator-after-password' ? MY_ACCOUNT.nowAddHeading : totp.state === 'ready' && totp.value ? MY_ACCOUNT.replaceHeading : MY_ACCOUNT.setUpHeading}
         {...(editing === 'authenticator-after-password' && {
-          intro: 'You sign in with a password now, so this site also asks for a code from an authenticator app.',
+          intro: MY_ACCOUNT.nowAddIntro,
         })}
         headingLevel={nextLevel(sub)}
         onDone={() => {
           setEditing(null);
-          fb.set({ status: 'Your authenticator is on.' });
+          fb.set({ status: STATUS.authenticatorOn });
           reloadTotp();
           reloadFactors();
         }}
@@ -251,22 +287,18 @@ export function MyAccount(props: MyAccountProps) {
       />
     );
   } else if (totp.state === 'loading') {
-    authenticatorBody = <Text classNames={classNames}>Loading…</Text>;
+    authenticatorBody = <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>;
   } else if (totp.state === 'failed') {
     authenticatorBody = unavailable(totp.message, reloadTotp);
   } else {
     authenticatorBody = (
       <>
         <Text classNames={classNames}>
-          {totp.value
-            ? 'On. Sign-in with your password also asks for a 6-digit code from it.'
-            : hasPassword
-              ? 'Off. You sign in with a password, so set one up now.'
-              : 'Off. You only need one if you sign in with a password.'}
+          {totp.value ? MY_ACCOUNT.totpOn : hasPassword ? MY_ACCOUNT.totpOffNeeded : MY_ACCOUNT.totpOff}
         </Text>
         <Actions classNames={classNames}>
           <Button variant={totp.value ? 'secondary' : 'primary'} classNames={classNames} disabled={fb.busy} onClick={() => setEditing('authenticator')}>
-            {totp.value ? 'Replace authenticator' : 'Set up authenticator'}
+            {totp.value ? MY_ACCOUNT.replace : MY_ACCOUNT.setUp}
           </Button>
         </Actions>
       </>
@@ -274,22 +306,22 @@ export function MyAccount(props: MyAccountProps) {
   }
 
   let passwordBody: ReactNode;
-  if (factors.state === 'loading') passwordBody = <Text classNames={classNames}>Loading…</Text>;
+  if (factors.state === 'loading') passwordBody = <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>;
   else if (factors.state === 'failed') passwordBody = unavailable(factors.message, reloadFactors);
   else if (editing === 'password') {
     passwordBody = hasPassword ? (
       <PasswordForm
         name="change-password"
-        heading="Change your password"
+        heading={MY_ACCOUNT.changePasswordHeading}
         headingLevel={nextLevel(sub)}
         askCurrent
         {...(emailValue !== undefined && { email: emailValue })}
-        submitLabel="Change password"
+        submitLabel={MY_ACCOUNT.changePassword}
         context="change-password"
         onSubmit={({ currentPassword, newPassword }) => changePassword(currentPassword ?? '', newPassword)}
         onDone={() => {
           setEditing(null);
-          fb.set({ status: 'Password changed.' });
+          fb.set({ status: STATUS.passwordChanged });
         }}
         onCancel={() => setEditing(null)}
         {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
@@ -298,11 +330,11 @@ export function MyAccount(props: MyAccountProps) {
     ) : (
       <PasswordForm
         name="set-password"
-        heading="Set a password"
-        intro="After this you'll add an authenticator app: sign-in with a password always asks for its code too."
+        heading={MY_ACCOUNT.setPassword}
+        intro={MY_ACCOUNT.setPasswordIntro}
         headingLevel={nextLevel(sub)}
         {...(emailValue !== undefined && { email: emailValue })}
-        submitLabel="Save password"
+        submitLabel={MY_ACCOUNT.savePassword}
         context="set-password"
         onSubmit={({ newPassword }) => setFirstPassword(newPassword)}
         onDone={() => {
@@ -319,10 +351,10 @@ export function MyAccount(props: MyAccountProps) {
   } else {
     passwordBody = (
       <>
-        <Text classNames={classNames}>{hasPassword ? 'You have a password.' : "You don't have a password. You don't need one if you use a passkey."}</Text>
+        <Text classNames={classNames}>{hasPassword ? MY_ACCOUNT.hasPassword : MY_ACCOUNT.noPassword}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} disabled={fb.busy || editing !== null} onClick={() => setEditing('password')}>
-            {hasPassword ? 'Change password' : 'Set a password'}
+            {hasPassword ? MY_ACCOUNT.changePassword : MY_ACCOUNT.setPassword}
           </Button>
         </Actions>
       </>
@@ -332,46 +364,260 @@ export function MyAccount(props: MyAccountProps) {
   return (
     <div ref={rootRef} data-auth-kit="my-account" {...slot(classNames, 'root', props.className)}>
       <Heading level={level} classNames={classNames}>
-        My account
+        {MY_ACCOUNT.heading}
       </Heading>
       <LiveRegions classNames={classNames} errorId={errorId} error={fb.error} status={fb.status} />
       <section aria-labelledby={`${errorId}-email`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-email`}>
-          Email
+          {MY_ACCOUNT.emailHeading}
         </Heading>
         {email.state === 'loading' ? (
-          <Text classNames={classNames}>Loading…</Text>
+          <Text classNames={classNames}>{MY_ACCOUNT.loading}</Text>
         ) : email.state === 'failed' ? (
           unavailable(email.message, reloadEmail)
         ) : (
-          <Text classNames={classNames}>{email.value ?? 'No email address on this account.'}</Text>
+          <Text classNames={classNames}>{email.value ?? MY_ACCOUNT.noEmail}</Text>
         )}
-        <Text classNames={classNames}>To change it, ask the site&apos;s admin.</Text>
+        {props.selfService ? (
+          <EmailChange selfService={props.selfService} level={nextLevel(sub)} classNames={classNames} {...(stepUpHref !== undefined && { stepUpHref })} onChanged={reloadEmail} />
+        ) : (
+          <Text classNames={classNames}>{SELF_SERVICE.askAdmin}</Text>
+        )}
       </section>
       {passkeySection}
       <section aria-labelledby={`${errorId}-authenticator`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-authenticator`}>
-          Authenticator app
+          {MY_ACCOUNT.authenticatorHeading}
         </Heading>
         {authenticatorBody}
       </section>
       <section aria-labelledby={`${errorId}-password`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-password`}>
-          Password
+          <Icon name="password" />
+          {MY_ACCOUNT.passwordHeading}
         </Heading>
         {passwordBody}
       </section>
       <section aria-labelledby={`${errorId}-signout`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-signout`}>
-          Sign out everywhere
+          {MY_ACCOUNT.signOutHeading}
         </Heading>
-        <Text classNames={classNames}>Ends your sessions on every device, including this one. Pages already open elsewhere can keep working for up to an hour.</Text>
+        <Text classNames={classNames}>{MY_ACCOUNT.signOutIntro}</Text>
         <Actions classNames={classNames}>
           <Button variant="secondary" classNames={classNames} disabled={fb.busy} onClick={() => void signOutAll()}>
-            Sign out everywhere
+            {MY_ACCOUNT.signOut}
           </Button>
         </Actions>
       </section>
+      {props.selfService ? (
+        <DeleteAccount
+          selfService={props.selfService}
+          email={emailValue}
+          {...(props.siteName !== undefined && { siteName: props.siteName })}
+          level={sub}
+          classNames={classNames}
+          {...(props.itemsNote !== undefined && { itemsNote: props.itemsNote })}
+          {...(stepUpHref !== undefined && { stepUpHref })}
+          onDeleted={() => (props.navigate ?? ((path: string) => window.location.assign(path)))(deletedPath)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** An action's result, said plainly; "Sign in again to confirm" when it needs a recent sign-in. */
+function ResultLine(props: { result: ActionResult | null; stepUpHref?: string; classNames: StyleProps['classNames'] }) {
+  if (!props.result) return null;
+  if (props.result.ok) {
+    return (
+      <p role="status" {...slot(props.classNames, 'status')}>
+        {props.result.message}
+      </p>
+    );
+  }
+  return (
+    <div role="alert" {...slot(props.classNames, 'error')}>
+      <p>{props.result.error}</p>
+      {props.result.code === 'step_up_required' && props.stepUpHref ? (
+        <p>
+          <a href={props.stepUpHref} {...slot(props.classNames, 'link')}>
+            {SELF_SERVICE.signInAgain}
+          </a>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Change your email address": a code to the new address, then the change (D4; verified before it takes effect). */
+function EmailChange(props: { selfService: MyAccountSelfService; level: HeadingLevel; stepUpHref?: string; onChanged: () => void; classNames: StyleProps['classNames'] }) {
+  const { classNames } = props;
+  const [stage, setStage] = useState<'closed' | 'address' | 'code'>('closed');
+  const [newEmail, setNewEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+
+  async function run(task: () => Promise<ActionResult>, onOk: () => void) {
+    setBusy(true);
+    let r: ActionResult;
+    try {
+      r = await task();
+    } catch {
+      r = { ok: false, code: 'unavailable', error: MY_ACCOUNT.unreachable };
+    }
+    setBusy(false);
+    setResult(r);
+    if (r.ok) onOk();
+  }
+
+  if (stage === 'closed') {
+    return (
+      <>
+        <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+        <Actions classNames={classNames}>
+          <Button variant="secondary" classNames={classNames} onClick={() => (setResult(null), setStage('address'))}>
+            {SELF_SERVICE.changeEmail}
+          </Button>
+        </Actions>
+      </>
+    );
+  }
+  return (
+    <div data-auth-kit="change-email" {...slot(classNames, 'section')}>
+      <Heading level={props.level} classNames={classNames}>
+        {SELF_SERVICE.changeEmailHeading}
+      </Heading>
+      <Text classNames={classNames}>{SELF_SERVICE.changeEmailSub}</Text>
+      <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+      {stage === 'address' ? (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) void run(() => props.selfService.requestEmailChange({ newEmail: newEmail.trim() }), () => setStage('code'));
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Field label={SELF_SERVICE.newEmailLabel} type="email" name="email" inputMode="email" autoComplete="email" autoCapitalize="none" spellCheck={false} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} classNames={classNames} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy} classNames={classNames}>
+              {SELF_SERVICE.sendCode}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setResult(null), setStage('closed'))}>
+              {SELF_SERVICE.cancel}
+            </Button>
+          </Actions>
+        </form>
+      ) : (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy)
+              void run(
+                () => props.selfService.confirmEmailChange({ code: code.trim() }),
+                () => {
+                  setStage('closed');
+                  setCode('');
+                  setNewEmail('');
+                  // New tokens carry the new address.
+                  void refreshSession().catch(() => undefined).then(props.onChanged);
+                },
+              );
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Field label={SELF_SERVICE.codeLabel} name="one-time-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} classNames={classNames} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy} classNames={classNames}>
+              {SELF_SERVICE.confirm}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setResult(null), setStage('closed'))}>
+              {SELF_SERVICE.cancel}
+            </Button>
+          </Actions>
+        </form>
+      )}
+    </div>
+  );
+}
+
+/** "Delete your {Site} account?" (REPORT §3.1e): a recent sign-in and the address typed out; never the owner (the server refuses). */
+function DeleteAccount(props: {
+  selfService: MyAccountSelfService;
+  email: string | undefined;
+  siteName?: string;
+  itemsNote?: string;
+  level: HeadingLevel;
+  stepUpHref?: string;
+  onDeleted: () => void;
+  classNames: StyleProps['classNames'];
+}) {
+  const { classNames } = props;
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  return (
+    <section data-auth-kit="delete-account" {...slot(classNames, 'section')}>
+      <Heading level={props.level} classNames={classNames}>
+        {open ? SELF_SERVICE.deleteConfirmHeading(props.siteName !== undefined ? { siteName: props.siteName } : {}) : SELF_SERVICE.deleteHeading}
+      </Heading>
+      {open ? (
+        <form
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (busy) return;
+            setBusy(true);
+            void props.selfService
+              .deleteMyAccount({ confirmEmail: typed.trim() })
+              .catch((): ActionResult => ({ ok: false, code: 'unavailable', error: MY_ACCOUNT.unreachable }))
+              .then((r) => {
+                setBusy(false);
+                setResult(r);
+                if (r.ok) props.onDeleted();
+              });
+          }}
+          {...slot(classNames, 'form')}
+        >
+          <Text classNames={classNames}>
+            {SELF_SERVICE.deleteConfirmSub}
+            {props.itemsNote ? ` ${props.itemsNote}` : ''}
+          </Text>
+          <Field
+            label={SELF_SERVICE.deleteConfirmLabel}
+            type="email"
+            name="confirm-email"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            {...(props.email !== undefined && { placeholder: props.email })}
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            classNames={classNames}
+          />
+          <ResultLine result={result} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
+          <Actions classNames={classNames}>
+            <Button type="submit" disabled={busy || typed.trim() === ''} classNames={classNames} data-danger="">
+              {SELF_SERVICE.deleteButton}
+            </Button>
+            <Button variant="link" classNames={classNames} onClick={() => (setOpen(false), setResult(null), setTyped(''))}>
+              {SELF_SERVICE.keep}
+            </Button>
+          </Actions>
+        </form>
+      ) : (
+        <>
+          <Text classNames={classNames}>{SELF_SERVICE.deleteIntro}</Text>
+          <Actions classNames={classNames}>
+            <Button variant="secondary" classNames={classNames} onClick={() => setOpen(true)}>
+              {SELF_SERVICE.deleteButton}
+            </Button>
+          </Actions>
+        </>
+      )}
+    </section>
   );
 }

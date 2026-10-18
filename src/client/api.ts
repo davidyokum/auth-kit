@@ -23,6 +23,7 @@ import {
   signOut,
   updateMFAPreference,
   updatePassword,
+  updateUserAttributes,
   verifyTOTPSetup,
   type SignInInput,
   type SignInOutput,
@@ -203,6 +204,19 @@ export async function currentUser(): Promise<{ userId: string; loginId?: string 
 /** The account's email address. */
 export async function fetchAccountEmail(): Promise<string | undefined> {
   return (await fetchUserAttributes()).email;
+}
+
+/**
+ * Saves the person's own name ("Your name" after sign-up): `given_name`, `family_name`, and `name`
+ * (what the People page shows). The app client lets people write these, never their email address.
+ */
+export async function saveName(input: { givenName: string; familyName: string }): Promise<void> {
+  const given = input.givenName.trim();
+  const family = input.familyName.trim();
+  await updateUserAttributes({
+    userAttributes: { given_name: given, family_name: family, name: [given, family].filter(Boolean).join(' ') },
+  });
+  await refreshSession();
 }
 
 // ---- Authenticator (TOTP) -----------------------------------------------------------------------

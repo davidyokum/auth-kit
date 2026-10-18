@@ -80,7 +80,7 @@ describe('canRemovePasskey (never the last way in)', () => {
   it('fails closed on the last passkey when factors are unknown', () => {
     const unknown = canRemovePasskey({ passkeyCount: 1, factors: null });
     expect(unknown.allowed).toBe(false);
-    expect(unknown.reason).toMatch(/couldn't confirm/i);
+    expect(unknown.reason).toMatch(/couldn’t confirm/i);
   });
 });
 
@@ -198,27 +198,64 @@ describe('describeAuthError', () => {
     expect(result.message.length).toBeGreaterThan(10);
   });
 
-  it('tells people to wait when rate-limited, including by WAF and by password lockout', () => {
-    expect(describeAuthError(awsError('ForbiddenException')).message).toMatch(/Wait a few minutes/);
-    expect(describeAuthError(awsError('NotAuthorizedException', 'Password attempts exceeded')).kind).toBe('rate-limited');
+  it('says the approved words for a wrong password, whatever the cause', () => {
+    for (const error of [
+      awsError('NotAuthorizedException', 'Incorrect username or password.'),
+      awsError('UserNotFoundException', 'User does not exist.'),
+      awsError('NotAuthorizedException', 'User is disabled.'),
+    ]) {
+      expect(describeAuthError(error, 'sign-in').message).toBe('That email address and password don’t match. Try again, or use another way to sign in.');
+    }
   });
 
-  it('spots an expired 3-minute sign-in session', () => {
-    const info = describeAuthError(awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.'), 'code');
+  it('tells people to wait when rate-limited, including by WAF and by password lockout', () => {
+    for (const name of ['ForbiddenException', 'LimitExceededException', 'TooManyRequestsException', 'TooManyFailedAttemptsException']) {
+      expect(describeAuthError(awsError(name)).message).toBe('Too many attempts from this network. Wait 5 minutes, then try again.');
+    }
+    const lockout = describeAuthError(awsError('NotAuthorizedException', 'Password attempts exceeded'));
+    expect(lockout.kind).toBe('rate-limited');
+    expect(lockout.message).toBe('Too many attempts from this network. Wait 5 minutes, then try again.');
+  });
+
+  it('spots an expired sign-in session and names the code lifetime (default 3 minutes)', () => {
+    const expired = awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.');
+    const info = describeAuthError(expired, 'code');
     expect(info.kind).toBe('session-expired');
-    expect(info.message).toMatch(/3 minutes/);
+    expect(info.message).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect(describeAuthError(expired, 'totp', { codeLifetimeMinutes: 10 }).message).toBe(
+      'That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.',
+    );
+  });
+
+  it('words a wrong emailed code with the site’s name, and a wrong authenticator code with what to do', () => {
+    for (const error of [awsError('CodeMismatchException'), awsError('NotAuthorizedException', 'Incorrect username or password.')]) {
+      expect(describeAuthError(error, 'code', { siteName: 'Example Reports' }).message).toBe('That code didn’t work. Check it against the newest email from Example Reports.');
+      expect(describeAuthError(error, 'code').message).toBe('That code didn’t work. Check it against the newest email from this site.');
+    }
+    const wrongTotp = 'That code didn’t work. Codes change every 30 seconds, so enter the newest one.';
+    expect(describeAuthError(awsError('CodeMismatchException'), 'totp').message).toBe(wrongTotp);
+    expect(describeAuthError(awsError('NotAuthorizedException', 'Invalid code'), 'totp').message).toBe(wrongTotp);
+    expect(describeAuthError(awsError('EnableSoftwareTokenMFAException'), 'authenticator-setup').message).toBe(wrongTotp);
+    expect(describeAuthError(awsError('ExpiredCodeException'), 'code').message).toBe('That code has expired. Ask for a new one.');
   });
 
   it('words errors for their context', () => {
-    expect(describeAuthError(awsError('NotAuthorizedException', 'Incorrect username or password.'), 'change-password').message).toBe("Your current password isn't right.");
-    expect(describeAuthError(awsError('CodeMismatchException'), 'totp').message).toMatch(/authenticator/);
-    expect(describeAuthError(awsError('InvalidPasswordException', 'Password is compromised')).message).toMatch(/data breach/);
-    expect(describeAuthError(awsError('PasskeyRegistrationCanceled'), 'passkey-register').message).toMatch(/wasn't saved/);
+    expect(describeAuthError(awsError('NotAuthorizedException', 'Incorrect username or password.'), 'change-password').message).toBe("Your current password isn’t right.");
+    expect(describeAuthError(awsError('InvalidPasswordException', 'Password is compromised')).message).toBe(
+      'This password has appeared in a data breach, so it isn’t safe to use. Choose a different one.',
+    );
+    expect(describeAuthError(awsError('PasskeyRegistrationCanceled'), 'passkey-register').message).toBe('We couldn’t create your passkey. Try again, or use a password instead.');
+    expect(describeAuthError(awsError('PasskeyAuthenticationCanceled'), 'sign-in').message).toBe('We didn’t get a passkey. Try again, or use another way below.');
+    expect(describeAuthError(awsError('PasskeyNotSupported'), 'sign-in').message).toBe('This browser can’t use passkeys here. Use another way below.');
   });
 
-  it('treats a failed fetch as a network problem', () => {
+  it('treats a failed fetch as a network problem, and names the help address when it has one', () => {
     expect(describeAuthError(new TypeError('Failed to fetch')).kind).toBe('network');
     expect(describeAuthError({ name: 'Unknown', underlyingError: new TypeError('x') }).kind).toBe('network');
     expect(describeAuthError('weird').kind).toBe('unknown');
+    expect(describeAuthError(new TypeError('Failed to fetch')).message).toBe('We couldn’t reach the sign-in service. Check your connection and try again.');
+    expect(describeAuthError(awsError('NetworkError'), 'sign-in', { helpAddress: 'apps-help@example.org' }).message).toBe(
+      'We couldn’t reach the sign-in service. Check your connection and try again. If it keeps happening, email apps-help@example.org.',
+    );
   });
 });
