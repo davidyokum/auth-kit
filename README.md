@@ -50,6 +50,7 @@ Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplif
 // amplify/auth/resource.ts
 import { defineAuth } from '@aws-amplify/backend';
 import { standardAuthProps, type AuthStandardOptions } from 'auth-kit/amplify';
+import { customMessage } from './custom-message/resource';
 
 export const authOptions = {
   project: 'example-reports',
@@ -70,7 +71,18 @@ export const authOptions = {
   // codeLifetimeMinutes: 3,
 } satisfies AuthStandardOptions;
 
-export const auth = defineAuth(standardAuthProps(authOptions));
+// Every pool needs the custom message trigger (synthesis fails without it): it words the code emails,
+// and it refuses email changes made through Cognito's public API (ADR 0023).
+export const auth = defineAuth(standardAuthProps(authOptions, { triggers: { customMessage } }));
+```
+
+```ts
+// amplify/auth/custom-message/resource.ts and handler.ts
+import { defineFunction } from '@aws-amplify/backend';
+export const customMessage = defineFunction({ name: 'custom-message', entry: './handler.ts' });
+// handler.ts
+import { customMessageHandler } from 'auth-kit/amplify/custom-message';
+export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 3 });
 ```
 
 ```ts
@@ -376,8 +388,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
 ```
 
 ```tsx
-// app/(app)/layout.tsx: the server enforces the authenticator rule for every page below
-await pages.requireUser(); // a password user without an authenticator goes to /account/authenticator
+// app/(app)/layout.tsx: the server enforces both enrollment rules for every page below
+await pages.requireUser(); // only emailed codes so far → /account/sign-in-method; a password without an authenticator → /account/authenticator
 return children; // no TOTPEnrollmentGate here: the guard above already covers every page
 
 // app/account/page.tsx: the gate inside the page, after its own guard, around client UI
@@ -393,9 +405,11 @@ return (
 
 The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true })` and renders `<AuthenticatorSetup issuer="…" onDone={…} />` from a small client component (function props such as `onDone`, `navigate`, `loadFactors`, and `renderQrCode` can't cross from a server component).
 
+**The first credential is enforced on the server.** An account with neither a passkey nor a password (an invitee or a sign-up who closed the tab at "Choose how you'll sign in next time") gets 403 `first_credential_required` from `requireUser` and `getUser` returns `null` (register A1). Add the chooser page the guard sends them to: `/account/sign-in-method` (`firstCredentialPath` to change it) calls `pages.requireUser({ allowFirstCredentialEnrollment: true })` and renders `<ChooseFirstCredential issuer="…" passkeysEnabled={…} onDone={…} />`. `requireFirstCredential: false` in `createServerAuth` turns the rule off.
+
 | Export | What it does |
 |---|---|
-| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" (or, with passkeys off, "Enter your password" with "for {email} · Change"); "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button. Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes`, `emailHint`, `securityNotices`, `signUpHref`, `requestAccessHref`. Redirects through `safeRedirect`; `reauth` for step-up. |
+| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" (or, with passkeys off, "Enter your password" with "for {email} · Change"); "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button. Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes`, `emailHint`, `securityNotices`, `signUpHref`, `requestAccessHref` (paths or http(s) URLs only; anything else throws), `passkey` (`{ relyingPartyId, timeoutMs }`: the pool's, so the decoy prompt matches the real one). Redirects through `safeRedirect`; `reauth` for step-up. |
 | `SignUp` | "Create your account" ([section 11](#11-account-creation-auth-kitaccounts)): the address (and the domain list), the privacy notice (`privacyNoticeUrl`, required), the sign-up route, the emailed code ("Verify"), "Your name", the required first credential, "You're set up" as a Member. |
 | `RequestAccess` | "Request access to {Site}": name, email, an optional reason, then "Request sent", the same for every address. |
 | `SignedOutEverywhere` | "You're signed out everywhere", where My account's sign-out lands. |
@@ -407,7 +421,7 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 
 - **The same screens for every address** until someone proves a factor ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)). Cognito's answer to "a passkey" or "a code" depends on the account (an unused invite has only emailed codes; an unknown address gets a random set), so the screens never show it: an account without a passkey still gets a passkey prompt that finds nothing (`decoyPasskeyPrompt`), an account without a password gets "don't match", and "Check your email" always follows a code request, naming the typed address ("If … has an account here"), with nothing sent when there's nothing to send. There's no method chooser. Cognito's responses still differ on the wire (the network panel, direct API calls); the WAF sign-in rule limits how fast anyone can ask. Sites building their own screens: `isFirstFactorUnavailable`, `decoyPasskeyPrompt`, `answerSimulatedCode`.
 - **The words** are the approved copy deck (Card Studio v4), all in `copy.ts` and exported (`SIGN_IN`, `FIRST_VISIT`, `TROUBLE`, `ERRORS`, `helpScreen`, …) for sites building their own screens. Oxford commas throughout; a test lints for them.
-- **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, and a disabled account read the same; a reset request looks the same either way). Rate limits, including WAF's, say to wait. A closed passkey prompt gets a calm note, not red.
+- **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, a disabled account or expired invite, and an account whose password must be reset read the same, on the passkey and emailed-code paths too; a reset request looks the same either way). Rate limits, including WAF's, say to wait. A closed passkey prompt gets a calm note, not red.
 - **Accessibility:** every field has a label; errors go in a summary that takes focus and links to the field, and again by the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading; Show on password fields; icons are hidden from assistive technology.
 - **The card** is themed (the family's colors and the computed 3:1 edge as `--ak-*` custom properties), carries `data-backdrop-card` for `<Backdrop>`, and has nothing above the heading and no colored line on top (E4). The passkey icon is a fingerprint in the family accent; password rows use a password-field glyph.
 - **Styling:** each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `card`, `summary`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS, drawn from the design studio, to copy into a stylesheet.
@@ -732,13 +746,16 @@ The server role needs `accountCreationAppPolicy({ userPoolArn, rateLimitTableArn
 
 ```ts
 // lib/accounts.ts (server-only)
-import { createAccountCreationRoutes, createDynamoAccessRequestStore, createDynamoRateLimitStore, createDynamoSiteSettingsStore, createSelfServiceActions, createSignInHelp } from 'auth-kit/accounts';
-export const signInHelp = createSignInHelp({ configured: 'apps-help@replace-me.invalid', store: createDynamoSiteSettingsStore({ tableName: outputs.custom.siteSettingsTable }) });
+import { createAccountCreationRoutes, createDynamoAccessRequestStore, createDynamoRateLimitStore, createDynamoSiteSettingsStore, createSelfServiceActions, createSignInHelp, forwardedForClientIp } from 'auth-kit/accounts';
+export const signInHelp = createSignInHelp({ configured: 'apps-help@replace-me.invalid', theme: 'osbm', store: createDynamoSiteSettingsStore({ tableName: outputs.custom.siteSettingsTable }) });
 const rateLimits = createDynamoRateLimitStore({ tableName: outputs.custom.rateLimitTable });
 export const requests = createDynamoAccessRequestStore({ tableName: outputs.custom.accessRequestTable });
 export const accountRoutes = createAccountCreationRoutes({
   accountCreation, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in',
   help: signInHelp, pool: { userPoolId: outputs.auth.user_pool_id }, auditLog, mailer, rateLimits, requests,
+  // Required: which X-Forwarded-For entry is the client. Behind Amplify Hosting, the last one (CloudFront
+  // appends it); never the first, which the client writes. More proxies: forwardedForClientIp({ trustedProxies: n }).
+  clientIp: forwardedForClientIp(),
   background: (task) => after(() => task), // from next/server: the existing-account email goes out after the answer
 });
 export const selfService = createSelfServiceActions({ auth, auditLog, accountCreation, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', help: signInHelp, mailer, rateLimits });
@@ -748,19 +765,19 @@ export const POST = (request: Request) => accountRoutes.signUp(request);
 export const POST = (request: Request) => accountRoutes.requestAccess(request);
 ```
 
-- **Sign-up** checks the address (and the list), rate-limits per address and per IP, and either creates the account with invite-core (no password, no group: Member) or emails "You already have an account". Both get the identical answer, in at least 800 ms. `SignUp` then runs the invite's emailed-code sign-in, "Your name", and the required "Choose how you'll sign in next time". A sign-up whose address is never verified is deleted after 24 hours (`UnverifiedAccountSweep`: only marked accounts, never one with a role, never the owner, never an admin's invite).
-- **Request access** stores the request in DynamoDB (never as a Cognito user), or emails an address that already has an account; the same answer either way. Admins with `people.manage` approve (the ordinary invite) or decline (silent unless `notifyOnDecline`) on the People page's "Pending requests" tab (`createPeopleActions({ accessRequests: requests, help: signInHelp, theme })`, `people.listAccessRequests()`, `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`), and get a daily digest instead of one email per request. Requests expire after 30 days, and each is deleted, with its typed name and reason, 30 days after it's settled.
-- **The silent WAF check** (optional): `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`.
-- **Members on sign-up sites** delete their own account (a recent sign-in, the address typed; never the owner) and change their own email (a recent sign-in; verified before it takes effect; the old address told) through `MyAccount`'s `selfService` prop. Cognito itself still lets a signed-in person start an email change through its public API (every app client can write required attributes); that change waits for the new address's code ([ADR 0023](docs/decisions/0023-account-creation.md) says what that leaves open).
-- **The matrix:** pass `signUpSite: true` and a `newMember` persona (`FRESH_SIGN_UP_MEMBER`) to `assertAuthMatrix`; it runs against every route, held to a member's expectations.
+- **Sign-up** checks the address (and the list), rate-limits per mailbox (`victim+1@` and `victim+2@` count as one; Gmail without dots), per IP, and site-wide (past 300 attempts an hour every address gets the same "try again later"), and either creates the account with invite-core (no password, no group: Member) or emails "You already have an account". Every answer is identical and takes at least 800 ms, refusals and failures included. `SignUp` then runs the invite's emailed-code sign-in, "Your name", and the required "Choose how you'll sign in next time". A sign-up whose address is never verified is deleted after 24 hours (`UnverifiedAccountSweep`: only marked accounts, never one with a role, never the owner, never an admin's invite).
+- **Request access** stores the request in DynamoDB (never as a Cognito user; one conditional write of a per-address marker and one of the request, whatever the queue holds; at most 100 new requests a day site-wide), or emails an address that already has an account; the same answer either way. Admins with `people.manage` approve (the ordinary invite, with the name the approver confirms) or decline (silent unless `notifyOnDecline`) on the People page's "Pending requests" tab (`createPeopleActions({ accessRequests: requests, help: signInHelp, theme })`, `people.listAccessRequests()`, `people.declineRequests()` for up to 100 at once, always silent, `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`), and get a daily digest instead of one email per request (counts in the subject, never a typed name; at most 25 listed). Requests expire after 30 days, and each is deleted, with its typed name and reason, 30 days after it's settled; the table keeps no point-in-time backups by default.
+- **The silent WAF check**: `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`. **Required in `open` mode:** the preset fails synthesis without `siteWebAclArn` (the ACL's ARN), and the sign-up route refuses requests without AWS WAF's `aws-waf-token` cookie (`requireWafToken: false` for local development only). Optional in `domains` mode.
+- **Members on sign-up sites** delete their own account (a recent sign-in, the address typed; never the owner) and change their own email (a recent sign-in; limited per account and per new address; verified before it takes effect; the old address told) through `MyAccount`'s `selfService` prop. On every site, the custom message trigger refuses an email change started through Cognito's public API, so this route (or an admin) is the only way ([ADR 0023](docs/decisions/0023-account-creation.md)).
+- **The matrix:** pass `signUpSite: true` and two personas to `assertAuthMatrix`: `newMember` (`FRESH_SIGN_UP_MEMBER`: signed up and chose a passkey), held to a member's expectations on every route, and `codeOnlyMember` (`EMAILED_CODE_ONLY_MEMBER`: only emailed codes), expected to get 403 wherever a signed-in person is needed, unless its row says otherwise (the chooser page). Any site can add `codeOnlyMember`; invitees start that way too.
 
 ### 12. Families as themes and the help address: `auth-kit/themes`
 
 One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) carries the accent colors, the sender's display name (`senderDisplayName`: "{Site} (NC OSBM)"), the footer identity line ("This site is managed by the NC Office of State Budget and Management", "This site is managed by UNC-Chapel Hill", none on personal sites), the email field's example, the help route, and an OSBM authorized-use line (off by default). `authTheme(family, overrides)` takes a site's own email hint (A9), `helpAddress`, `helpNamed`, `showAuthorizedUse`, and `cardEdge`. The screens and the emails take the theme; emails match the card: no letterhead, and the footer reads "{identity line}. Help: {address}."
 
 - **The card edge:** `cardEdge: 'defined'` (default) computes the lightest line in the family ink that reaches 3:1 against every backdrop color (`definedCardEdge`, `checkCardEdge`); `'soft'` is a hairline. `themeCssVariables(theme)` gives the card's `--ak-*` custom properties.
-- **The help route:** the site helps only with the person's account on this site; for their email, device, or app, the help screens point to the theme's IT desk. OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal sites say "the {Site} team".
-- **The help address** is one role-based mailbox per family by default, with a per-site override in site config, and it's required: nothing ships by default, and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, and the digest refuse a missing, placeholder (`apps-help@replace-me.invalid`), or personal address (`helpAddressProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner is alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
+- **The help route:** the site helps only with the person's account on this site; for their email or app, the help screens point to the theme's IT desk, and for a device that isn't working, to its device desk (`devDesk`: the agency's or UNC's IT help desk; on personal sites, the device maker's support). OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal sites say "the {Site} team".
+- **The help address** is one role-based mailbox per family by default, with a per-site override in site config, and it's required: nothing ships by default, and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, and the digest refuse a missing, placeholder (`apps-help@replace-me.invalid`), or personal address (`helpAddressProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner and every Super admin are alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The override stays on the configured address's domain or the family's own (`theme.help.domains`: nc.gov, unc.edu, subdomains included; `createSignInHelp({ theme, allowedDomains })` for a help desk elsewhere), and must be a plain mailbox (letters, digits, dots, plus, hyphen, underscore). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
 
 ## Status codes
 
@@ -770,11 +787,12 @@ One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/
 | 401 | Signed in, but this action needs a fresh sign-in (`WWW-Authenticate: … insufficient_user_authentication`) | `StepUpRequiredError` |
 | 403 | Signed in, and not allowed | `ForbiddenError` |
 | 403 | A password user without an authenticator code: send them to setup | `MfaEnrollmentRequiredError` |
+| 403 | An account with only emailed codes (no passkey, no password): send them to "Choose how you'll sign in" | `FirstCredentialRequiredError` |
 | 403 | They can see the item, but not do this to it (a Reader editing) | `ForbiddenError` |
 | 404 | The item isn't theirs to see (or doesn't exist; the route doesn't say which) | `NotFoundError` |
 | 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed; on pages, the error boundary says so (`isAuthUnavailableError`) | `AuthUnavailableError` |
 
-Pages turn 401 into a sign-in redirect with a safe `next` path (`&reauth=1` for step-up), missing TOTP into the setup page, and 403/404 into Next's not-found page.
+Pages turn 401 into a sign-in redirect with a safe `next` path (`&reauth=1` for step-up), a missing first credential into the chooser page, missing TOTP into the setup page, and 403/404 into Next's not-found page.
 
 ### "Couldn't check" on pages
 
@@ -936,12 +954,15 @@ Still to check on a live pool (each needs a real person or a deploy approved by 
 - **`request.url`'s scheme in route handlers behind Amplify Hosting.** If handlers see `http://` while browsers send `Origin: https://`, every state-changing request without `expectedOrigin` fails the origin check. Set `expectedOrigin` from configuration (step 3) either way.
 - **Admin pool MFA ON with passkeys.** `defineAuth` rejects passkeys with MFA `REQUIRED` (it doesn't model `FactorConfiguration`), so the preset raises `MfaConfiguration` to `ON` in a CDK override. AWS documents that a user-verified passkey satisfies required MFA; whether CloudFormation accepts this exact combination is untested.
 - **The invite-expiry schedule end to end** (a real invite disabled after 7 days, its audit rows on the Activity page), and a sole owner's unused invite skipped with the warning delivered through SES.
+- **The email-change refusal** ([ADR 0023](docs/decisions/0023-account-creation.md)): `callerContext.clientId` is `CLIENT_ID_NOT_APPLICABLE` for `AdminUpdateUserAttributes`; a user's own `UpdateUserAttributes` and `GetUserAttributeVerificationCode` fail with the trigger's message; and no pending address survives the refusal (inert without a code if one does).
+- **Which `X-Forwarded-For` entry is the client** behind Amplify Hosting (the last one, if CloudFront is the only proxy that appends), and that the `aws-waf-token` cookie reaches the sign-up route.
+- **A disabled account on the passkey and emailed-code paths**: that Cognito answers `NotAuthorizedException`, which the screens now treat like an unknown address.
 
 ## What the pool can't enforce
 
 - **What Cognito reveals on the wire.** Cognito's own `SignUp` is off, so it can no longer be asked who's registered; the sign-up and request routes answer every address alike. Cognito's sign-in responses still differ on the wire ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)).
 - **Untrusted sibling subdomains.** Amplify's cookie names can't use the `__Host-` prefix, so an app on a sibling subdomain of a custom domain can set cookies for the parent domain and plant a session. auth-kit reads duplicate cookies the way Next does (the last one wins) so every layer agrees, but don't host an app you don't trust under the same parent domain.
-- **Email changes only through the app.** Every app client can write the pool's required attributes, and email is required, so a signed-in person can start an email change through Cognito's public API, skipping the app's recent sign-in and its notice to the old address. The pool keeps the old address active until the new one is verified with a code (`AttributesRequireVerificationBeforeUpdate`). The admin-only rule (and, on sign-up sites, the self-service path's checks) live in the app.
+- **Email changes only through the app, enforced by a trigger.** Every app client can write the pool's required attributes, and email is required, so the pool alone can't stop a signed-in person calling Cognito's `UpdateUserAttributes` themselves. The custom message trigger closes it: it refuses `CustomMessage_UpdateUserAttribute` and `CustomMessage_VerifyUserAttribute` unless the admin API made the call, so Cognito fails the call and sends no code; the preset requires the trigger on every pool. What's left: the change depends on that trigger staying deployed, and whether a refused call leaves an inert pending address is to check live ([ADR 0023](docs/decisions/0023-account-creation.md)).
 - **A strictly passkey-only admin pool.** Cognito won't let someone register a passkey before they've signed in once, and in a pool without emailed codes `AdminCreateUser` needs a temporary password. So an admin pool keeps `PASSWORD` as a first factor: a new admin signs in with a one-time password, sets a password and an authenticator (MFA is required), then saves a passkey. Admins use the passkey day to day and keep the password plus authenticator as a second way in; it isn't neutralized afterwards (register A3, [ADR 0001](docs/decisions/0001-passkey-first.md#amendment-2026-10-18-admins-keep-a-password-plus-authenticator-route-register-a3)). Recovery is admin-only.
 
 ## Development
