@@ -26,8 +26,9 @@ for (const [name, path] of Object.entries(bins)) {
   if (!files.has(path.replace(/^\.\//, ''))) problems.push(`bin "${name}" points at ${path}, which isn't in the tarball`);
 }
 // Files the package loads by path rather than through an export: the Lambda bundles its CDK
-// constructs deploy (auth-kit/admin/cdk's InviteExpirySweep).
-for (const path of ['dist/lambda/invite-expiry/index.mjs']) {
+// constructs deploy (auth-kit/admin/cdk's InviteExpirySweep, UnverifiedAccountSweep, AccessRequestDigest),
+// and the third-party notices the icons need.
+for (const path of ['dist/lambda/invite-expiry/index.mjs', 'dist/lambda/unverified-sweep/index.mjs', 'dist/lambda/access-request-digest/index.mjs', 'THIRD_PARTY_NOTICES.md']) {
   if (!files.has(path)) problems.push(`${path} (deployed by auth-kit/admin/cdk) isn't in the tarball`);
 }
 for (const file of files) {
