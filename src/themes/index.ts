@@ -77,6 +77,12 @@ export interface ThemeHelp {
   devDesk: string;
   /** Offer "Not sure an email is really from us? Ask {owner} on Teams." (OSBM). */
   teamsCheck: boolean;
+  /**
+   * The family's own email domains (subdomains included): where a Super admin may point the help
+   * address without a deploy, besides the configured address's domain (`createSignInHelp`). Empty on
+   * personal sites, whose override stays on the configured address's domain.
+   */
+  domains: readonly string[];
 }
 
 export interface AuthTheme {
@@ -151,7 +157,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'NC OSBM',
     footer: 'This site is managed by the NC Office of State Budget and Management',
     emailHint: 'name@osbm.nc.gov',
-    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', devDesk: 'your agency’s IT help desk', teamsCheck: true }),
+    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', devDesk: 'your agency’s IT help desk', teamsCheck: true, domains: Object.freeze(['nc.gov']) }),
     authorizedUseLine: 'This is a State of North Carolina system for authorized use.',
   }),
   unc: Object.freeze({
@@ -161,7 +167,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     senderSuffix: 'UNC',
     footer: 'This site is managed by UNC-Chapel Hill',
     emailHint: 'name@unc.edu',
-    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', devDesk: 'the UNC IT help desk', teamsCheck: false }),
+    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', devDesk: 'the UNC IT help desk', teamsCheck: false, domains: Object.freeze(['unc.edu']) }),
     authorizedUseLine: null,
   }),
   personal: Object.freeze({
@@ -178,6 +184,7 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
       itDesk: 'your email provider, or your IT help desk if your organization runs your email',
       devDesk: 'the device maker’s support',
       teamsCheck: false,
+      domains: Object.freeze([]),
     }),
     authorizedUseLine: null,
   }),
@@ -253,6 +260,9 @@ export function helpAddressProblems(address: string | null | undefined): string[
   const value = (address ?? '').trim().toLowerCase();
   if (value === '') return ['The site needs a help address: a role-based mailbox, like apps-help@your-agency.gov, on the help screens and as the Reply-To on auth emails.'];
   if (!/^[^\s@<>"(),;:]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)) return [`"${address}" isn't an email address.`];
+  // A plain mailbox name: letters, digits, dots, plus, hyphen, underscore. Nothing that changes what a
+  // mailto: link does (`?subject=…`, `#`, `%`-escapes, `/`), and no empty parts between dots.
+  if (!/^[a-z0-9_+-]+(?:\.[a-z0-9_+-]+)*@/.test(value)) return [`"${address}" isn't a plain mailbox: use letters, digits, dots, hyphens, underscores, or plus signs before the @.`];
   const [local = '', domain = ''] = value.split('@');
   const tld = domain.slice(domain.lastIndexOf('.') + 1);
   if (PLACEHOLDER_MARKERS.test(value) || RESERVED_TLDS.includes(tld)) return [`"${address}" is a placeholder: set the site's real help mailbox.`];

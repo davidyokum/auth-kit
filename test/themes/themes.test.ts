@@ -115,3 +115,22 @@ describe('the card edge (E5, ADR 0021)', () => {
     expect(vars['--ak-edge']).toBe(cardEdgeColor(FAMILY_THEMES.unc));
   });
 });
+
+describe('the help address is a plain mailbox (M8)', () => {
+  it('refuses a local part that changes what a mailto: link does, or has empty parts', () => {
+    for (const bad of ['help?subject=Send+your+code@site.gov', 'help#x@site.gov', 'help%41@site.gov', 'help/x@site.gov', 'help!@site.gov', 'a..b@site.gov', '.help@site.gov', 'help.@site.gov', "o'brien@site.gov"]) {
+      expect(helpAddressProblems(bad)[0], bad).toMatch(/isn't a plain mailbox|isn't an email address/);
+    }
+  });
+
+  it('accepts letters, digits, dots, plus, hyphen, and underscore', () => {
+    for (const good of ['apps-help@osbm.nc.gov', 'it_help+reports@unc.edu', 'desk.2@example.org']) expect(helpAddressProblems(good), good).toEqual([]);
+  });
+
+  it('the families list their own domains for the Super admin override; personal lists none', () => {
+    expect(FAMILY_THEMES.osbm.help.domains).toEqual(['nc.gov']);
+    expect(FAMILY_THEMES.unc.help.domains).toEqual(['unc.edu']);
+    expect(FAMILY_THEMES.personal.help.domains).toEqual([]);
+  });
+});
+

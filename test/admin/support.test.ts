@@ -288,3 +288,30 @@ describe('copy', () => {
     expect(describeAwsError(new Error('secret stack detail'))).toBe("AWS couldn't complete the call (Error).");
   });
 });
+
+describe('sign-in help changed alert (M8: the owner and every Super admin)', () => {
+  const alert = {
+    siteName: 'Example Reports',
+    owners: [{ sub: 'o1', email: 'olivia@example.org' }],
+    superAdmins: [
+      { sub: 's1', email: 'sam@example.org' },
+      { sub: 's2', email: 'olivia@example.org' },
+    ],
+    changedBy: { sub: 's3', email: 'rogue@example.org' },
+    from: 'help@example.org',
+    to: 'desk@example.org',
+    reverted: false,
+    reason: 'New desk',
+    at: new Date('2026-10-18T09:30:00Z'),
+  };
+
+  it('goes to the owners and every Super admin in one message, each address once, and still refuses with no owner', async () => {
+    const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
+    const ses = mockClient(client);
+    ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
+    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    await mailer.signInHelpChanged(alert);
+    expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['olivia@example.org', 'sam@example.org'] } });
+    await expect(mailer.signInHelpChanged({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
+  });
+});

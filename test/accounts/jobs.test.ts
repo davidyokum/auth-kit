@@ -536,7 +536,7 @@ describe('createAccessRequestDigest', () => {
   it('uses the help address in effect as Reply-To: a Super admin’s override, or the configured one', async () => {
     const settings = createMemorySiteSettingsStore();
     await settings.put(SITE_SETTING.signInHelp, { value: { address: 'apps-help@example.net', reason: 'New desk' }, expectedVersion: 0, by: ADMIN, now: new Date(NOW) });
-    const withOverride = digestSetup({ site: { ...SITE, help: createSignInHelp({ configured: 'help@example.org', store: settings }) } });
+    const withOverride = digestSetup({ site: { ...SITE, help: createSignInHelp({ configured: 'help@example.org', allowedDomains: ['example.net'], store: settings }) } });
     seedAdmins(withOverride.pool);
     await withOverride.store.create({ email: 'nia@example.com', now: new Date(NOW - DAY) });
     await withOverride.run();

@@ -102,6 +102,8 @@ export interface OwnerAlertNotifier {
 export interface SignInHelpChangedAlert {
   siteName: string;
   owners: readonly { sub: string; email: string; name?: string }[];
+  /** Every enabled Super admin (besides the owners), told too: a peer sees a change that isn't theirs. */
+  superAdmins?: readonly { sub: string; email: string; name?: string }[];
   changedBy: { sub: string; email?: string };
   /** The address in effect before, and after. */
   from: string;
@@ -127,6 +129,8 @@ export function renderSignInHelpChangedEmail(alert: SignInHelpChangedAlert): Ren
     '',
     'The help screens and auth emails now tell people to write to that address about their account. Someone who controls it can be asked to reset authenticators and move accounts to new addresses.',
     `If you didn't expect it, sign in and change it back under Settings, then check the Activity page.`,
+    '',
+    `Sent to the site's owner${(alert.superAdmins?.length ?? 0) > 0 ? ' and every Super admin' : ''}.`,
   ]);
 }
 
@@ -374,8 +378,9 @@ export function createSesInviteMailer(
       await send([warning.to.email], renderWarning(warning));
     },
     async signInHelpChanged(alert) {
-      const to = [...new Set(alert.owners.map((o) => o.email).filter(Boolean))];
-      if (to.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
+      const owners = alert.owners.map((o) => o.email).filter(Boolean);
+      if (owners.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
+      const to = [...new Set([...owners, ...(alert.superAdmins ?? []).map((s) => s.email).filter(Boolean)])];
       await send(to, renderHelpChanged(alert));
     },
     async sendEmail(message) {

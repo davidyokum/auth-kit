@@ -86,7 +86,7 @@ export function createAccessRequestDigestHandler(options: AccessRequestDigestHan
     if (!digest) {
       const config = accessRequestDigestConfig(options.env ?? process.env);
       const help = config.settingsTable
-        ? createSignInHelp({ configured: config.helpEmail, store: createDynamoSiteSettingsStore({ tableName: config.settingsTable }) })
+        ? createSignInHelp({ configured: config.helpEmail, theme: config.family, store: createDynamoSiteSettingsStore({ tableName: config.settingsTable }) })
         : config.helpEmail;
       digest = (options.createDigest ?? createAccessRequestDigest)({
         requests: createDynamoAccessRequestStore({ tableName: config.requestTable }),

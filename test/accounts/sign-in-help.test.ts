@@ -143,6 +143,9 @@ function setupActions(options: { actor?: HelpActor; ownerAlerts?: boolean } = {}
   const pool = fakeUserPool({ timeline });
   pool.add({ sub: 'owner-1', email: 'owner@example.org', name: 'Olive Owner' }, 'owner');
   pool.add({ sub: 'owner-old', email: 'old-owner@example.org', enabled: false }, 'owner');
+  // A peer Super admin (told of every change), and one who's disabled (not told).
+  pool.add({ sub: 'super-2', email: 'super2@example.org', name: 'Sam Super' }, 'superadmin');
+  pool.add({ sub: 'super-old', email: 'old-super@example.org', enabled: false }, 'superadmin');
   let token: string | null = null;
   const h = harness({ context: () => Promise.resolve(token ? toRequestContext(bearer(token)) : { cookies: { get: () => undefined }, headers: new Headers() }) });
   const clock = { t: NOW };
@@ -270,7 +273,7 @@ describe('Settings → Sign-in help (the Super admin’s override)', () => {
     const t = setupActions();
     expect(await t.help.effective()).toEqual({ address: CONFIGURED, source: 'config' }); // now cached
     const result = await t.actions.set({ address: ' Reports-Help@Example.org ', reason: REASON, version: 0 });
-    expect(result).toMatchObject({ ok: true, message: `People who need help signing in are now sent to ${NEW_HELP}. The owner has been told.` });
+    expect(result).toMatchObject({ ok: true, message: `People who need help signing in are now sent to ${NEW_HELP}. The owner and every Super admin have been told.` });
 
     expect(await t.store.get(SITE_SETTING.signInHelp)).toMatchObject({ value: { address: NEW_HELP, reason: REASON }, version: 1, updatedBy: { sub: 'super-1' } });
     expect(await t.help.effective()).toEqual({ address: NEW_HELP, source: 'override' });
@@ -279,6 +282,7 @@ describe('Settings → Sign-in help (the Super admin’s override)', () => {
       {
         siteName: SITE,
         owners: [{ sub: 'owner-1', email: 'owner@example.org', name: 'Olive Owner' }],
+        superAdmins: [{ sub: 'super-2', email: 'super2@example.org', name: 'Sam Super' }],
         changedBy: { sub: 'super-1' },
         from: CONFIGURED,
         to: NEW_HELP,
@@ -289,7 +293,7 @@ describe('Settings → Sign-in help (the Super admin’s override)', () => {
       },
     ]);
     // The owner is read live (the disabled former owner isn't told).
-    expect(t.pool.inputsOf<ListUsersInGroupCommandInput>(ListUsersInGroupCommand)).toEqual([expect.objectContaining({ GroupName: 'owner' })]);
+    expect(t.pool.inputsOf<ListUsersInGroupCommandInput>(ListUsersInGroupCommand)).toEqual([expect.objectContaining({ GroupName: 'owner' }), expect.objectContaining({ GroupName: 'superadmin' })]);
     expect(t.timeline.filter((x) => !x.startsWith('cognito:'))).toEqual(['audit:intent', 'mail:signInHelpChanged', 'audit:result']);
 
     const [intent, row] = t.auditLog.rows;
@@ -342,7 +346,7 @@ describe('Settings → Sign-in help (the Super admin’s override)', () => {
     expect(await t.actions.set({ address: NEW_HELP, reason: REASON, version: 0 })).toMatchObject({ ok: true });
     expect(await t.help.effective()).toEqual({ address: NEW_HELP, source: 'override' });
     const result = await t.actions.clear({ reason: 'The reports team mailbox is closing', version: 1 });
-    expect(result).toMatchObject({ ok: true, message: `The sign-in help address is back to the site's configured address, ${CONFIGURED}. The owner has been told.` });
+    expect(result).toMatchObject({ ok: true, message: `The sign-in help address is back to the site's configured address, ${CONFIGURED}. The owner and every Super admin have been told.` });
     expect(await t.store.get(SITE_SETTING.signInHelp)).toBeNull();
     expect(await t.help.effective()).toEqual({ address: CONFIGURED, source: 'config' });
     expect(t.alerts.at(-1)).toMatchObject({ from: NEW_HELP, to: CONFIGURED, reverted: true, reason: 'The reports team mailbox is closing' });
@@ -368,3 +372,36 @@ describe('Settings → Sign-in help (the Super admin’s override)', () => {
     expect(t.alerts).toEqual([]);
   });
 });
+
+describe('the override stays on allowed domains (M8)', () => {
+  it('allows the configured address’s domain, the family’s domains (subdomains too), and allowedDomains; nothing else', () => {
+    const osbm = createSignInHelp({ configured: 'apps-help@osbm.nc.gov', theme: 'osbm' });
+    expect(osbm.allowedDomains).toEqual(['osbm.nc.gov', 'nc.gov']);
+    expect(osbm.overrideProblems('help@dhhs.nc.gov')).toEqual([]);
+    expect(osbm.overrideProblems('help@not-our-desk.net')[0]).toMatch(/must be on osbm\.nc\.gov, nc\.gov/);
+    expect(osbm.overrideProblems('help@evilnc.gov')[0]).toMatch(/must be on/);
+    const personal = createSignInHelp({ configured: CONFIGURED });
+    expect(personal.allowedDomains).toEqual(['example.org']);
+    expect(personal.overrideProblems('desk@help.example.org')).toEqual([]);
+    expect(personal.overrideProblems('desk@example.net')[0]).toMatch(/allowedDomains/);
+    expect(createSignInHelp({ configured: CONFIGURED, allowedDomains: ['desk.example.net'] }).overrideProblems('help@desk.example.net')).toEqual([]);
+  });
+
+  it('a stored override off the list (written straight into the table, or a list narrowed since) falls back to the configured address', async () => {
+    const store = createMemorySiteSettingsStore();
+    await store.put(SITE_SETTING.signInHelp, { value: { address: 'help@not-our-desk.net', reason: 'x' }, expectedVersion: 0, by: { sub: 'x' }, now: new Date(NOW) });
+    const help = createSignInHelp({ configured: CONFIGURED, store });
+    expect(await help.effective()).toEqual({ address: CONFIGURED, source: 'config' });
+    expect(await help.view()).toMatchObject({ state: 'ok', effective: { address: CONFIGURED, source: 'config' } });
+  });
+
+  it('a Super admin can’t set an outside address, or one whose local part changes the mailto: link', async () => {
+    const t = setupActions();
+    expect(await t.actions.set({ address: 'help@not-our-desk.net', reason: REASON, version: 0 })).toMatchObject({ ok: false, code: 'invalid', error: expect.stringMatching(/must be on example\.org/) as string });
+    expect(await t.actions.set({ address: 'help?subject=Send+your+code@example.org', reason: REASON, version: 0 })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(await t.store.get(SITE_SETTING.signInHelp)).toBeNull();
+    expect(t.alerts).toEqual([]);
+    expect(t.auditLog.rows).toEqual([]);
+  });
+});
+

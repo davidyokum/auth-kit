@@ -22,7 +22,11 @@ import { type QuotaLimiterOptions, createQuotaLimiter } from '../admin/quota.js'
 import type { ActionResult, AuditActor, AuditRequestContext, FormAction } from '../admin/types.js';
 import type { ServerAuth } from '../server/auth.js';
 import { OWNER_GROUP } from '../shared/policy.js';
-import { helpAddressProblems } from '../themes/index.js';
+
+/** The Super admin group (the standard roles' second rank). */
+const SUPERADMIN_GROUP = 'superadmin';
+import { type AuthTheme, type ThemeFamily, helpAddressProblems, resolveTheme } from '../themes/index.js';
+import { emailDomain, emailDomainAllowed } from '../shared/account-creation.js';
 import { SITE_SETTING } from './schema.js';
 import { SettingConflictError, type SiteSettingsStore, type StoredSetting } from './stores.js';
 
@@ -55,6 +59,14 @@ export type SignInHelpView =
 export interface SignInHelpOptions {
   /** The configured help address: the family's mailbox, or the site's override in its config. Required. */
   configured: string;
+  /**
+   * The site's family or theme: its email domains (`theme.help.domains`, subdomains included) are
+   * where a Super admin may point the help address, besides the configured address's own domain.
+   * Default personal (no family domains).
+   */
+  theme?: AuthTheme | ThemeFamily;
+  /** More domains a Super admin may use (the escape hatch for a site whose help desk lives elsewhere). */
+  allowedDomains?: readonly string[];
   /** Where a Super admin's override lives (`SiteSettingsTable`). Without it, the configured address is the only one. */
   store?: SiteSettingsStore;
   /** How long a read override is reused by this server. Default 60 seconds. */
@@ -67,6 +79,10 @@ export interface SignInHelpOptions {
 export interface SignInHelp {
   readonly configured: string;
   readonly store: SiteSettingsStore | null;
+  /** Where an override may point: the configured address's domain, the family's, and `allowedDomains`. */
+  readonly allowedDomains: readonly string[];
+  /** Why an address can't be the override (a malformed or placeholder address, or a domain off the list), or `[]`. */
+  overrideProblems(address: string): string[];
   /** For the sign-in page, the help screens, and emails: never throws, falls back to the configured address. */
   effective(): Promise<EffectiveSignInHelp>;
   /** For the Settings page: the override as stored (uncached), or why it couldn't be read. */
@@ -94,6 +110,18 @@ export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
   const problems = helpAddressProblems(options.configured);
   if (problems.length > 0) throw new Error(`auth-kit: createSignInHelp: ${problems.join(' ')}`);
   const configured = options.configured.trim().toLowerCase();
+  const allowedDomains = Object.freeze(
+    [...new Set([emailDomain(configured), ...resolveTheme(options.theme).help.domains, ...(options.allowedDomains ?? [])].map((d) => d.trim().toLowerCase().replace(/^[@.]/, '')).filter((d) => d !== ''))],
+  );
+  // A Super admin's override (or a value someone wrote straight into the table) stays on these domains:
+  // a hijacked session can't point every help screen and Reply-To at an outside mailbox.
+  const overrideProblems = (address: string): string[] => {
+    const problems = helpAddressProblems(address);
+    if (problems.length > 0) return problems;
+    return emailDomainAllowed(address.trim().toLowerCase(), allowedDomains)
+      ? []
+      : [`The help address must be on ${allowedDomains.join(', ')} (the configured address's domain or the site family's). A site whose help desk lives elsewhere adds the domain to allowedDomains in its config.`];
+  };
   const now = options.now ?? Date.now;
   const ttl = (options.cacheSeconds ?? 60) * 1000;
   let cached: { value: EffectiveSignInHelp; until: number } | null = null;
@@ -102,13 +130,15 @@ export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
   return {
     configured,
     store: options.store ?? null,
+    allowedDomains,
+    overrideProblems,
     async effective() {
       if (!options.store) return fallback;
       if (cached && cached.until > now()) return cached.value;
       let value = fallback;
       try {
         const help = storedHelp(await options.store.get(SITE_SETTING.signInHelp));
-        if (help && helpAddressProblems(help.address).length === 0) value = { address: help.address, source: 'override' };
+        if (help && overrideProblems(help.address).length === 0) value = { address: help.address, source: 'override' };
       } catch (error) {
         options.onError?.(error);
         // Not cached: the next request tries the store again.
@@ -122,7 +152,7 @@ export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
       try {
         const setting = await options.store.get(SITE_SETTING.signInHelp);
         const help = storedHelp(setting);
-        const usable = help !== null && helpAddressProblems(help.address).length === 0;
+        const usable = help !== null && overrideProblems(help.address).length === 0;
         return {
           state: 'ok',
           configured,
@@ -219,7 +249,7 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
       version = parseVersion(raw.version);
       if (mode === 'set') {
         address = (text(raw.address, 'Help address', 254) ?? '').toLowerCase();
-        const problems = helpAddressProblems(address);
+        const problems = help.overrideProblems(address);
         if (problems.length > 0) throw new InputError(problems.join(' '));
       }
     } catch (error) {
@@ -263,12 +293,17 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
           await steps.call('DynamoDB DeleteItem sign-in help', () => store.remove(SITE_SETTING.signInHelp, version));
         }
         try {
-          const owners = (await cognito().listGroupMembers(OWNER_GROUP))
-            .filter((p) => p.enabled)
-            .map((p) => ({ sub: p.sub, email: p.email, ...(p.name !== undefined && { name: p.name }) }));
+          // The owner and every Super admin: a peer sees a change that isn't theirs.
+          const members = async (group: string) =>
+            (await cognito().listGroupMembers(group))
+              .filter((p) => p.enabled)
+              .map((p) => ({ sub: p.sub, email: p.email, ...(p.name !== undefined && { name: p.name }) }));
+          const owners = await members(OWNER_GROUP);
+          const superAdmins = (await members(SUPERADMIN_GROUP)).filter((p) => !owners.some((o) => o.sub === p.sub));
           const alert: SignInHelpChangedAlert = {
             siteName: config.siteName,
             owners,
+            superAdmins,
             changedBy: who.actor,
             from,
             to,
@@ -310,8 +345,8 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
           ok: true,
           message:
             mode === 'set'
-              ? `People who need help signing in are now sent to ${to}. The owner has been told.`
-              : `The sign-in help address is back to the site's configured address, ${to}. The owner has been told.`,
+              ? `People who need help signing in are now sent to ${to}. The owner and every Super admin have been told.`
+              : `The sign-in help address is back to the site's configured address, ${to}. The owner and every Super admin have been told.`,
           ...(run.result !== undefined && { auditId: run.result.id }),
         };
     }
