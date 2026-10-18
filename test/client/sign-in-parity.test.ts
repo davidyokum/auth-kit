@@ -6,16 +6,18 @@
  * the 2026-10-17 demo deploy (an unknown address under PreventUserExistenceErrors got SELECT_CHALLENGE
  * with [PASSWORD_SRP, PASSWORD, WEB_AUTHN] and, asked for a passkey, a challenge with decoy credential
  * IDs; AWS documents a random selection from the pool's allowed challenge types, so an unknown address
- * might instead get a fake emailed-code challenge, covered as its own case). Someone who can't
- * complete any factor runs the same script against each, and every screen they see must be identical:
- * email first, then the passkey screen, the password screen, "Check your email", "Forgot your
- * password?", and the help screens' own actions.
+ * might instead get a fake emailed-code challenge, covered as its own case). Accounts Cognito refuses
+ * outright are here too: a disabled account and an expired invite (the 7-day sweep disables it) get
+ * "User is disabled." for every factor, and a RESET_REQUIRED account gets a password-reset demand.
+ * Someone who can't complete any factor runs the same script against each, and every screen they see
+ * must be identical: email first, then the passkey screen, the password screen, "Check your email",
+ * "Forgot your password?", the help screens' own actions, and SignUp's "Check your email".
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SignIn, type SignInProps, describeAuthError, isFirstFactorUnavailable, type SignInStep } from '../../src/client/index.js';
+import { SignIn, type SignInProps, SignUp, describeAuthError, isFirstFactorRefusal, isFirstFactorUnavailable, type SignInStep } from '../../src/client/index.js';
 import { answerSimulatedCode } from '../../src/client/parity.js';
 import { auth, awsError, next, resetAmplifyMocks } from './amplify-mock.js';
 
@@ -31,6 +33,9 @@ const resetCodeSent = (destination: string) =>
   Promise.resolve({ isPasswordReset: false, nextStep: { resetPasswordStep: 'CONFIRM_RESET_PASSWORD_WITH_CODE', codeDeliveryDetails: { destination, deliveryMedium: 'EMAIL' } } });
 const closedPrompt = () => awsError('PasskeyAuthenticationCanceled', 'Passkey authentication has been canceled.');
 const wrongPassword = () => awsError('NotAuthorizedException', 'Incorrect username or password.');
+const userDisabled = () => awsError('NotAuthorizedException', 'User is disabled.');
+const resetRequiredStep = next({ signInStep: 'RESET_PASSWORD' });
+const resetRequired = () => awsError('PasswordResetRequiredException', 'Password reset required for the user');
 
 const PASSKEY_NOTE = 'We didn’t get a passkey. Try again, or use another way below.';
 const WRONG_PASSWORD = 'That email address and password don’t match. Try again, or use another way to sign in.';
@@ -78,6 +83,36 @@ const ACCOUNTS: Record<string, Account> = {
     EMAIL_OTP: () => Promise.resolve(codeSent),
     RESET: () => resetCodeSent('s***@e***'),
   },
+  // A disabled account (an admin turned it off): Cognito refuses every first factor with "User is disabled."
+  // where an unknown address gets a challenge (M3). A reset refused the same way reads as sent (requestPasswordReset).
+  'disabled account': {
+    WEB_AUTHN: () => Promise.reject(userDisabled()),
+    PASSWORD: () => Promise.reject(userDisabled()),
+    EMAIL_OTP: () => Promise.reject(userDisabled()),
+    RESET: () => Promise.reject(userDisabled()),
+  },
+  // An invite nobody used: the 7-day sweep disabled it. The same refusals; here the pool masks the reset (AWS docs).
+  'expired invite (disabled)': {
+    WEB_AUTHN: () => Promise.reject(userDisabled()),
+    PASSWORD: () => Promise.reject(userDisabled()),
+    EMAIL_OTP: () => Promise.reject(userDisabled()),
+    RESET: () => resetCodeSent('s***@e***'),
+  },
+  // RESET_REQUIRED (a console "reset password"): Cognito answers PasswordResetRequiredException, which Amplify's
+  // USER_AUTH flow turns into the RESET_PASSWORD step, whichever factor was asked for (L5)...
+  'password must be reset (RESET_REQUIRED)': {
+    WEB_AUTHN: () => Promise.resolve(resetRequiredStep),
+    PASSWORD: () => Promise.resolve(resetRequiredStep),
+    EMAIL_OTP: () => Promise.resolve(resetRequiredStep),
+    RESET: () => resetCodeSent('s***@e***'),
+  },
+  // ...or the exception itself, should an Amplify version pass it through.
+  'password must be reset (the exception itself)': {
+    WEB_AUTHN: () => Promise.reject(resetRequired()),
+    PASSWORD: () => Promise.reject(resetRequired()),
+    EMAIL_OTP: () => Promise.reject(resetRequired()),
+    RESET: () => resetCodeSent('s***@e***'),
+  },
 };
 
 function answerAs(account: Account) {
@@ -90,8 +125,8 @@ function answerAs(account: Account) {
 }
 
 /** Everything the person can perceive: the view, every visible text, the fields, and the buttons' states. */
-function snapshot(): string {
-  const root = document.querySelector('[data-auth-kit="sign-in"]')!;
+function snapshot(card: 'sign-in' | 'sign-up' = 'sign-in'): string {
+  const root = document.querySelector(`[data-auth-kit="${card}"]`)!;
   const buttons = [...root.querySelectorAll('button')].map((b) => `${b.textContent}${b.disabled ? ' (disabled)' : ''}`);
   const fields = [...root.querySelectorAll('input')].map((i) => `${i.name}=${i.value}${i.getAttribute('aria-invalid') === 'true' ? ' (invalid)' : ''}`);
   const alert = root.querySelector('[role="alert"]:not([hidden])')?.textContent ?? null;
@@ -147,11 +182,11 @@ function renderSignIn(props: Partial<SignInProps> = {}) {
   return userEvent.setup();
 }
 
-async function settled(): Promise<string> {
+async function settled(card: 'sign-in' | 'sign-up' = 'sign-in'): Promise<string> {
   // Wait out the busy state (every path ends in an announced status, note, or error).
   await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull(), { timeout: 3000 });
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Try again' })?.hasAttribute('disabled') ?? false).toBe(false), { timeout: 3000 });
-  return snapshot();
+  return snapshot(card);
 }
 
 const alertSays = (text: string) => waitFor(() => expect(screen.getByRole('alert').textContent).toBe(text), { timeout: 3000 });
@@ -301,8 +336,11 @@ describe('the same screens for every address (ADR 0018)', () => {
       await user.type(screen.getByLabelText('Email address'), EMAIL);
       await user.click(screen.getByRole('button', { name: 'Continue' }));
       await screen.findByText(PASSKEY_NOTE, undefined, { timeout: 3000 });
-      // Either Cognito sent a challenge (Amplify prompted: the mocked rejection stands for it) or the decoy did.
-      const cognitoPrompted = await account.WEB_AUTHN().then(() => false, () => true);
+      // Either Cognito sent a challenge (Amplify prompted: the mocked closed prompt stands for it) or the decoy did.
+      const cognitoPrompted = await account.WEB_AUTHN().then(
+        () => false,
+        (error: Error) => error.name === 'PasskeyAuthenticationCanceled',
+      );
       expect(promptShown + (cognitoPrompted ? 1 : 0), name).toBe(1);
       cleanup();
     }
@@ -329,6 +367,72 @@ describe('the same screens for every address (ADR 0018)', () => {
   });
 });
 
+describe('SignUp’s "Check your email" is the same for every address (ADR 0018)', () => {
+  function renderSignUp() {
+    // The sign-up route answers the same for every address (ADR 0023): a new account, or an email to the existing one.
+    const fetch = vi.fn<typeof globalThis.fetch>(() => Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    render(
+      createElement(SignUp, {
+        siteName: 'Example Reports',
+        help: { address: 'apps-help@example.org' },
+        accountCreation: { mode: 'open' },
+        privacyNoticeUrl: '/privacy',
+        passkeysEnabled: true,
+        navigate: vi.fn(),
+        loadFactors: vi.fn(),
+        fetch,
+        checkBreachedPassword: false,
+      }),
+    );
+    return userEvent.setup();
+  }
+
+  it('the email, the code screen, two guesses, and "Use a different email address": identical for an unknown address and every kind of account', async () => {
+    const seen: [string, string[]][] = [];
+    for (const [name, account] of Object.entries(ACCOUNTS)) {
+      answerAs(account);
+      const user = renderSignUp();
+      const frames: string[] = [];
+      await user.type(screen.getByLabelText('Email address'), `${EMAIL}{Enter}`);
+      await screen.findByRole('heading', { name: 'Check your email' }, { timeout: 3000 });
+      frames.push(await settled('sign-up'));
+      for (const guess of ['12345678', '87654321']) {
+        await user.clear(screen.getByLabelText('8-digit code'));
+        await user.type(screen.getByLabelText('8-digit code'), `${guess}{Enter}`);
+        await alertSays(WRONG_EMAILED_CODE);
+        frames.push(await settled('sign-up'));
+      }
+      await user.click(screen.getByRole('button', { name: 'Use a different email address' }));
+      frames.push(snapshot('sign-up'));
+      seen.push([name, frames]);
+      cleanup();
+    }
+    const [[firstName, firstFrames], ...rest] = seen as [[string, string[]], ...[string, string[]][]];
+    expect(JSON.parse(firstFrames[0]!).text).toContain(`We’ve emailed ${EMAIL}.`);
+    for (const [name, frames] of rest) expect(frames, `${name} vs ${firstName}`).toEqual(firstFrames);
+  });
+});
+
+describe('isFirstFactorRefusal', () => {
+  it('a disabled account (an expired invite too), a password that must be reset, and "no such account" are refusals', () => {
+    expect(isFirstFactorRefusal(userDisabled())).toBe(true);
+    expect(isFirstFactorRefusal(resetRequired())).toBe(true);
+    expect(isFirstFactorRefusal(wrongPassword())).toBe(true);
+    expect(isFirstFactorRefusal(awsError('UserNotFoundException', 'User does not exist.'))).toBe(true);
+  });
+
+  it('a throttle, an expired session, the network, a closed passkey window, and anything else keep their own messages', () => {
+    expect(isFirstFactorRefusal(awsError('NotAuthorizedException', 'Password attempts exceeded'))).toBe(false);
+    expect(isFirstFactorRefusal(awsError('NotAuthorizedException', 'Too many failed attempts.'))).toBe(false);
+    expect(isFirstFactorRefusal(awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.'))).toBe(false);
+    expect(isFirstFactorRefusal(awsError('LimitExceededException', 'Attempt limit exceeded, please try after some time.'))).toBe(false);
+    expect(isFirstFactorRefusal(awsError('ForbiddenException', 'Request not allowed due to WAF block.'))).toBe(false);
+    expect(isFirstFactorRefusal(new TypeError('Failed to fetch'))).toBe(false);
+    expect(isFirstFactorRefusal(closedPrompt())).toBe(false);
+    expect(isFirstFactorRefusal('weird')).toBe(false);
+  });
+});
+
 describe('isFirstFactorUnavailable', () => {
   const steps: Record<string, SignInStep> = {
     choice: { step: 'choose-method', methods: ['email-code'] },
@@ -346,6 +450,10 @@ describe('isFirstFactorUnavailable', () => {
     expect(isFirstFactorUnavailable('password', steps.code!)).toBe(true);
     expect(isFirstFactorUnavailable('email-code', steps.choice!)).toBe(true);
     expect(isFirstFactorUnavailable('email-code', steps.password!)).toBe(true);
+  });
+
+  it('a password that must be reset (RESET_PASSWORD) is "not available" for every factor (an unknown address never gets it)', () => {
+    for (const method of ['passkey', 'password', 'email-code'] as const) expect(isFirstFactorUnavailable(method, { step: 'reset-password' })).toBe(true);
   });
 
   it('the factor’s own challenge, or the steps after it was proven, go ahead', () => {

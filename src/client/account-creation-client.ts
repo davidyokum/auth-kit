@@ -26,8 +26,17 @@ export function wafAwareFetch(custom?: typeof fetch): typeof fetch {
 /** What the screen does with the route's answer. */
 export type PostOutcome = { ok: true } | { ok: false; body: Extract<AccountCreationBody, { ok: false }> | null; message: string };
 
-/** Posts JSON to one of the routes. A network failure or an unreadable answer reads as "couldn't reach". */
-export async function postAccountForm(url: string, payload: Record<string, unknown>, options: { fetch?: typeof fetch; helpAddress?: string } = {}): Promise<PostOutcome> {
+/**
+ * Posts JSON to one of the routes. A network failure or an unreadable answer reads as "couldn't
+ * reach": the caller's own words for it (`networkMessage`), or "We couldn't reach the sign-in
+ * service…" with the help address.
+ */
+export async function postAccountForm(
+  url: string,
+  payload: Record<string, unknown>,
+  options: { fetch?: typeof fetch; helpAddress?: string; networkMessage?: string } = {},
+): Promise<PostOutcome> {
+  const unreachable = options.networkMessage ?? ERRORS.network(options.helpAddress !== undefined ? { helpAddress: options.helpAddress } : undefined);
   let response: Response;
   try {
     response = await wafAwareFetch(options.fetch)(url, {
@@ -37,7 +46,7 @@ export async function postAccountForm(url: string, payload: Record<string, unkno
       credentials: 'same-origin',
     });
   } catch {
-    return { ok: false, body: null, message: ERRORS.network(options.helpAddress !== undefined ? { helpAddress: options.helpAddress } : undefined) };
+    return { ok: false, body: null, message: unreachable };
   }
   let body: AccountCreationBody | null;
   try {
@@ -48,7 +57,7 @@ export async function postAccountForm(url: string, payload: Record<string, unkno
   if (response.ok && body?.ok === true) return { ok: true };
   if (body && body.ok === false && typeof body.error === 'string') return { ok: false, body, message: body.error };
   // A WAF challenge that couldn't be solved, or something between us and the route.
-  return { ok: false, body: null, message: response.status === 405 || response.status === 202 ? ERRORS.unknown : ERRORS.network(options.helpAddress !== undefined ? { helpAddress: options.helpAddress } : undefined) };
+  return { ok: false, body: null, message: response.status === 405 || response.status === 202 ? ERRORS.unknown : unreachable };
 }
 
 /** Where "Ask for access instead" hands the typed address to the request form (never the URL: no personal data in links). */

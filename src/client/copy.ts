@@ -97,8 +97,8 @@ export const SIGN_IN = {
 
   finishing: 'Signing you in…',
   signedInOneMoment: 'Signed in. One moment…',
-
-  mustChooseNewPassword: 'You need to choose a new password before signing in. We can email you a code to do that.',
+  /** After a sign-in, when the account's ways in couldn't be read: nobody goes in unchecked (ADR 0024). */
+  checkFailed: (c: CopyContext) => `We couldn’t check how you sign in. Try again. If it keeps happening, email ${c.helpAddress}.`,
 
   offerPasskeyHeading: 'Create a passkey on this device?',
   offerPasskeySub: 'Next time, sign in with your face, fingerprint, or device PIN. Nothing to remember or type.',
@@ -190,6 +190,8 @@ export interface HelpScreen {
 /** The help screens (Card Studio v4's HELP; David, 2026-10-18: the site helps only with the account on this site). */
 export function helpScreen(topic: HelpTopic, c: CopyContext, options: { securityNotices?: boolean } = {}): HelpScreen {
   const itDesk = c.theme.help.itDesk;
+  // Who helps when the device or browser itself isn't working (personal sites: the device maker).
+  const devDesk = c.theme.help.devDesk;
   const site = c.siteName;
   switch (topic) {
     case 'passkey':
@@ -197,7 +199,7 @@ export function helpScreen(topic: HelpTopic, c: CopyContext, options: { security
         heading: 'Can’t use your passkey?',
         intro: 'You can still get in with an emailed code, then make a new passkey on this device.',
         steps: [['Go back and choose ', { strong: 'Email me a code instead' }, '.'], ['Enter the 8-digit code we email you.'], ['When asked, create a new passkey.']],
-        after: `Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, ${itDesk} can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.`,
+        after: `Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, ${devDesk} can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.`,
         button: { label: 'Email me a code', action: 'email-code' },
       };
     case 'password':
@@ -322,6 +324,8 @@ export const REQUEST = {
   send: 'Send request',
   sentHeading: 'Request sent',
   sentSub: 'Thanks. If an admin approves, you’ll get an email invitation. If you already have an account, just sign in.',
+  /** The request didn't reach the site (the network, or something between the page and the route). */
+  couldntSend: 'We couldn’t send your request. Check your connection and try again.',
 } as const;
 
 /** My account on sign-up sites (register D4, REPORT §3.1e). */
@@ -454,8 +458,8 @@ export const ERRORS = {
   passwordTooShort: 'Choose a password with at least 15 characters',
   passwordTooLong: 'Choose a password with at most 256 characters',
   passkeyCancelled: 'We didn’t get a passkey. Try again, or use another way below.',
-  passkeyRejected: 'We couldn’t sign you in with that passkey. Try again or use another way below.',
-  passkeyCreateFailed: 'We couldn’t create your passkey. Try again, or continue without one.',
+  passkeyRejected: 'We couldn’t sign you in with that passkey. Try again, or use another way below.',
+  passkeyCreateFailed: 'We couldn’t create your passkey. Try again, or use a password instead.',
   passkeyUnsupported: 'This browser can’t use passkeys here. Use another way below.',
   methodUnavailable: 'That way of signing in isn’t available here. Use another way below.',
   emptyCurrentPassword: 'Enter your current password',

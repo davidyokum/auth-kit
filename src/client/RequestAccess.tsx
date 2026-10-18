@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'rea
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import { postAccountForm, takeHandedOffEmail } from './account-creation-client.js';
 import { type CopyContext, ERRORS, REQUEST, SHARED, SIGN_IN, STATUS } from './copy.js';
+import { checkedHref, hrefOr } from './href.js';
 import type { SignInHelp } from './SignIn.js';
 import { Actions, Button, Card, ErrorSummary, Field, Glyph, Heading, type HeadingLevel, StatusRegion, type StyleProps, Text, slot, useFeedback, useFocusOnViewChange } from './ui.js';
 
@@ -11,11 +12,11 @@ export interface RequestAccessProps extends StyleProps {
   help: SignInHelp;
   /** The request route. Default `/api/auth/request-access`. */
   endpoint?: string;
-  /** "Back to sign in". Default `/sign-in`. */
+  /** "Back to sign in". Default `/sign-in`. A same-site path or an http(s) URL (anything else throws). */
   signInHref?: string;
   /** The email field's example. Default: the family's. */
   emailHint?: string;
-  /** The privacy notice: "We use this only to decide on your request. Privacy notice" (REPORT §3.1a). */
+  /** The privacy notice: "We use this only to decide on your request. Privacy notice" (REPORT §3.1a). A path or an http(s) URL. */
   privacyNoticeUrl?: string;
   headingLevel?: HeadingLevel;
   navigate?: (path: string) => void;
@@ -47,6 +48,9 @@ export function RequestAccess(props: RequestAccessProps) {
   const [problems, setProblems] = useState<Problem[]>([]);
   useFocusOnViewChange(rootRef, sent ? 'sent' : 'form');
   const navigate = (path: string) => (props.navigate ?? ((p: string) => window.location.assign(p)))(path);
+  const signInHref = hrefOr('signInHref', props.signInHref, '/sign-in');
+  // An empty string means no notice, as before.
+  const privacyNoticeUrl = props.privacyNoticeUrl ? checkedHref('privacyNoticeUrl', props.privacyNoticeUrl, '/privacy') : undefined;
 
   // "Ask for access instead" on the sign-up screen hands the typed address over (never in the URL).
   useEffect(() => {
@@ -69,7 +73,7 @@ export function RequestAccess(props: RequestAccessProps) {
     const outcome = await postAccountForm(
       props.endpoint ?? '/api/auth/request-access',
       { name: name.trim(), email: typed, ...(reason.trim() && { reason: reason.trim() }) },
-      { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address },
+      { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address, networkMessage: REQUEST.couldntSend },
     );
     fb.set({ busy: false, status: null });
     if (outcome.ok) {
@@ -93,7 +97,7 @@ export function RequestAccess(props: RequestAccessProps) {
       name="request-access"
       view={sent ? 'sent' : 'form'}
       theme={theme}
-      bottom={sent ? {} : { back: { label: SIGN_IN.backToSignIn, onClick: () => navigate(props.signInHref ?? '/sign-in') } }}
+      bottom={sent ? {} : { back: { label: SIGN_IN.backToSignIn, onClick: () => navigate(signInHref) } }}
       rootRef={rootRef}
       {...(props.className !== undefined && { className: props.className })}
       classNames={classNames}
@@ -104,7 +108,7 @@ export function RequestAccess(props: RequestAccessProps) {
           {heading(REQUEST.sentHeading)}
           <Text classNames={classNames}>{REQUEST.sentSub}</Text>
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={() => navigate(props.signInHref ?? '/sign-in')}>
+            <Button classNames={classNames} onClick={() => navigate(signInHref)}>
               {SIGN_IN.backToSignIn}
             </Button>
           </Actions>
@@ -154,10 +158,10 @@ export function RequestAccess(props: RequestAccessProps) {
               {...slot(classNames, 'input')}
             />
           </div>
-          {props.privacyNoticeUrl ? (
+          {privacyNoticeUrl ? (
             <p {...slot(classNames, 'small')}>
               {REQUEST.privacy[0]}
-              <a href={props.privacyNoticeUrl} {...slot(classNames, 'link')}>
+              <a href={privacyNoticeUrl} {...slot(classNames, 'link')}>
                 {REQUEST.privacy[1]}
               </a>
             </p>

@@ -49,6 +49,7 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'SIGN_IN.codeSub': (c) => [[c, EMAIL]],
   'SIGN_IN.codeResent': () => [['2:05 PM']],
   'SIGN_IN.resetCodeSub': () => [[EMAIL]],
+  'SIGN_IN.checkFailed': (c) => [[c]],
   'ACCESS_LINE.inviteOnly': (c) => [[c]],
   'FIRST_VISIT.donePasskey': (c) => [[c]],
   'FIRST_VISIT.continueTo': (c) => [[c]],
@@ -140,7 +141,7 @@ function copyTexts(): Text[] {
   }
   for (const family of THEME_FAMILIES) {
     const theme = authTheme(family);
-    for (const text of [theme.footer, theme.authorizedUseLine, theme.help.verify, theme.help.itDesk]) if (text) out.push({ where: `theme(${family})`, text });
+    for (const text of [theme.footer, theme.authorizedUseLine, theme.help.verify, theme.help.itDesk, theme.help.devDesk]) if (text) out.push({ where: `theme(${family})`, text });
   }
   for (const [domains, requestsAlso] of [[['example.org'], false], [['example.org', 'edu'], true], [['example.org', 'example.net', 'edu'], true]] as const) {
     out.push({ where: 'notOnListMessage', text: notOnListMessage(SITE, domains, requestsAlso) });
@@ -421,6 +422,9 @@ describe('Card Studio v4’s words', () => {
     expect(copy.SIGN_IN.resetCodeSub(EMAIL)).toBe('If ada@example.org has an account here, we’ve emailed it a code to reset your password. It works for 1 hour.');
     expect(copy.SIGN_IN.offerPasskeyHeading).toBe('Create a passkey on this device?');
     expect(copy.SIGN_IN.trouble).toBe('Trouble signing in?');
+    expect(copy.SIGN_IN.checkFailed(personal)).toBe('We couldn’t check how you sign in. Try again. If it keeps happening, email apps-help@example.org.');
+    // A password that must be reset reads like a wrong password (L5): no screen of its own.
+    expect(Object.keys(copy.SIGN_IN)).not.toContain('mustChooseNewPassword');
   });
 
   it('the access lines', () => {
@@ -472,6 +476,20 @@ describe('Card Studio v4’s words', () => {
     );
   });
 
+  it('a device or browser that isn’t working: the passkey help names who helps with that (devDesk), the other screens the IT desk', () => {
+    expect(copy.helpScreen('passkey', personal).after).toBe(
+      'Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, the device maker’s support can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.',
+    );
+    expect(copy.helpScreen('passkey', osbm).after).toContain('If your device or browser itself isn’t working, your agency’s IT help desk can help with that part.');
+    expect(copy.helpScreen('passkey', context('unc')).after).toContain('If your device or browser itself isn’t working, the UNC IT help desk can help with that part.');
+    // The authenticator and email screens keep the IT desk.
+    for (const c of [personal, osbm, context('unc')]) {
+      expect(copy.helpScreen('totp', c).after).toContain(c.theme.help.itDesk);
+      expect(copy.helpScreen('email', c).intro).toContain(c.theme.help.itDesk);
+    }
+    expect(copy.helpScreen('totp', personal).after).not.toContain('device maker');
+  });
+
   it('the contact box: the owner where the family names one, the Teams check for OSBM, and never a password or code', () => {
     expect(copy.contactLines(personal)).toEqual({ lead: 'Need help with your Example Reports account?', address: HELP, lines: ['Never send a password or code.'] });
     expect(copy.contactLines(osbm, { teams: true }).lines).toEqual([
@@ -497,6 +515,7 @@ describe('Card Studio v4’s words', () => {
     expect(copy.REQUEST.heading(personal)).toBe('Request access to Example Reports');
     expect(copy.REQUEST.sentHeading).toBe('Request sent');
     expect(copy.REQUEST.sentSub).toBe('Thanks. If an admin approves, you’ll get an email invitation. If you already have an account, just sign in.');
+    expect(copy.REQUEST.couldntSend).toBe('We couldn’t send your request. Check your connection and try again.');
     expect(copy.SIGNED_OUT.heading).toBe('You’re signed out everywhere');
     expect(copy.SIGNED_OUT.sub(personal)).toBe('You’ve been signed out of Example Reports on all your devices.');
     expect(copy.SELF_SERVICE.askAdmin).toBe('To change it, ask the site’s admin.');
@@ -508,7 +527,8 @@ describe('Card Studio v4’s words', () => {
     expect(copy.ERRORS.emptyEmail).toBe('Enter your email address');
     expect(copy.ERRORS.badEmail('name@osbm.nc.gov')).toBe('Enter an email address like name@osbm.nc.gov');
     expect(copy.ERRORS.passkeyCancelled).toBe('We didn’t get a passkey. Try again, or use another way below.');
-    expect(copy.ERRORS.passkeyCreateFailed).toBe('We couldn’t create your passkey. Try again, or continue without one.');
+    expect(copy.ERRORS.passkeyCreateFailed).toBe('We couldn’t create your passkey. Try again, or use a password instead.');
+    expect(copy.ERRORS.passkeyRejected).toBe('We couldn’t sign you in with that passkey. Try again, or use another way below.');
     expect(copy.ERRORS.wrongPassword).toBe('That email address and password don’t match. Try again, or use another way to sign in.');
     expect(copy.ERRORS.wrongTotp).toBe('That code didn’t work. Codes change every 30 seconds, so enter the newest one.');
     expect(copy.ERRORS.wrongEmailCode(personal)).toBe('That code didn’t work. Check it against the newest email from Example Reports.');

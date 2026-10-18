@@ -147,11 +147,16 @@ describe('RequestAccess', () => {
     await user.type(emailField(), 'ada@example.org{Enter}');
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Too many attempts from this network. Wait 5 minutes, then try again.'));
     expect(nameField().hasAttribute('aria-invalid')).toBe(false);
+    // Its own words for a send that didn't arrive, never the sign-in service's.
     fetch.mockRejectedValue(new TypeError('Failed to fetch'));
     await user.click(screen.getByRole('button', { name: 'Send request' }));
-    await waitFor(() =>
-      expect(screen.getByRole('alert').textContent).toBe('We couldn’t reach the sign-in service. Check your connection and try again. If it keeps happening, email apps-help@example.org.'),
-    );
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('We couldn’t send your request. Check your connection and try again.'));
+    // Something between the page and the route (an HTML error page) reads the same.
+    fetch.mockImplementation(() => Promise.resolve(new Response('<html>Bad gateway</html>', { status: 502 })));
+    await user.click(screen.getByRole('button', { name: 'Send request' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('We couldn’t send your request. Check your connection and try again.'));
+    expect(screen.queryByText(/sign-in service/)).toBeNull();
   });
 
   it('shows the privacy line only with a privacy notice', () => {

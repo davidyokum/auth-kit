@@ -567,6 +567,36 @@ describe('passkey sign-in', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalled());
   });
 
+  it('the decoy prompt asks with the pool’s relying-party ID and timeout when the site gives them, and the defaults otherwise', async () => {
+    const browser = stubPasskeyBrowser();
+    type Options = { publicKey: { rpId?: string; timeout?: number } };
+    auth.signIn.mockResolvedValue(next({ signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION', availableChallenges: ['EMAIL_OTP'] }));
+    let { user } = setup({ passkey: { relyingPartyId: 'reports.example.org', timeoutMs: 120_000 } });
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    expect(browser.get).toHaveBeenCalledTimes(1);
+    const given = (browser.get.mock.calls[0]![0] as Options).publicKey;
+    expect(given.rpId).toBe('reports.example.org');
+    expect(given.timeout).toBe(120_000);
+    cleanup();
+
+    // A disabled account's decoy carries them too (the refusal path).
+    auth.signIn.mockRejectedValue(awsError('NotAuthorizedException', 'User is disabled.'));
+    ({ user } = setup({ passkey: { relyingPartyId: 'reports.example.org', timeoutMs: 120_000 } }));
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    expect((browser.get.mock.calls[1]![0] as Options).publicKey).toMatchObject({ rpId: 'reports.example.org', timeout: 120_000 });
+    cleanup();
+
+    // Without them: the browser's own (the page's domain) and 3 minutes, as before.
+    ({ user } = setup());
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    const defaults = (browser.get.mock.calls[2]![0] as Options).publicKey;
+    expect('rpId' in defaults).toBe(false);
+    expect(defaults.timeout).toBe(180_000);
+  });
+
   it('a browser without passkeys says so the same way for every address', async () => {
     // No stubPasskeyBrowser(): jsdom has no WebAuthn, like a browser without passkey support.
     auth.signIn.mockResolvedValue(next({ signInStep: 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION', availableChallenges: ['SMS_OTP'] }));
@@ -743,23 +773,28 @@ describe('password sign-in', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('a password that must be reset: the help screen says why, and the reset code is one tap away', async () => {
-    auth.signIn.mockResolvedValue(next({ signInStep: 'RESET_PASSWORD' }));
-    const { user } = setup();
-    await submitPassword(user);
-    await heading('Forgot your password?');
-    expect(screen.getByRole('status').textContent).toBe('You need to choose a new password before signing in. We can email you a code to do that.');
-    await user.click(screen.getByRole('button', { name: 'Send a reset code' }));
-    expect(auth.resetPassword).toHaveBeenCalledWith({ username: 'ada@example.org' });
-    await heading('Check your email');
-  });
-
-  it('PasswordResetRequiredException opens the same help screen, with the message', async () => {
-    auth.signIn.mockRejectedValue(awsError('PasswordResetRequiredException'));
-    const { user } = setup();
-    await submitPassword(user);
-    await heading('Forgot your password?');
-    expect(summary().textContent).toBe('You need to choose a new password. We can email you a code to do that.');
+  it('a password that must be reset reads like a wrong password, with "Forgot your password?" as the way on (RESET_REQUIRED, ADR 0018)', async () => {
+    // Amplify turns PasswordResetRequiredException into the RESET_PASSWORD step; either way, the same screen.
+    const answers = [
+      () => auth.signIn.mockResolvedValue(next({ signInStep: 'RESET_PASSWORD' })),
+      () => auth.signIn.mockRejectedValue(awsError('PasswordResetRequiredException', 'Password reset required for the user')),
+    ];
+    for (const answer of answers) {
+      answer();
+      auth.resetPassword.mockClear();
+      const { user } = setup();
+      await submitPassword(user);
+      expect((await findSummary()).textContent).toBe('That email address and password don’t match. Try again, or use another way to sign in.');
+      expect(screen.getByRole('heading', { name: 'Enter your password' })).toBeTruthy();
+      expect(screen.getByLabelText('Password').getAttribute('aria-invalid')).toBe('true');
+      expect(document.body.textContent).not.toMatch(/choose a new password/i);
+      await user.click(screen.getByRole('button', { name: 'Forgot your password?' }));
+      await heading('Forgot your password?');
+      await user.click(screen.getByRole('button', { name: 'Send a reset code' }));
+      expect(auth.resetPassword).toHaveBeenCalledWith({ username: 'ada@example.org' });
+      await heading('Check your email');
+      cleanup();
+    }
   });
 });
 
@@ -822,7 +857,7 @@ describe('emailed code (the backstop) and joining', () => {
       first.reject(awsError('PasskeyRegistrationCanceled'));
       await Promise.resolve();
     });
-    expect((await findSummary()).textContent).toBe('We couldn’t create your passkey. Try again, or continue without one.');
+    expect((await findSummary()).textContent).toBe('We couldn’t create your passkey. Try again, or use a password instead.');
     expect(screen.queryByText('Waiting for your device…')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await heading('You’re set up');
@@ -1005,13 +1040,52 @@ describe('after sign-in', () => {
     expect(screen.queryByRole('heading', { name: 'Create a passkey on this device?' })).toBeNull();
   });
 
-  it('goes on when the factor check fails (the server enforces the authenticator rule anyway)', async () => {
+  const CHECK_FAILED = 'We couldn’t check how you sign in. Try again. If it keeps happening, email apps-help@example.org.';
+
+  it('a failed factor check after an emailed code never goes in: "Try again" re-reads, and a fresh invite must then choose (ADR 0024)', async () => {
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
+    const navigate = vi.fn();
+    const loadFactors = vi.fn<() => Promise<ClientAuthFactors>>().mockRejectedValueOnce(awsError('NetworkError')).mockResolvedValue(FRESH_INVITE);
+    const user = userEvent.setup();
+    render(createElement(SignIn, { siteName: 'Example Reports', help: HELP, passkeysEnabled: true, navigate, loadFactors, checkBreachedPassword: false }));
+    await askForCode(user);
+    await user.type(screen.getByLabelText('8-digit code'), '12345678{Enter}');
+
+    const note = await screen.findByText(CHECK_FAILED);
+    expect(note.closest('[data-auth-kit-slot="note"]')).not.toBeNull();
+    expect(root().getAttribute('data-auth-kit-view')).toBe('check-failed');
+    expect(screen.getByRole('heading', { name: 'Sign in to Example Reports' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(loadFactors).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await heading('Choose how you’ll sign in next time');
+    expect(loadFactors).toHaveBeenCalledTimes(2);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('a factor check that keeps failing (or reads nothing) keeps offering "Try again", and goes on once it reads', async () => {
     auth.signIn.mockResolvedValue(SIGNED_IN);
     const navigate = vi.fn();
+    const loadFactors = vi
+      .fn<() => Promise<ClientAuthFactors>>()
+      .mockRejectedValueOnce(awsError('NotAuthorizedException', 'Access Token has been revoked'))
+      // A site's own loader that answers nothing is no answer either.
+      .mockResolvedValueOnce(undefined as unknown as ClientAuthFactors)
+      .mockResolvedValue(DONE_FACTORS);
     const user = userEvent.setup();
-    render(createElement(SignIn, { siteName: 'X', help: HELP, passkeysEnabled: true, navigate, loadFactors: () => Promise.reject(awsError('NetworkError')) }));
+    render(createElement(SignIn, { siteName: 'Example Reports', help: HELP, passkeysEnabled: true, navigate, loadFactors }));
     await user.type(emailField(), 'ada@example.org{Enter}');
+    await screen.findByText(CHECK_FAILED);
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(loadFactors).toHaveBeenCalledTimes(2));
+    await screen.findByText(CHECK_FAILED);
+    expect(navigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
+    expect(loadFactors).toHaveBeenCalledTimes(3);
   });
 });
 

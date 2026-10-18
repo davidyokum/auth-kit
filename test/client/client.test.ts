@@ -244,7 +244,7 @@ describe('describeAuthError', () => {
     expect(describeAuthError(awsError('InvalidPasswordException', 'Password is compromised')).message).toBe(
       'This password has appeared in a data breach, so it isn’t safe to use. Choose a different one.',
     );
-    expect(describeAuthError(awsError('PasskeyRegistrationCanceled'), 'passkey-register').message).toBe('We couldn’t create your passkey. Try again, or continue without one.');
+    expect(describeAuthError(awsError('PasskeyRegistrationCanceled'), 'passkey-register').message).toBe('We couldn’t create your passkey. Try again, or use a password instead.');
     expect(describeAuthError(awsError('PasskeyAuthenticationCanceled'), 'sign-in').message).toBe('We didn’t get a passkey. Try again, or use another way below.');
     expect(describeAuthError(awsError('PasskeyNotSupported'), 'sign-in').message).toBe('This browser can’t use passkeys here. Use another way below.');
   });

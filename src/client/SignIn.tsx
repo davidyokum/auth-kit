@@ -19,10 +19,11 @@ import {
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
 import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
+import { hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode } from './ladder.js';
 import type { AuthErrorContext, AuthErrorInfo, AuthErrorKind, MessageWords } from './messages.js';
-import { answerSimulatedCode, decoyPasskeyPrompt, isFirstFactorUnavailable } from './parity.js';
+import { type PasskeyPromptOptions, answerSimulatedCode, decoyPasskeyPrompt, isFirstFactorRefusal, isFirstFactorUnavailable } from './parity.js';
 import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
 import type { SignInStep } from './steps.js';
 import {
@@ -72,6 +73,17 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   help: SignInHelp;
   /** Passkeys switch on once the site's final domain is live (the relying-party ID). */
   passkeysEnabled: boolean;
+  /**
+   * The pool's passkey settings: its relying-party ID (`passkeys.relyingPartyId` in `auth-kit/amplify`,
+   * or the sandbox's) and the passkey window's timeout in milliseconds. An address without a passkey
+   * gets a passkey window that finds nothing (ADR 0018); with these, that window asks the browser what
+   * Cognito's would, so it looks and times out the same. Defaults: the page's own domain, and 180000.
+   *
+   * ```tsx
+   * <SignIn passkey={{ relyingPartyId: 'reports.example.org' }} … />
+   * ```
+   */
+  passkey?: PasskeyPromptOptions;
   /** Offer "Email me a code instead". Default true; admin pools have no emailed codes. */
   emailCodeEnabled?: boolean;
   /** How the site creates accounts (the card's line; register D1). Default invite only. */
@@ -82,9 +94,9 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   troubleLink?: 'inside' | 'below';
   /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 3. */
   codeLifetimeMinutes?: number;
-  /** Where "Create an account" goes. Default `/sign-up`. */
+  /** Where "Create an account" goes. Default `/sign-up`. A same-site path or an http(s) URL (anything else throws). */
   signUpHref?: string;
-  /** Where "Need access? Request it." goes. Default `/request-access`. */
+  /** Where "Need access? Request it." goes. Default `/request-access`. A same-site path or an http(s) URL (anything else throws). */
   requestAccessHref?: string;
   /**
    * The site emails security notices (a passkey added, a password changed; REPORT §5.2f), so the
@@ -125,6 +137,8 @@ type View =
   | { name: 'reset-code' }
   | { name: 'reset-password'; code: string }
   | { name: 'finishing' }
+  /** Signed in, but the account's ways in couldn't be read: "Try again", never into the site unchecked. */
+  | { name: 'check-failed' }
   | { name: 'enroll-authenticator' }
   | { name: 'first-credential' }
   | { name: 'done'; how: FirstCredential }
@@ -149,22 +163,32 @@ function passwordRefused(): Error {
 
 /**
  * Starts a sign-in with one first factor and keeps the screens the same for every address (ADR 0018):
- * when Cognito says this account can't use that factor (or offers a choice of others), the screens get
+ * when Cognito says this account can't use that factor (offers a choice of others, or asks for a
+ * password reset), or refuses the account (disabled, an expired invite included), the screens get
  * what an unknown address gets: a passkey prompt that finds nothing, a password that doesn't match, or
  * "check your email" with nothing sent. Cognito's list of the account's other factors is never shown.
  */
-function firstFactor(method: SignInMethod, request: () => Promise<SignInStep>): () => Promise<ScreenStep> {
-  return async () => {
-    const step = await request();
-    if (!isFirstFactorUnavailable(method, step)) return step;
+function firstFactor(method: SignInMethod, request: () => Promise<SignInStep>, passkey: PasskeyPromptOptions = {}): () => Promise<ScreenStep> {
+  const unavailable = async (): Promise<ScreenStep> => {
     switch (method) {
       case 'passkey':
-        return decoyPasskeyPrompt();
+        return decoyPasskeyPrompt(passkey);
       case 'password':
         throw passwordRefused();
       case 'email-code':
         return { step: 'email-code-simulated' };
     }
+  };
+  return async () => {
+    let step: SignInStep;
+    try {
+      step = await request();
+    } catch (error) {
+      // A throttle, an expired session, or the network keep their own messages.
+      if (!isFirstFactorRefusal(error)) throw error;
+      return unavailable();
+    }
+    return isFirstFactorUnavailable(method, step) ? unavailable() : step;
   };
 }
 
@@ -228,6 +252,10 @@ export function SignIn(props: SignInProps) {
   const emailCodeEnabled = props.emailCodeEnabled ?? true;
   const level = props.headingLevel ?? 1;
   const hint = props.emailHint?.trim() || theme.emailHint;
+  // Checked before anything renders: a bad one is the site's misconfiguration, never a visitor's input.
+  const signUpHref = hrefOr('signUpHref', props.signUpHref, '/sign-up');
+  const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
+  const passkeyOptions = props.passkey;
   const uid = useId();
   const ids = { email: `${uid}-email`, password: `${uid}-password`, code: `${uid}-code`, newPassword: `${uid}-new-password` };
   const rootRef = useRef<HTMLDivElement>(null);
@@ -280,18 +308,26 @@ export function SignIn(props: SignInProps) {
     (props.navigate ?? ((path: string) => window.location.assign(path)))(target);
   }, [props.next, props.defaultNext, props.allowedRedirectPrefixes, props.navigate]);
 
-  /** After Cognito says DONE: decide what else this person needs before entering the site. */
+  /**
+   * After Cognito says DONE: decide what else this person needs before entering the site. Never in
+   * without reading the account's factors: one that still owes its first credential (a fresh invite
+   * or sign-up) must choose it first (ADR 0024), so a failed read offers "Try again" instead.
+   */
   const afterSignIn = useCallback(async () => {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
     userIdRef.current = (await currentUser())?.userId;
-    let factors: ClientAuthFactors | null = null;
+    let factors: ClientAuthFactors | null | undefined;
     try {
       factors = await (props.loadFactors ?? fetchAuthFactors)();
     } catch {
-      // The server enforces the authenticator rule on every request, so continuing is safe.
+      factors = null;
     }
-    if (!factors) return finish();
+    if (!factors) {
+      // The server refuses an account with no password and no passkey too (first_credential_required).
+      set({ status: null });
+      return go({ name: 'check-failed' });
+    }
     switch (afterSignInStep(factors, { passkeysEnabled })) {
       case 'set-up-authenticator':
         set({ status: null });
@@ -336,7 +372,8 @@ export function SignIn(props: SignInProps) {
         case 'totp-setup':
           return go({ name: 'totp-setup', secret: step.secret });
         case 'reset-password':
-          set({ status: SIGN_IN.mustChooseNewPassword });
+          // Never from a first-factor request: firstFactor reads it as "not available" (ADR 0018), so a
+          // stranger can't tell such an account from no account. "Forgot your password?" is the route.
           return go({ name: 'help', topic: 'password' });
         case 'select-mfa':
         case 'unsupported':
@@ -403,7 +440,7 @@ export function SignIn(props: SignInProps) {
 
   function startPasskey() {
     go({ name: 'passkey', cancelled: false });
-    void attempt(firstFactor('passkey', () => signInWithPasskey(email)), 'sign-in').then((kind) => {
+    void attempt(firstFactor('passkey', () => signInWithPasskey(email), passkeyOptions), 'sign-in').then((kind) => {
       // A closed window, or no passkey here (indistinguishable): a calm note, not an error.
       if (kind === 'passkey-cancelled') {
         set({ error: null, field: null });
@@ -504,7 +541,7 @@ export function SignIn(props: SignInProps) {
     switch (accountCreation.mode) {
       case 'request':
         return line(
-          <a href={props.requestAccessHref ?? '/request-access'} {...slot(classNames, 'link')}>
+          <a href={requestAccessHref} {...slot(classNames, 'link')}>
             {ACCESS_LINE.request}
           </a>,
         );
@@ -513,7 +550,7 @@ export function SignIn(props: SignInProps) {
         return line(
           <>
             {ACCESS_LINE.newHere}{' '}
-            <a href={props.signUpHref ?? '/sign-up'} {...slot(classNames, 'link')}>
+            <a href={signUpHref} {...slot(classNames, 'link')}>
               {ACCESS_LINE.createAccount}
             </a>
           </>,
@@ -880,6 +917,19 @@ export function SignIn(props: SignInProps) {
       break;
     case 'finishing':
       body = heading(SIGN_IN.finishing);
+      break;
+    case 'check-failed':
+      body = (
+        <div {...slot(classNames, 'form')}>
+          {heading(title)}
+          <Note classNames={classNames}>{SIGN_IN.checkFailed(c)}</Note>
+          <Actions classNames={classNames}>
+            <Button classNames={classNames} disabled={busy} onClick={() => void afterSignIn()}>
+              {SIGN_IN.tryAgain}
+            </Button>
+          </Actions>
+        </div>
+      );
       break;
     case 'enroll-authenticator':
       body = (

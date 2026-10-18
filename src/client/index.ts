@@ -29,7 +29,7 @@ export {
 } from './ladder.js';
 export { toSignInStep, methodsFromChallenges, type SignInStep } from './steps.js';
 // The same screens for every address (ADR 0018), for sites building their own sign-in screens.
-export { isFirstFactorUnavailable, decoyPasskeyPrompt, answerSimulatedCode, SIGN_IN_SESSION_MS } from './parity.js';
+export { isFirstFactorUnavailable, isFirstFactorRefusal, decoyPasskeyPrompt, answerSimulatedCode, SIGN_IN_SESSION_MS, DECOY_PASSKEY_TIMEOUT_MS, type PasskeyPromptOptions } from './parity.js';
 export { describeAuthError, type AuthErrorInfo, type AuthErrorKind, type AuthErrorContext, type MessageWords } from './messages.js';
 // Every screen's words (REPORT §4, Card Studio v4), for sites building their own screens and for tests.
 export {

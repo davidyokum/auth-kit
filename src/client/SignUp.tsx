@@ -8,11 +8,13 @@ import { confirmCode, fetchAuthFactors, requestEmailCode, saveName } from './api
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
 import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP, STATUS } from './copy.js';
+import { checkedHref, hrefOr } from './href.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, needsAuthenticator, normalizeCode } from './ladder.js';
 import type { AuthErrorKind, MessageWords } from './messages.js';
-import { answerSimulatedCode, isFirstFactorUnavailable } from './parity.js';
+import { answerSimulatedCode, isFirstFactorRefusal, isFirstFactorUnavailable } from './parity.js';
 import type { PasswordCheckOptions } from './PasswordForm.js';
 import type { SignInHelp } from './SignIn.js';
+import type { SignInStep } from './steps.js';
 import {
   Actions,
   AltLinks,
@@ -40,9 +42,9 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   help: SignInHelp;
   /** The site's setting: `domains` or `open` (the screen refuses to render for the others). */
   accountCreation: AccountCreationSettings;
-  /** The privacy notice, linked from the sign-up screen (register D4). Required. */
+  /** The privacy notice, linked from the sign-up screen (register D4). Required: a same-site path or an http(s) URL (anything else throws). */
   privacyNoticeUrl: string;
-  /** The site's terms, when it has them (open sign-up: "you agree to the terms and privacy notice"). */
+  /** The site's terms, when it has them (open sign-up: "you agree to the terms and privacy notice"). A path or an http(s) URL. */
   termsUrl?: string;
   passkeysEnabled: boolean;
   /** The same value as the preset's (register A7). Default 3. */
@@ -53,7 +55,7 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   domainHint?: string;
   /** The sign-up route. Default `/api/auth/sign-up`. */
   endpoint?: string;
-  /** Where "Sign in" and the rest go. Defaults `/sign-in` and `/request-access`. */
+  /** Where "Sign in" and "Ask for access instead" go. Defaults `/sign-in` and `/request-access`. Paths or http(s) URLs. */
   signInHref?: string;
   requestAccessHref?: string;
   /** Show "Protected against automated sign-ups." (open sign-up). Default false. */
@@ -127,6 +129,10 @@ export function SignUp(props: SignUpProps) {
   if (settings.mode !== 'domains' && settings.mode !== 'open') {
     throw new Error(`auth-kit: SignUp needs accountCreation mode 'domains' or 'open' (this site is '${settings.mode}').`);
   }
+  const signInHref = hrefOr('signInHref', props.signInHref, '/sign-in');
+  const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
+  const privacyNoticeUrl = checkedHref('privacyNoticeUrl', props.privacyNoticeUrl, '/privacy');
+  const termsUrl = props.termsUrl ? checkedHref('termsUrl', props.termsUrl, '/terms') : undefined;
 
   const domainList = domainsInWords(settings.domains);
   const notOnList = notOnListMessage(siteName, settings.domains, settings.requestsAlso);
@@ -141,7 +147,15 @@ export function SignUp(props: SignUpProps) {
   async function sendCode(): Promise<boolean> {
     const result = await fb.run(
       async () => {
-        const step = await requestEmailCode(email);
+        let step: SignInStep;
+        try {
+          step = await requestEmailCode(email);
+        } catch (error) {
+          // A disabled account (an expired invite included), or one whose password must be reset: an
+          // unknown address gets a challenge here, so these read as "check your email" too (ADR 0018).
+          if (isFirstFactorRefusal(error)) return 'simulated';
+          throw error;
+        }
         // Anything but a real code challenge reads as "check your email" with nothing sent (ADR 0018).
         return !isFirstFactorUnavailable('email-code', step) && step.step === 'email-code' ? 'sent' : 'simulated';
       },
@@ -246,7 +260,7 @@ export function SignUp(props: SignUpProps) {
   const signInLink = (
     <p {...slot(classNames, 'access')}>
       {SIGN_UP.alreadyHaveAccount}{' '}
-      <a href={props.signInHref ?? '/sign-in'} {...slot(classNames, 'link')}>
+      <a href={signInHref} {...slot(classNames, 'link')}>
         {SIGN_UP.signIn}
       </a>
     </p>
@@ -262,7 +276,7 @@ export function SignUp(props: SignUpProps) {
   switch (view.name) {
     case 'email': {
       extra = signInLink;
-      const terms = open && props.termsUrl ? SIGN_UP.termsOpen(c) : null;
+      const terms = open && termsUrl ? SIGN_UP.termsOpen(c) : null;
       const privacy = SIGN_UP.privacyDomains(c);
       body = (
         <form noValidate onSubmit={(e) => void submitEmail(e)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
@@ -294,7 +308,7 @@ export function SignUp(props: SignUpProps) {
                 classNames={classNames}
                 onClick={() => {
                   handOffEmail(email.trim());
-                  navigate(props.requestAccessHref ?? '/request-access');
+                  navigate(requestAccessHref);
                 }}
               >
                 {SIGN_UP.askForAccessInstead}
@@ -302,17 +316,17 @@ export function SignUp(props: SignUpProps) {
             </p>
           ) : null}
           <p {...slot(classNames, 'small')}>
-            {terms ? (
+            {terms && termsUrl ? (
               <>
                 {terms[0]}
-                {link(props.termsUrl!, terms[1])}
+                {link(termsUrl, terms[1])}
                 {terms[2]}
-                {link(props.privacyNoticeUrl, terms[3])}
+                {link(privacyNoticeUrl, terms[3])}
                 {terms[4]}
               </>
             ) : (
               <>
-                {link(props.privacyNoticeUrl, privacy[0])}
+                {link(privacyNoticeUrl, privacy[0])}
                 {privacy[1]}
               </>
             )}

@@ -14,6 +14,7 @@ import {
 import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
+import { checkedHref, hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
 import { describeAuthError } from './messages.js';
@@ -38,7 +39,7 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   passkeysEnabled: boolean;
   /** The site's name, shown in the authenticator app. */
   issuer: string;
-  /** Where "Sign out everywhere" goes afterwards. Default `/sign-in`. */
+  /** Where "Sign out everywhere" goes afterwards. Default `/sign-in`. A same-site path or an http(s) URL (anything else throws). */
   signedOutPath?: string;
   /** Default: a full page load (`window.location.assign`). */
   navigate?: (path: string) => void;
@@ -56,9 +57,9 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   siteName?: string;
   /** What happens to a deleted person's items on this site, in one sentence (REPORT §3.1e). */
   itemsNote?: string;
-  /** Where "Sign in again to confirm" goes when an action needs a recent sign-in: `signInUrl('/account', { reauth: true })`. */
+  /** Where "Sign in again to confirm" goes when an action needs a recent sign-in: `signInUrl('/account', { reauth: true })`. A path or an http(s) URL. */
   stepUpHref?: string;
-  /** Where a deleted account goes afterwards. Default `/`. */
+  /** Where a deleted account goes afterwards. Default `/`. A same-site path or an http(s) URL. */
   deletedPath?: string;
 }
 
@@ -104,6 +105,10 @@ function describePasskey(passkey: PasskeyInfo): string {
  */
 export function MyAccount(props: MyAccountProps) {
   const { classNames, passkeysEnabled } = props;
+  // Checked before anything renders: each ends up in an href or window.location.assign.
+  const signedOutPath = hrefOr('signedOutPath', props.signedOutPath, '/sign-in');
+  const deletedPath = hrefOr('deletedPath', props.deletedPath, '/');
+  const stepUpHref = props.stepUpHref !== undefined ? checkedHref('stepUpHref', props.stepUpHref, '/sign-in?reauth=1') : undefined;
   const level = props.headingLevel ?? 1;
   const sub = nextLevel(level);
   const errorId = useId();
@@ -167,7 +172,7 @@ export function MyAccount(props: MyAccountProps) {
 
   async function signOutAll() {
     const result = await fb.run(signOutEverywhere, { context: 'account', busyStatus: STATUS.signingOutEverywhere });
-    if (result.ok) (props.navigate ?? ((path: string) => window.location.assign(path)))(props.signedOutPath ?? '/sign-in');
+    if (result.ok) (props.navigate ?? ((path: string) => window.location.assign(path)))(signedOutPath);
   }
 
   function unavailable(message: string, retry: () => void) {
@@ -374,7 +379,7 @@ export function MyAccount(props: MyAccountProps) {
           <Text classNames={classNames}>{email.value ?? MY_ACCOUNT.noEmail}</Text>
         )}
         {props.selfService ? (
-          <EmailChange selfService={props.selfService} level={nextLevel(sub)} classNames={classNames} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} onChanged={reloadEmail} />
+          <EmailChange selfService={props.selfService} level={nextLevel(sub)} classNames={classNames} {...(stepUpHref !== undefined && { stepUpHref })} onChanged={reloadEmail} />
         ) : (
           <Text classNames={classNames}>{SELF_SERVICE.askAdmin}</Text>
         )}
@@ -412,8 +417,8 @@ export function MyAccount(props: MyAccountProps) {
           level={sub}
           classNames={classNames}
           {...(props.itemsNote !== undefined && { itemsNote: props.itemsNote })}
-          {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })}
-          onDeleted={() => (props.navigate ?? ((path: string) => window.location.assign(path)))(props.deletedPath ?? '/')}
+          {...(stepUpHref !== undefined && { stepUpHref })}
+          onDeleted={() => (props.navigate ?? ((path: string) => window.location.assign(path)))(deletedPath)}
         />
       ) : null}
     </div>
