@@ -87,7 +87,7 @@ export function standardAuthProps(options: AuthStandardOptions, extras: Standard
       email: {
         fromEmail: o.email.fromAddress,
         fromName: o.email.fromName,
-        ...(o.email.replyTo !== undefined && { replyTo: o.email.replyTo }),
+        replyTo: o.email.replyTo,
       },
     },
     ...(userAttributes !== undefined && { userAttributes }),

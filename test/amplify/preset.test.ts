@@ -651,10 +651,10 @@ describe('option validation', () => {
     ['tier 1', { tier: 1 }, /tier must be 2 or 3/],
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
-    ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X' } }, /fromAddress/],
+    ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
     ['from name with brackets', { email: { fromAddress: 'a@example.org', fromName: 'X <y>' } }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -672,6 +672,9 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
+    ['no help address', { email: { fromAddress: 'a@example.org', fromName: 'X' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
     ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
     ['an admin pool with sign-up', { adminPool: true, accountCreation: { mode: 'open' } }, /admin pool is invite only/],
     ['an empty domain list', { accountCreation: { mode: 'domains', domains: [] } }, /at least one domain/],
@@ -703,7 +706,7 @@ describe('option validation', () => {
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
     expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });

@@ -13,6 +13,7 @@ import {
   WAF_POLICY,
   codeLifetimeMinutes,
 } from '../shared/policy.js';
+import { helpAddressProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
 export class AuthStandardConfigError extends Error {
@@ -25,9 +26,15 @@ export class AuthStandardConfigError extends Error {
 export interface AuthEmailOptions {
   /** Address auth email comes from, e.g. `noreply@example.org`. Its domain must be verified in SES. */
   fromAddress: string;
-  /** Display name, e.g. `Example Reports`. */
+  /** Display name, e.g. `Example Reports (NC OSBM)` (`senderDisplayName` from `auth-kit/themes`). */
   fromName: string;
-  replyTo?: string;
+  /**
+   * The site's help address: the family's role-based help mailbox (`theme.help.address`, or the
+   * site's override). Required (ADR 0024): it's the Reply-To on every auth email Cognito sends, and
+   * the address the help screens and email footers name. Synthesis fails while it's missing, a
+   * placeholder (`apps-help@replace-me.invalid`), or a person's own address.
+   */
+  replyTo: string;
   /**
    * The verified SES identity that authorizes `fromAddress`: a domain (the default is `fromAddress`'s
    * domain) or the address itself. Amplify's typed `senders.email` can only point at an address
@@ -192,8 +199,8 @@ export interface NormalizedAuthStandardOptions {
   owner: string;
   tier: AuthTier;
   adminPool: boolean;
-  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity'>> &
-    Pick<AuthEmailOptions, 'replyTo' | 'configurationSet' | 'verification' | 'invitation'>;
+  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'replyTo'>> &
+    Pick<AuthEmailOptions, 'configurationSet' | 'verification' | 'invitation'>;
   passkeys: Required<PasskeyOptions> | null;
   groups: string[];
   appRoles: string[];
@@ -358,9 +365,9 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
   const fromName = (email.fromName ?? '').trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
-  if (email.replyTo !== undefined && !EMAIL_RE.test(email.replyTo.trim())) {
-    fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
-  }
+  const helpProblems = helpAddressProblems(email.replyTo);
+  if (helpProblems.length > 0) fail(`email.replyTo is the site's help address (the Reply-To on auth emails, and the address the help screens name). ${helpProblems.join(' ')}`);
+  if (!EMAIL_RE.test(email.replyTo.trim())) fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
   const sesIdentity = (email.sesIdentity ?? domainOf(fromAddress)).trim().toLowerCase();
   if (sesIdentity.includes('@')) {
     if (sesIdentity !== fromAddress.toLowerCase()) {
@@ -452,7 +459,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
       fromAddress,
       fromName,
       sesIdentity,
-      ...(email.replyTo !== undefined && { replyTo: email.replyTo.trim() }),
+      replyTo: email.replyTo.trim().toLowerCase(),
       ...(email.configurationSet !== undefined && { configurationSet: email.configurationSet }),
       ...(email.verification !== undefined && { verification: email.verification }),
       ...(email.invitation !== undefined && { invitation: email.invitation }),

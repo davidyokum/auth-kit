@@ -272,7 +272,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
       arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
     }),
     from: formatSender(o.email.fromName, o.email.fromAddress),
-    ...(o.email.replyTo !== undefined && { replyToEmailAddress: o.email.replyTo }),
+    replyToEmailAddress: o.email.replyTo,
     ...(o.email.configurationSet !== undefined && { configurationSet: o.email.configurationSet }),
   };
 
