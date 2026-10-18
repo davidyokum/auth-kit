@@ -576,6 +576,22 @@ describe('invite expiry sweep', () => {
     ]);
   });
 
+  it('as an admin: never disables the last owner, warns them through the mailer, and says so', async () => {
+    const t = setup({ actor: ADMIN });
+    t.pool.add({ sub: 'o-1', email: 'olivia@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'superadmin');
+    t.pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'editor');
+    const result = await t.people.expireStaleInvites();
+    expect(result).toMatchObject({ disabled: ['old'], failed: [], skipped: [{ sub: 'o-1', reason: 'last-owner', warned: ['owner'], problems: [] }] });
+    expect(t.pool.get('o-1')).toMatchObject({ enabled: true });
+    expect([...t.pool.get('o-1')!.groups]).toEqual(['superadmin']);
+    expect(t.ownerWarnings).toEqual([
+      expect.objectContaining({ siteName: 'Example Reports', signInUrl: 'https://reports.example.org/sign-in', to: { email: 'olivia@example.org', kind: 'owner' } }),
+    ]);
+    const row = t.auditLog.rows.find((r) => r.target?.sub === 'o-1')!;
+    expect(row).toMatchObject({ phase: 'refused', action: 'people.expireInvite', actor: { sub: 'admin-1' } });
+    expect(row.error).toMatch(/^last_owner: skipped: last owner/);
+  });
+
   it('skips an invite whose intent can’t be logged', async () => {
     const pool = fakeUserPool();
     seedInvites(pool);

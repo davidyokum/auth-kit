@@ -100,6 +100,78 @@ export function renderOwnerAlertEmail(alert: OwnerGrantAlert): RenderedEmail {
   };
 }
 
+/**
+ * The site's last owner hasn't used their invite (ADR 0019): the invite-expiry sweep left it enabled,
+ * because a site keeps at least one owner, and warns the owner and, in a separate message, an
+ * optional fallback address.
+ */
+export interface OwnerInviteWarning {
+  siteName: string;
+  /** The owner whose invite is unused. */
+  owner: { sub: string; email: string; name?: string };
+  /** Who this message goes to: the owner, or the configured fallback address (an operator). */
+  to: { email: string; kind: 'owner' | 'fallback' };
+  /** When the invite was sent (the account's creation). */
+  invitedAt: Date;
+  /** When its 7 days ran out. */
+  expiredAt: Date;
+  /** Absolute sign-in URL, when the sender knows it. */
+  signInUrl?: string;
+  at: Date;
+}
+
+/** Sends the last-owner warning, one message per recipient. Throw to report a failure. */
+export interface OwnerInviteWarningNotifier {
+  ownerInviteUnused(warning: OwnerInviteWarning): Promise<void>;
+}
+
+/**
+ * The default last-owner warning. The owner's copy says why the invite is still open and where to
+ * sign in; the fallback copy says whose invite it is and how to resolve it.
+ */
+export function renderOwnerInviteWarningEmail(warning: OwnerInviteWarning): RenderedEmail {
+  const sent = longDate(warning.invitedAt);
+  const expired = longDate(warning.expiredAt);
+  const site = warning.siteName;
+  let subject: string;
+  let lines: string[];
+  if (warning.to.kind === 'owner') {
+    subject = `Your owner invite to ${site} hasn't been used`;
+    lines = [
+      warning.owner.name ? `Hi ${warning.owner.name},` : 'Hello,',
+      '',
+      `You were invited as an owner of ${site} on ${sent} (UTC), and the invite hasn't been used. Invites expire after 7 days (yours on ${expired}), but you're the site's only owner, so yours was left open.`,
+      '',
+      warning.signInUrl
+        ? `Sign in at ${warning.signInUrl} with this email address to keep your owner access.`
+        : `Sign in to ${site} with this email address to keep your owner access.`,
+      '',
+      `Until then, the invite is a live owner account for whoever can sign in with this address. If you weren't expecting it, tell whoever runs ${site}.`,
+    ];
+  } else {
+    const whom = warning.owner.name ? `${warning.owner.name} (${warning.owner.email})` : warning.owner.email;
+    subject = `${site}: the owner invite for ${warning.owner.email} hasn't been used`;
+    lines = [
+      `The owner invite for ${whom} on ${site}, sent ${sent} (UTC), hasn't been used. Invites expire after 7 days (this one on ${expired}), but this is the site's only owner, so the invite-expiry job left it enabled and warned them.`,
+      '',
+      'Until they sign in, it is a live owner account for whoever controls that inbox.',
+      'If the address is wrong, or they no longer need it, make someone else an owner: the next run then disables this invite.',
+      '',
+      `You get this because you're the fallback contact for ${site}'s owner warnings.`,
+    ];
+  }
+  const url = warning.signInUrl !== undefined ? escapeHtml(warning.signInUrl) : undefined;
+  const html = lines
+    .filter((l) => l !== '')
+    .map((l) => {
+      const escaped = escapeHtml(l);
+      // A function replacement, so a `$` in the URL is never read as a replacement pattern.
+      return url !== undefined && warning.to.kind === 'owner' ? `<p>${escaped.replace(url, () => `<a href="${url}">${url}</a>`)}</p>` : `<p>${escaped}</p>`;
+    })
+    .join('\n');
+  return { subject, text: lines.join('\n'), html };
+}
+
 export interface SesInviteMailerOptions {
   /** A verified SES identity, e.g. `Example Reports <noreply@example.org>`. */
   from: string;
@@ -111,19 +183,23 @@ export interface SesInviteMailerOptions {
   render?: (input: InviteEmail) => RenderedEmail;
   /** Your own owner-alert template. Default `renderOwnerAlertEmail`. */
   renderOwnerAlert?: (alert: OwnerGrantAlert) => RenderedEmail;
+  /** Your own last-owner warning template. Default `renderOwnerInviteWarningEmail`. */
+  renderOwnerInviteWarning?: (warning: OwnerInviteWarning) => RenderedEmail;
 }
 
 /**
- * The site's mailer through SES (SESv2 `SendEmail`): the invite email, and the alert every owner gets
- * when someone is made an owner (one message to all of them, so it's sent to all or to none). The
- * server's role needs `ses:SendEmail` on the identity.
+ * The site's mailer through SES (SESv2 `SendEmail`): the invite email, the alert every owner gets
+ * when someone is made an owner (one message to all of them, so it's sent to all or to none), and the
+ * last-owner warning the invite-expiry sweep sends (one message per recipient). The role needs
+ * `ses:SendEmail` on the identity.
  */
-export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMailer & OwnerAlertNotifier {
+export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMailer & OwnerAlertNotifier & OwnerInviteWarningNotifier {
   if (!options.from) throw new Error('auth-kit: createSesInviteMailer needs a from address.');
   let client = options.client;
   const ses = (): SESv2Client => (client ??= new SESv2Client(options.region ? { region: options.region } : {}));
   const render = options.render ?? renderInviteEmail;
   const renderAlert = options.renderOwnerAlert ?? renderOwnerAlertEmail;
+  const renderWarning = options.renderOwnerInviteWarning ?? renderOwnerInviteWarningEmail;
   const send = async (to: string[], email: RenderedEmail) => {
     await ses().send(
       new SendEmailCommand({
@@ -146,6 +222,10 @@ export function createSesInviteMailer(options: SesInviteMailerOptions): InviteMa
       const to = [...new Set(alert.owners.map((o) => o.email).filter(Boolean))];
       if (to.length === 0) throw new Error('auth-kit: no owner has an email address to alert.');
       await send(to, renderAlert(alert));
+    },
+    async ownerInviteUnused(warning) {
+      if (!warning.to.email) throw new Error('auth-kit: the owner warning has no address to go to.');
+      await send([warning.to.email], renderWarning(warning));
     },
   };
 }

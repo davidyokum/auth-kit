@@ -30,7 +30,7 @@ import {
   isStandardGroup,
   roleRank,
 } from './guardrails.js';
-import type { InviteMailer, OwnerAlertNotifier } from './mailer.js';
+import type { InviteMailer, OwnerAlertNotifier, OwnerInviteWarningNotifier } from './mailer.js';
 import { ADMIN_POLICY } from './policy.js';
 import { type QuotaLimiterOptions, type Sleep, createQuotaLimiter } from './quota.js';
 import { type SweepResult, sweepFor } from './sweep.js';
@@ -64,9 +64,10 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   inviteMode?: InviteMode;
   /**
    * Sends the branded invite. Required in `emailed-code` mode. `createSesInviteMailer` also sends the
-   * owner-grant alert, so it serves as `ownerAlerts` too.
+   * owner-grant alert, so it serves as `ownerAlerts` too, and the last-owner warning
+   * `expireStaleInvites` sends when it leaves the site's only owner's unused invite open.
    */
-  mailer?: InviteMailer & Partial<OwnerAlertNotifier>;
+  mailer?: InviteMailer & Partial<OwnerAlertNotifier> & Partial<OwnerInviteWarningNotifier>;
   /**
    * Alerts every owner when someone is made an owner. Granting the owner role requires it: with no
    * notifier the grant is refused, and if the alert fails the grant is undone. Default: the mailer's
@@ -121,7 +122,10 @@ export interface PeopleActions {
   signOutEverywhere(input: TargetInput): Promise<ActionResult>;
   /** AdminDeleteUser: owners only, after disabling and the retention period, with the address typed out. */
   deleteUser(input: DeleteUserInput): Promise<ActionResult>;
-  /** Disables unaccepted invites older than 7 days, as the acting admin. */
+  /**
+   * Disables unaccepted invites older than 7 days, as the acting admin, except the site's last
+   * owner's: that one is skipped (`skipped`), logged, and the owner warned through the mailer.
+   */
   expireStaleInvites(): Promise<SweepResult | { error: ActionResult }>;
   /** The Activity page: merged audit entries, newest first. Needs `audit.read`. */
   listActivity(query?: AuditLogQuery): Promise<ActivityPage>;
@@ -308,8 +312,20 @@ export function createPeopleActions<G extends string, C extends string>(config: 
       auth.pool.userPoolId,
       limiter,
     ));
+  const warningNotifier: OwnerInviteWarningNotifier | undefined =
+    typeof config.mailer?.ownerInviteUnused === 'function' ? (config.mailer as OwnerInviteWarningNotifier) : undefined;
   const sweep = () =>
-    sweepFor({ cognito: cognito(), auditLog, mode, now, maxPeople, ...(config.sleep !== undefined && { sleep: config.sleep }) });
+    sweepFor({
+      cognito: cognito(),
+      auditLog,
+      mode,
+      now,
+      maxPeople,
+      ...(warningNotifier !== undefined && {
+        ownerWarnings: { notifier: warningNotifier, siteName: config.siteName, signInUrl: signInUrl.toString() },
+      }),
+      ...(config.sleep !== undefined && { sleep: config.sleep }),
+    });
 
   const groupsKnown = (): string[] => [...new Set<string>([...STANDARD_GROUPS, ...auth.capabilities.groups])];
   const statusOf = (p: CognitoPerson): InviteStatus =>
