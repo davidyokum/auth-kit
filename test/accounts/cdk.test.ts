@@ -96,7 +96,8 @@ describe('AccessRequestTable', () => {
     expect(table.Properties.Replicas).toHaveLength(1);
     expect(table.Properties.Replicas[0]).toMatchObject({
       DeletionProtectionEnabled: true,
-      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      // Off by default: backups would keep typed names and reasons past the 30-day deletion (I1).
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false },
       ResourcePolicy: { PolicyDocument: { Statement: [{ Sid: 'AccessRequestsAreKept', Effect: 'Deny', Principal: '*', Action: 'dynamodb:DeleteTable', Resource: '*' }] } },
       Tags: expect.arrayContaining([
         { Key: 'Component', Value: 'access-requests' },
@@ -105,11 +106,16 @@ describe('AccessRequestTable', () => {
     });
   });
 
-  it('in a sandbox: no deletion protection, no resource policy, removed with the stack (TTL and PITR stay)', () => {
+  it('point-in-time recovery only when the site turns it on (its privacy notice must say backups keep requests longer)', () => {
+    const table = onlyTable(synth((stack) => new AccessRequestTable(stack, 'Requests', { pointInTimeRecovery: true })));
+    expect(table.Properties.Replicas[0]).toMatchObject({ PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } });
+  });
+
+  it('in a sandbox: no deletion protection, no resource policy, removed with the stack (TTL stays)', () => {
     const template = synth((stack) => new AccessRequestTable(stack, 'Requests'), { 'amplify-backend-type': 'sandbox' });
     const table = onlyTable(template);
     expect(table.DeletionPolicy).toBe('Delete');
-    expect(table.Properties.Replicas[0]).toMatchObject({ DeletionProtectionEnabled: false, PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true } });
+    expect(table.Properties.Replicas[0]).toMatchObject({ DeletionProtectionEnabled: false, PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: false } });
     expect(table.Properties.Replicas[0]).not.toHaveProperty('ResourcePolicy');
     expect(table.Properties.TimeToLiveSpecification).toEqual({ AttributeName: 'ttl', Enabled: true });
     expect(JSON.stringify(template.toJSON())).not.toContain('DeleteTable');

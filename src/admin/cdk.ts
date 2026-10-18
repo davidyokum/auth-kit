@@ -627,15 +627,23 @@ function keptTable(
   });
 }
 
-export type AccessRequestTableProps = TableProps;
+export interface AccessRequestTableProps extends TableProps {
+  /**
+   * Point-in-time recovery. Default **off**: backups would keep each request's typed name and reason
+   * for up to 35 days past the 30-day deletion the site promises (ADR 0023), and nothing in the queue
+   * is worth restoring (an unanswered request can be filed again). Turn it on only if the privacy
+   * notice says backups keep requests longer.
+   */
+  pointInTimeRecovery?: boolean;
+}
 
 /**
  * The access-request queue (register D3): requests wait here, never as Cognito users.
  * - partition `pk` (`requests`), sort `sk` (`request#<id>`), `ttl` for DynamoDB's TTL
  *   (`ACCESS_REQUEST_TABLE_SCHEMA`): a request and its typed name and reason are deleted 30 days after
  *   it's settled (approved, declined, or expired after 30 days), and the digest deletes them too;
- * - on-demand, point-in-time recovery, deletion protection, retained on stack delete, `DeleteTable`
- *   denied to everyone (outside sandboxes).
+ * - on-demand, deletion protection, retained on stack delete, `DeleteTable` denied to everyone
+ *   (outside sandboxes); no point-in-time recovery by default, so backups don't keep what was deleted.
  *
  * Grant the app with `grantApp` (`Query`, `GetItem`, `PutItem`); the digest gets `grantDigest`.
  */
@@ -649,7 +657,7 @@ export class AccessRequestTable extends Construct {
     super(scope, id);
     this.encryptionKey = props.encryptionKey;
     const t = ACCESS_REQUEST_TABLE_SCHEMA;
-    this.table = keptTable(this, props, { partitionKey: t.partitionKey, sortKey: t.sortKey, ttl: t.ttlAttribute, pointInTimeRecovery: true, keep: true, denySid: 'AccessRequestsAreKept' });
+    this.table = keptTable(this, props, { partitionKey: t.partitionKey, sortKey: t.sortKey, ttl: t.ttlAttribute, pointInTimeRecovery: props.pointInTimeRecovery === true, keep: true, denySid: 'AccessRequestsAreKept' });
     this.tableName = this.table.tableName;
     this.tableArn = this.table.tableArn;
     Tags.of(this).add('ManagedBy', 'auth-kit');
