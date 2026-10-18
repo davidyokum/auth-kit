@@ -16,7 +16,8 @@
     "passkeys",
     "webauthn",
     "nextjs",
-    "authorization"
+    "authorization",
+    "generative-art"
   ],
   "type": "module",
   "sideEffects": false,
@@ -84,6 +85,18 @@
     "./ribbon": {
       "types": "./dist/ribbon/index.d.ts",
       "import": "./dist/ribbon/index.js"
+    },
+    "./backdrops": {
+      "types": "./dist/backdrops/index.d.ts",
+      "import": "./dist/backdrops/index.js"
+    },
+    "./backdrops/react": {
+      "types": "./dist/backdrops/react.d.ts",
+      "import": "./dist/backdrops/react.js"
+    },
+    "./backdrops/picker": {
+      "types": "./dist/backdrops/picker.d.ts",
+      "import": "./dist/backdrops/picker.js"
     },
     "./package.json": "./package.json"
   },

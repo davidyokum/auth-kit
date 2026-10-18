@@ -110,7 +110,7 @@ export {
   type DevKitNextConfig,
   type DevKitNextConfigResult,
 } from './next-config.js';
-export { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, DEV_SIGNIN_MARKER_HEADER, MATRIX_SERVER_MARKER } from './marker.js';
+export { BACKDROP_PICKER_MARKER, DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, DEV_SIGNIN_MARKER_HEADER, MATRIX_SERVER_MARKER } from './marker.js';
 export {
   environmentRibbonModel,
   resolveEnvironment,

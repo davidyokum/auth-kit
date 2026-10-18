@@ -3,20 +3,21 @@
  *
  * Run after `next build`. It fails if the build output contains the dev sign-in marker (the route
  * handler or the persona menu was bundled) or the auth matrix's server-mode marker
- * (`auth-kit/testing/matrix-server` was bundled), or registers the dev route in any route manifest
+ * (`auth-kit/testing/matrix-server` was bundled) or the backdrop picker's marker
+ * (`auth-kit/backdrops/picker` was bundled), or registers the dev route in any route manifest
  * or route file. It skips `.next/cache` and `.next/dev` (where Next 16 keeps `next dev` output), and it
  * refuses a directory that isn't a production build, because "no build" isn't "no dev code".
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
-import { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from './marker.js';
+import { BACKDROP_PICKER_MARKER, DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from './marker.js';
 
 export interface ProductionBuildCheckOptions {
   /** The build output, e.g. `.next`. */
   buildDir: string;
   /** Default `/api/dev/sign-in`. */
   devRoute?: string;
-  /** Strings that must not appear. Default: the dev sign-in marker and the matrix server-mode marker. */
+  /** Strings that must not appear. Default: the dev sign-in, matrix server-mode, and backdrop picker markers. */
   markers?: readonly string[];
   /** Top-level directories to skip. Default `['cache', 'dev']`. */
   skip?: readonly string[];
@@ -41,6 +42,7 @@ export interface ProductionBuildCheckResult {
 const MARKER_MEANING: Readonly<Record<string, string>> = {
   [DEV_SIGNIN_MARKER]: 'contains the dev sign-in marker (the route handler or persona menu was bundled)',
   [MATRIX_SERVER_MARKER]: "contains the auth matrix's server-mode marker (auth-kit/testing/matrix-server was bundled; import it only through a withDevKit alias)",
+  [BACKDROP_PICKER_MARKER]: 'contains the backdrop picker marker (auth-kit/backdrops/picker was bundled; import it only from a dev-only page such as page.dev.tsx)',
 };
 
 const MANIFESTS = [
@@ -82,7 +84,7 @@ function collectStrings(value: unknown, out: string[]): void {
 export async function checkProductionBuild(options: ProductionBuildCheckOptions): Promise<ProductionBuildCheckResult> {
   const root = options.buildDir;
   const route = (options.devRoute ?? DEV_SIGN_IN_ROUTE).replace(/\/+$/, '');
-  const markers = (options.markers ?? [DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER]).filter(Boolean).map((m) => ({ text: m, bytes: Buffer.from(m) }));
+  const markers = (options.markers ?? [DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER, BACKDROP_PICKER_MARKER]).filter(Boolean).map((m) => ({ text: m, bytes: Buffer.from(m) }));
   const skip = new Set(options.skip ?? ['cache', 'dev']);
   const findings: ProductionBuildFinding[] = [];
 
