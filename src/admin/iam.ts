@@ -66,6 +66,31 @@ export function auditLogResourcePolicy(options: { denyDeleteTable?: boolean } = 
   return { Version: '2012-10-17', Statement: statements };
 }
 
+/**
+ * The calls the resource membership store makes (`auth-kit/resources`): `GetItem` and `Query`
+ * (consistent reads, and the `byPerson` index), and transactions of `Put` and `Delete`, which IAM
+ * authorizes as `PutItem` and `DeleteItem`. No `UpdateItem`, `Scan`, `BatchWriteItem`, or
+ * `ConditionCheckItem`.
+ */
+export const RESOURCE_ACCESS_APP_ACTIONS = {
+  item: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:DeleteItem'],
+  query: ['dynamodb:Query'],
+} as const;
+
+/**
+ * The app's identity policy for the resource membership table (`ResourceAccessTable`): the item calls
+ * on the table, and `Query` on the table and its index. Nothing else, and only this table.
+ */
+export function resourceAccessAppPolicy(tableArn: string): IamPolicyDocument {
+  return {
+    Version: '2012-10-17',
+    Statement: [
+      { Sid: 'ResourceAccessItems', Effect: 'Allow', Action: [...RESOURCE_ACCESS_APP_ACTIONS.item], Resource: tableArn },
+      { Sid: 'ResourceAccessQuery', Effect: 'Allow', Action: [...RESOURCE_ACCESS_APP_ACTIONS.query], Resource: [tableArn, `${tableArn}/index/*`] },
+    ],
+  };
+}
+
 /** Cognito calls the People actions make (plus `AdminGetUser`, which auth-kit/server's live checks use). */
 export const PEOPLE_ADMIN_COGNITO_ACTIONS = {
   read: ['cognito-idp:ListUsers', 'cognito-idp:ListUsersInGroup', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminGetUser'],

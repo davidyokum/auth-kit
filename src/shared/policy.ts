@@ -9,7 +9,7 @@
 //
 // One owner, an explicit admin ladder, and members. These roles are for running the site. Access to
 // one project, plan, or other item is a resource role on that item (Manager, Contributor, Reader;
-// built separately), which adds to the site role there. Each role includes everything below it.
+// ADR 0022, below), which adds to the site role there. Each role includes everything below it.
 
 /** The owner's group. Exactly one enabled person holds it; it moves only by "Transfer ownership". */
 export const OWNER_GROUP = 'owner';
@@ -185,6 +185,157 @@ function roleMatrixRow(role: SiteRole): RoleMatrixRow {
 export const ROLE_MATRIX: Readonly<{ columns: typeof ROLE_MATRIX_COLUMNS; rows: readonly RoleMatrixRow[] }> = Object.freeze({
   columns: ROLE_MATRIX_COLUMNS,
   rows: Object.freeze(([...STANDARD_GROUPS, MEMBER_ROLE] as SiteRole[]).map(roleMatrixRow)),
+});
+
+// ---- Resource roles (ADR 0022) ------------------------------------------------------------------
+//
+// Who can do what to one project, plan, grant, or other item. "Resource" is the term in code and
+// docs (as in AWS IAM, Amazon Verified Permissions, and OAuth); screens never show it, or "record":
+// they use the app's own noun ("Who has access to this project"). A resource role adds to the site
+// role on that item: an action is allowed when either grants it.
+
+/** Resource roles, highest first. Several Managers are allowed; every item keeps at least one. */
+export const RESOURCE_ROLES = ['manager', 'contributor', 'reader'] as const;
+export type ResourceRole = (typeof RESOURCE_ROLES)[number];
+
+/** Rank of each resource role: each includes everything the one below it can do. */
+export const RESOURCE_ROLE_RANK: Readonly<Record<ResourceRole, number>> = { reader: 1, contributor: 2, manager: 3 };
+
+/** Display names, exactly as screens show them. */
+export const RESOURCE_ROLE_LABEL: Readonly<Record<ResourceRole, string>> = {
+  manager: 'Manager',
+  contributor: 'Contributor',
+  reader: 'Reader',
+};
+
+/**
+ * The standard actions on an item. Apps may add their own per resource type (`comment`, `approve`);
+ * these four are the ones every type has.
+ * - `view`: see it (list it and open it);
+ * - `edit`: change it;
+ * - `manage-access`: choose who has access to it and with which role;
+ * - `invite`: bring in someone who has no account yet, as a member with access to this one item.
+ */
+export const RESOURCE_ACTIONS = ['view', 'edit', 'manage-access', 'invite'] as const;
+export type StandardResourceAction = (typeof RESOURCE_ACTIONS)[number];
+
+/** What each standard action is called on screens. */
+export const RESOURCE_ACTION_LABEL: Readonly<Record<StandardResourceAction, string>> = {
+  view: 'See it',
+  edit: 'Edit it',
+  'manage-access': 'Choose who has access',
+  invite: 'Invite someone new',
+};
+
+/**
+ * Each resource role's actions, unless an app overrides them for one resource type. Each role holds
+ * everything below it; only Managers manage access and invite.
+ */
+export const DEFAULT_RESOURCE_ROLE_ACTIONS: Readonly<Record<ResourceRole, readonly StandardResourceAction[]>> = {
+  reader: ['view'],
+  contributor: ['view', 'edit'],
+  manager: ['view', 'edit', 'manage-access', 'invite'],
+};
+
+/**
+ * The site role as a floor on every item: the capability that grants each standard action on every
+ * item of every type. With the standard map: Admin – view only sees every item; Admin – content only
+ * also edits every item; Admin – content & people and above also manage access (and invite) on every
+ * item. Members get nothing here: their access comes from their resource roles.
+ */
+export const RESOURCE_SITE_FLOOR: Readonly<Record<StandardResourceAction, string>> = {
+  view: 'content.read',
+  edit: 'content.edit',
+  'manage-access': 'people.manage',
+  invite: 'people.manage',
+};
+
+/** Defaults for every resource type (each type may change the two switches). */
+export const RESOURCE_POLICY = {
+  /** Members may create items (and become their Manager). Off: admins create items and assign a Manager. */
+  selfServiceCreate: false,
+  /** Every signed-in person may see every item, read-only. Off: members see only their own items. */
+  sharedDirectory: false,
+  /** Every item keeps at least this many Managers. */
+  minimumManagers: 1,
+  /** Members one item may have (one access list is one Query; changes are batched below DynamoDB's 100-item transaction limit). */
+  maxMembersPerResource: 500,
+  /** Memberships read for one person's "my items" list; a longer list says it stopped. */
+  maxResourcesPerPerson: 1000,
+} as const;
+
+/**
+ * What each resource role can and can't do, one line each, in the app's own words: pass its noun
+ * ("project") and screens say "this project". Describes the default actions.
+ */
+export function resourceRoleDescriptions(noun = 'item'): Readonly<Record<ResourceRole, RoleDescription>> {
+  return {
+    manager: {
+      can: `See and edit this ${noun}, choose who has access to it, and invite someone new to it.`,
+      cannot: `Remove the last Manager (every ${noun} keeps at least one), or reach anything outside this ${noun}.`,
+    },
+    contributor: {
+      can: `See and edit this ${noun}.`,
+      cannot: 'Change who has access to it.',
+    },
+    reader: {
+      can: `See this ${noun}.`,
+      cannot: 'Edit it or change who has access to it.',
+    },
+  };
+}
+
+/** `resourceRoleDescriptions()` with the generic noun "item". */
+export const RESOURCE_ROLE_DESCRIPTIONS: Readonly<Record<ResourceRole, RoleDescription>> = resourceRoleDescriptions();
+
+/** One row of the combined comparison: a site role or a resource role, and the actions it grants. */
+export interface ResourceAccessMatrixRow {
+  kind: 'site' | 'resource';
+  role: SiteRole | ResourceRole;
+  label: string;
+  /** Where it applies: every item (a site role) or the one item (a resource role). */
+  scope: 'every item' | 'this item';
+  actions: Readonly<Record<StandardResourceAction, boolean>>;
+}
+
+function siteFloorActions(role: SiteRole): Readonly<Record<StandardResourceAction, boolean>> {
+  const held = new Set<string>(role === MEMBER_ROLE ? [] : STANDARD_CAPABILITIES[role]);
+  const out = {} as Record<StandardResourceAction, boolean>;
+  for (const action of RESOURCE_ACTIONS) out[action] = held.has(RESOURCE_SITE_FLOOR[action]);
+  return Object.freeze(out);
+}
+
+/**
+ * The combining rule as a table, built from `STANDARD_CAPABILITIES`, `RESOURCE_SITE_FLOOR`, and
+ * `DEFAULT_RESOURCE_ROLE_ACTIONS` so it can't drift from what the server enforces: on one item, a
+ * person may do an action when their site row or their resource row (on that item) says yes.
+ */
+export const RESOURCE_ACCESS_MATRIX: Readonly<{ actions: typeof RESOURCE_ACTIONS; rows: readonly ResourceAccessMatrixRow[] }> = Object.freeze({
+  actions: RESOURCE_ACTIONS,
+  rows: Object.freeze([
+    ...([...STANDARD_GROUPS, MEMBER_ROLE] as SiteRole[]).map(
+      (role): ResourceAccessMatrixRow =>
+        Object.freeze({
+          kind: 'site' as const,
+          role,
+          label: role === MEMBER_ROLE ? MEMBER_LABEL : ADMIN_ROLE_LABEL[role],
+          scope: 'every item' as const,
+          actions: siteFloorActions(role),
+        }),
+    ),
+    ...RESOURCE_ROLES.map(
+      (role): ResourceAccessMatrixRow =>
+        Object.freeze({
+          kind: 'resource' as const,
+          role,
+          label: RESOURCE_ROLE_LABEL[role],
+          scope: 'this item' as const,
+          actions: Object.freeze(
+            Object.fromEntries(RESOURCE_ACTIONS.map((a) => [a, DEFAULT_RESOURCE_ROLE_ACTIONS[role].includes(a)])) as Record<StandardResourceAction, boolean>,
+          ),
+        }),
+    ),
+  ]),
 });
 
 export type AuthTier = 2 | 3;

@@ -603,17 +603,33 @@ describe('transfer ownership', () => {
 });
 
 describe('disable, enable, sign out', () => {
-  it('disables first, then removes admin roles and record memberships, keeping app roles', async () => {
+  it('disables first, then removes admin roles and resource memberships, keeping app roles', async () => {
     const removed: string[] = [];
-    const t = setup({ actor: ADMIN, config: { removeRecordMemberships: (p) => (removed.push(p.sub), Promise.resolve({ reviews: 2 })) } });
+    const t = setup({ actor: ADMIN, config: { removeResourceMemberships: (p) => (removed.push(p.sub), Promise.resolve({ reviews: 2 })) } });
     t.pool.add({ sub: 'e-1', email: 'e@example.org' }, 'admin-content', 'admin-view', 'reviewer');
     expect(await t.people.disable({ sub: 'e-1', reason: 'Left the comms team' })).toMatchObject({ ok: true });
     expect(t.pool.writes()).toEqual(['AdminDisableUserCommand', 'AdminRemoveUserFromGroupCommand', 'AdminRemoveUserFromGroupCommand']);
     expect(t.pool.get('e-1')).toMatchObject({ enabled: false });
     expect([...t.pool.get('e-1')!.groups]).toEqual(['reviewer']);
     expect(removed).toEqual(['e-1']);
-    expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { enabled: false, groups: ['reviewer'], recordMemberships: { reviews: 2 } } });
+    expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { enabled: false, groups: ['reviewer'], resourceMemberships: { reviews: 2 } } });
+    expect(t.auditLog.rows.at(-1)?.calls).toContain('App: remove item memberships: ok');
     expectAuditedWrites(t.timeline);
+  });
+
+  it('still accepts the old hook name, removeRecordMemberships, for one release', async () => {
+    const removed: string[] = [];
+    const t = setup({ actor: ADMIN, config: { removeRecordMemberships: (p) => (removed.push(p.sub), Promise.resolve({ reviews: 1 })) } });
+    t.pool.add({ sub: 'e-2', email: 'e2@example.org' }, 'reviewer');
+    expect(await t.people.disable({ sub: 'e-2' })).toMatchObject({ ok: true });
+    expect(removed).toEqual(['e-2']);
+    expect(t.auditLog.rows.at(-1)).toMatchObject({ after: { resourceMemberships: { reviews: 1 } } });
+  });
+
+  it('refuses two different membership hooks at startup (the old and the new name)', () => {
+    const one = () => Promise.resolve(1);
+    const two = () => Promise.resolve(2);
+    expect(() => setup({ actor: ADMIN, config: { removeResourceMemberships: one, removeRecordMemberships: two } })).toThrow(/removeResourceMemberships only/);
   });
 
   it('a disable that stops sign-in but fails cleanup is partial, and says sign-in stopped', async () => {

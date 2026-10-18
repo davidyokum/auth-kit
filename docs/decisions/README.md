@@ -25,3 +25,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0019](0019-invite-expiry-sweep.md) | Invite expiry runs hourly, from a Lambda bundled in the package |
 | [0020](0020-site-wide-roles.md) | Site-wide roles: one owner, an explicit admin ladder, members per-item |
 | [0021](0021-backdrops.md) | Backdrops: site identity behind a fixed card, locked and frozen per style version |
+| [0022](0022-resource-roles.md) | Resource roles: Manager, Contributor, Reader, combined with site roles |

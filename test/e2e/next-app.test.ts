@@ -11,6 +11,8 @@
  * - #11 the proxy's headers hook: Next stamps its scripts with the CSP nonce from the hook.
  * - #10 in a production build, error.jsx can still tell auth-kit's "couldn't check" apart.
  * - ADR 0014 the proxy never steps aside in a production build, whatever the environment says.
+ * - ADR 0022 resource roles across bundles: the route that creates a record makes its creator the
+ *       Manager (an audited change), and the page and the other routes read the same memberships.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -154,6 +156,16 @@ describe.runIf(enabled)('auth-kit on real Next.js', () => {
     const html = await own.text();
     // Rendered on the server, inside the gate's content slot, hidden until the browser check passes.
     expect(html).toMatch(/data-auth-kit-slot="content" hidden="">[\s\S]*Member’s own record/);
+  });
+
+  it('ADR 0022: the creator manages their record; admins see it by their site role; another member gets 404', async () => {
+    const ids = async (as: keyof typeof PERSONAS) => ((await (await send('/api/records', { as })).json()) as { records: { id: string }[] }).records.map((r) => r.id);
+    expect(await ids('member')).toContain(recordId);
+    expect(await ids('admin')).toContain(recordId);
+    expect(await ids('otherMember')).not.toContain(recordId);
+    expect((await send(`/api/records/${recordId}`, { as: 'admin' })).status).toBe(200);
+    expect((await send(`/api/records/${recordId}`, { as: 'otherMember' })).status).toBe(404);
+    expect((await send('/api/records/not%23an-id', { as: 'admin' })).status).toBe(404);
   });
 
   it('#8: the origin check passes the page’s own origin under next dev and refuses others', async () => {

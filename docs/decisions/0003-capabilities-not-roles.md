@@ -18,4 +18,4 @@ The audit found seven spellings of "admin" and role names scattered through rout
 
 - Splitting or renaming a role is a change to one file.
 - `requireGroup` remains for coarse gates, but `requireCan` is the default.
-- A role still doesn't say whose record it is; routes that take a record ID add `requireRecordAccess`, which answers 404.
+- A role still doesn't say whose record it is; routes that take a record ID add `requireRecordAccess`, which answers 404. (Now resource roles and `requireResourceRole`: [0022](0022-resource-roles.md).)

@@ -4,7 +4,7 @@
  * functions, shared by the server actions and `auth-kit/admin/ui`.
  */
 import { type InviteMode, type PeopleAction, roleLabel } from './guardrails.js';
-import { INVITE_EXPIRY_DAYS } from '../shared/policy.js';
+import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
 import type { ActivityEntry, AuditEvent } from './types.js';
 
 export { roleLabel };
@@ -209,6 +209,12 @@ const DONE: Readonly<Record<string, string>> = {
   'people.signOutEverywhere': 'signed out everywhere',
   'people.delete': 'deleted',
   'people.expireInvite': 'disabled the unused invite for',
+  'resources.create': 'created an item managed by',
+  'resources.add': 'gave access to',
+  'resources.changeRole': 'changed the access of',
+  'resources.remove': 'removed the access of',
+  'resources.invite': 'invited, with access to one item,',
+  'resources.delete': 'removed all access to',
 };
 
 const TRIED: Readonly<Record<string, string>> = {
@@ -221,7 +227,15 @@ const TRIED: Readonly<Record<string, string>> = {
   'people.signOutEverywhere': 'tried to sign out',
   'people.delete': 'tried to delete',
   'people.expireInvite': 'tried to disable the unused invite for',
+  'resources.create': 'tried to create an item managed by',
+  'resources.add': 'tried to give access to',
+  'resources.changeRole': 'tried to change the access of',
+  'resources.remove': 'tried to remove the access of',
+  'resources.invite': 'tried to invite, with access to one item,',
+  'resources.delete': 'tried to remove all access to',
 };
+
+const isResourceRoleName = (value: unknown): value is ResourceRole => typeof value === 'string' && value in RESOURCE_ROLE_LABEL;
 
 export interface ActivityLine {
   /** "Bob", or the actor's email, or "Scheduled job". */
@@ -246,6 +260,8 @@ function summarize(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (typeof value === 'object') {
     const v = value as Record<string, unknown>;
+    // Access to one item: its role there ("no access" when it was removed).
+    if ('resourceRole' in v) return isResourceRoleName(v.resourceRole) ? RESOURCE_ROLE_LABEL[v.resourceRole] : 'no access';
     if ('adminRole' in v) return roleLabel(v.adminRole as string | null);
     if ('role' in v && typeof v.role === 'string') return roleLabel(v.role);
     if ('enabled' in v) return v.enabled ? 'enabled' : 'disabled';
@@ -260,7 +276,13 @@ export function describeActivity(entry: ActivityEntry, names: (sub: string) => s
   const actor = e.actor.kind === 'system' ? 'Scheduled job' : (names(e.actor.sub) ?? e.actor.email ?? e.actor.sub);
   const failed = entry.status === 'failed' || entry.status === 'refused' || entry.status === 'unknown';
   const verb = (failed ? TRIED[e.action] : DONE[e.action]) ?? e.action;
-  const target = e.target ? ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? e.target.recordId ?? e.target.sub ?? '') : '';
+  const person = e.target ? ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? e.target.sub) : undefined;
+  // An access change names the person and the item (`project:abc`).
+  const target = e.target
+    ? e.action.startsWith('resources.') && e.target.recordId !== undefined
+      ? [person, e.target.recordId].filter(Boolean).join(' · ')
+      : ((e.target.sub ? names(e.target.sub) : undefined) ?? e.target.email ?? e.target.recordId ?? e.target.sub ?? '')
+    : '';
   const before = summarize(e.before);
   const after = summarize(e.after);
   const change = before !== undefined || after !== undefined ? `${before ?? '—'} → ${after ?? '—'}` : undefined;

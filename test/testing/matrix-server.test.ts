@@ -266,3 +266,25 @@ function overrides_send(area: { overrides: { peopleCognito: unknown } }) {
     return client.send(Object.assign(new Command(), { input: { Username: 'x' } }));
   };
 }
+
+describe('resource roles while the matrix runs', () => {
+  it('one membership store per process, shared by every bundle, whose conflicts any bundle recognizes', async () => {
+    const s = setup();
+    matrixEnv(s.fixture);
+    const first = (await freshBundle()).matrixServerOverrides()!;
+    const { defineResourceTypes } = await import('../../src/resources/index.js');
+    const types = defineResourceTypes({ project: { noun: 'project' } });
+    const context = toRequestContext(new NextRequest('http://127.0.0.1:3210/app', { headers: s.personas.member.cookie.headers as HeadersInit }));
+    const auth = createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...first.serverAuth, resources: { types, store: first.resources }, context: () => Promise.resolve(context) });
+    const ref = { type: 'project', id: 'p-1' };
+    const meta = { ...ref, version: 1, managers: 1, createdAt: 'x', createdBy: 'x', updatedAt: 'x', updatedBy: 'x' };
+    await first.resources.commit(ref, { expectedVersion: null, meta, put: [{ ...ref, sub: s.personas.member.sub, role: 'manager', addedBy: 'x', addedAt: 'x' }] });
+    expect((await auth.requireResourceRole('project', 'p-1', 'manage-access')).role).toBe('manager');
+    // Another bundle sees the same memberships; its conflict error is matched by name.
+    const second = (await freshBundle()).matrixServerOverrides()!;
+    expect((await second.resources.getMembership(ref, s.personas.member.sub))?.role).toBe('manager');
+    const conflict = await second.resources.commit(ref, { expectedVersion: null, meta, put: [] }).catch((e: unknown) => e);
+    const { isResourceConflict } = await import('../../src/resources/index.js');
+    expect(isResourceConflict(conflict)).toBe(true);
+  });
+});

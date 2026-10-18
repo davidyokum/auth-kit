@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.6-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), and the admin module (`auth-kit/admin`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.7-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), and resource roles (`auth-kit/resources`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -10,14 +10,16 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 |---|---|---|
 | `auth-kit/amplify` | A Gen 2 auth preset: one pool per app, invite-only, passkey first, password + authenticator second, emailed code as the backstop, standard token lifetimes, deletion protection, SES from a verified domain, standard groups, a WAF rate rule, sandbox detection | **Implemented** |
 | `auth-kit/amplify/pre-sign-up` | The one sanctioned exception to invite-only: a preSignUp Lambda that allows self-registration from listed email domains | **Implemented** |
-| `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, record checks (404), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
+| `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, `requireResourceRole` (resource roles; 404 for anyone who can't see the item), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
 | `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, and a second member on record routes), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
 | `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
 | `auth-kit/client` | Sign-in screens (passkey, password + TOTP, emailed code), first sign-in after an invite, the authenticator gate, My account | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions (including Transfer ownership) and an append-only audit log, on the site-wide roles ([below](#site-wide-roles)) | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role picker (each role's can/can't, "Compare roles"), role-change and Transfer ownership dialogs, Activity log (React client components) | **Implemented** (phase 2) |
-| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the last owner's) | **Implemented** (phase 2) |
+| `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the last owner's); `ResourceAccessTable`: the resource roles' membership table | **Implemented** (phase 2) |
+| `auth-kit/resources` | Resource roles ([below](#10-resource-roles-auth-kitresources)): Manager, Contributor, Reader on one item, combined with the site role; the membership store; audited access changes, a Manager's invite with an alert to the admins, item creation with its first Manager, the disable hook | **Implemented** |
+| `auth-kit/resources/ui` | "Who has access to this {noun}": role chips, add, invite, remove, leave, the last-Manager messages; the resource roles summary for the site role picker (React client components) | **Implemented** |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
 | `auth-kit/dev/menu` | The "Sign in as…" persona menu (client component). **Dev only** | **Implemented** (phase 2) |
 | `auth-kit/ribbon` | The environment ribbon, `[DEV]`/`[PREVIEW]` title and favicon, and the View as banner. Safe in production builds | **Implemented** (phase 2) |
@@ -30,10 +32,10 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 From the release tarball (the package isn't on npm):
 
 ```sh
-npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.6-alpha/auth-kit-0.1.6-alpha.tgz
+npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.7-alpha/auth-kit-0.1.7-alpha.tgz
 ```
 
-Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.6-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
+Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.7-alpha.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
@@ -98,7 +100,7 @@ Every site has the same admin ladder ([ADR 0020](docs/decisions/0020-site-wide-r
 
 - You grant, and act on, only roles below your own: only the owner grants (or manages) Super admins. Nobody changes their own role.
 - The owner role is never granted. It moves only by **Transfer ownership** (owner only, to someone who has signed in, with a reason, their address typed out, and a recent sign-in; both are emailed; the previous owner becomes Super admin). Nobody disables, demotes, or deletes the owner, and the invite-expiry sweep never disables them. The People table flags a site without exactly one owner.
-- These roles are for running the site. What a member can do with one project, plan, or other item is decided on that item (resource roles, next), never by these roles.
+- These roles are for running the site. What a member can do with one project, plan, or other item is decided on that item ([resource roles](#10-resource-roles-auth-kitresources)), never by these roles. On any item the site role is a floor: Admin – view only sees every item, Admin – content only also edits every item, Admin – content & people and above also manage who has access.
 - `STANDARD_CAPABILITIES`, `ADMIN_ROLE_LABEL`, `ROLE_DESCRIPTIONS` (one line each of can and can't), and `ROLE_MATRIX` (this table, built from the capability map) come from `auth-kit/server` and `auth-kit/admin`. Moving from `superadmin`/`admin`/`editor`/`viewer`: see [ADR 0020's migration note](docs/decisions/0020-site-wide-roles.md#migration-from-superadmin--admin--editor--viewer).
 
 ```ts
@@ -115,16 +117,16 @@ export const pages = createPageGuards(auth);
 
 ```ts
 // app/api/reports/[id]/route.ts
-import { withAuthErrors } from 'auth-kit/server';
+import { NotFoundError, withAuthErrors } from 'auth-kit/server';
 import { auth } from '@/lib/auth';
 
 export const GET = withAuthErrors(async (_req, { params }) => {
-  const user = await auth.requireCan('reviews.read');
-  const report = auth.requireRecordAccess(user, await loadReport((await params).id), {
-    owner: (r) => r.ownerSub,
-    members: (r) => r.reviewerSubs,
-    coveredBy: 'audit.read', // a capability that sees every record
-  }); // anyone else gets 404, not 403
+  const { id } = await params;
+  // Their role on this report, or a site role that sees every item (step 10). Anyone who can't see
+  // it gets 404, the same answer as a report that doesn't exist.
+  await auth.requireResourceRole('report', id, 'view');
+  const report = await loadReport(id);
+  if (!report) throw new NotFoundError();
   return Response.json(report);
 });
 ```
@@ -546,6 +548,108 @@ import { Backdrop } from 'auth-kit/backdrops/react';
 
 `auth-kit/client`'s `SignIn` also takes `emailHint`: an example address shown as the email field's placeholder, under the always-visible "Email address" label.
 
+### 10. Resource roles: `auth-kit/resources`
+
+Who can do what to one project, plan, grant, or other item ([ADR 0022](docs/decisions/0022-resource-roles.md)). The same three roles on every site, attached to one item; screens use the app's own noun ("Who has access to this project") and never say "resource" or "record".
+
+| Role | Can (on this item) | Can't |
+|---|---|---|
+| Manager | See and edit it, choose who has access, invite someone new to it | Remove the last Manager (every item keeps at least one) |
+| Contributor | See and edit it | Change who has access |
+| Reader | See it | Edit it or change who has access |
+
+**The combining rule.** An action is allowed when the person's site role grants it on every item, **or** their role on this item grants it:
+
+| | See | Edit | Choose who has access | Invite someone new |
+|---|---|---|---|---|
+| Owner, Super admin, Admin – content & people (every item) | Yes | Yes | Yes | Yes |
+| Admin – content only (every item) | Yes | Yes | No | No |
+| Admin – view only (every item) | Yes | No | No | No |
+| Member (every item) | No | No | No | No |
+| Manager (this item) | Yes | Yes | Yes | Yes |
+| Contributor (this item) | Yes | Yes | No | No |
+| Reader (this item) | Yes | No | No | No |
+
+The site floor goes by capability (`content.read`, `content.edit`, `people.manage`: `RESOURCE_SITE_FLOOR`), so it follows the app's capability map. `RESOURCE_ACCESS_MATRIX` is this table, built from the constants the server uses.
+
+```ts
+// lib/resources.ts: the app's resource types, next to its capability map
+import { defineResourceTypes } from 'auth-kit/resources';
+
+export const resourceTypes = defineResourceTypes({
+  project: { noun: 'project' }, // admins create projects and pick a Manager; members see their own
+  idea: { noun: 'idea', selfServiceCreate: true, sharedDirectory: true }, // anyone creates; everyone sees all
+});
+```
+
+A type can change each role's actions and add its own (`actions: { reader: ['view', 'comment'], … }`), within rules checked at startup: every role can view, each holds everything below it, and only Managers manage access or invite.
+
+```ts
+// amplify/backend.ts
+import { ResourceAccessTable } from 'auth-kit/admin/cdk';
+const access = new ResourceAccessTable(data, 'ResourceAccess'); // PITR, deletion protection, retained
+access.grantApp(computeRole); // GetItem, PutItem, DeleteItem, Query on this table only
+backend.addOutput({ custom: { resourceAccessTable: access.tableName } });
+
+// lib/auth.ts
+import { createDynamoResourceStore } from 'auth-kit/resources';
+export const auth = createServerAuth({
+  ...poolConfigFromAmplifyOutputs(outputs),
+  capabilities,
+  resources: { types: resourceTypes, store: createDynamoResourceStore({ tableName: outputs.custom.resourceAccessTable }) },
+});
+```
+
+**Checking.** `requireResourceRole(type, id, need)` takes an action (`'edit'`) or a minimum role (`'contributor'`, meaning every action a Contributor has, so Admin – content only passes it). No access at all: 404, never a hint the item exists. Can see it but not this: 403. Couldn't read memberships: 503.
+
+```ts
+await auth.requireResourceRole('project', id, 'edit');            // a route handler or server action
+const access = await pages.requireResourceRole('project', id, 'view'); // a page: 403/404 → not found
+access.can('manage-access');                                      // what to show: Edit, Who has access
+const mine = await auth.listMyResources('project');               // { scope: 'mine', items } or { scope: 'all', roles }
+```
+
+`resourceAccess(type, id)` answers without refusing. Pass `{ user }` when the page already has the person from this auth, and `{ live: true }` where a demoted admin must lose the floor at once.
+
+**Changing access.** Every change re-reads the acting person live, runs the same guardrails as the UI (`checkAccessChange`), and writes the audit intent, one transaction, then the result. A transaction applies only if nobody changed that item's access since it was read, so two Managers acting at once can't leave it without one.
+
+```ts
+// lib/resource-actions.ts (server-only)
+import { createResourceActions } from 'auth-kit/resources';
+export const resourceActions = createResourceActions({
+  auth,
+  auditLog,
+  mailer, // createSesInviteMailer: the invite email and the admins' alert
+  siteName: 'Example Reports',
+  signInUrl: 'https://reports.example.org/sign-in',
+  inviteDomains: ['example.org'],
+  resourceName: async ({ type, id }) => (await loadProject(id))?.name, // for emails; never from the request
+});
+
+// Creating a project: its access and the app's record, as one audited change.
+const created = await resourceActions.create({ type: 'project', managerEmail, run: ({ id }) => saveProject({ id, name }) });
+```
+
+- `add` (an existing account), `grant` (add or change, for APIs), `changeRole`, `remove` (anyone may leave). The last Manager can't be removed, demoted, or leave; a site admin whose role manages people may do it by naming the new Manager in the same step (`replaceWithEmail`).
+- `invite`: a Manager brings in someone with no account. The People page's invite flow with no admin role (access to this one item only), then the membership, then an alert to the admins who manage people (owner included), then the invite email naming the inviter and the item. If the alert or the email fails, the account and the membership are removed again. No alert configured: refused.
+- `create`: admins who manage people create items and choose the first Manager (default: themselves). With `selfServiceCreate`, anyone signed in creates one and becomes its Manager.
+- `deleteResourceAccess` when the app deletes an item; `listAccess` for the panel; `forms.*` for `useActionState`.
+- `removeResourceMemberships`: pass it to `createPeopleActions({ removeResourceMemberships })` so disabling someone removes their item access (never blocked; items left without a Manager are listed in the disable row).
+
+```tsx
+// app/app/projects/[id]/page.tsx: the panel, for anyone who can see the project
+import { WhoHasAccess } from 'auth-kit/resources/ui';
+<WhoHasAccess noun="project" access={await resourceActions.listAccess({ type: 'project', id })} actions={{ add, changeRole, remove, invite }} />
+
+// app/admin/people/page.tsx: where item access lives, under the site role picker
+import { ResourceRolesSummary } from 'auth-kit/resources/ui';
+<InviteForm … resourceAccessHref="/app/projects" resourceAccess={<ResourceRolesSummary noun="project" href="/app/projects" />} />
+```
+
+**Testing.** `createMemoryResourceStore()` has the same rules; under the auth matrix, use `matrixServerOverrides().resources`, which every bundle shares. For a role defined outside CDK, `resourceAccessAppPolicy(tableArn)` is the same grant as JSON.
+
+**Moving from `requireRecordAccess`** (kept, deprecated, for one release): deploy the table, give each record's owner a Manager membership (a one-time script through `create`), replace each check with `requireResourceRole`, and drop `coveredBy` (the site floor covers admins). `removeRecordMemberships` is now `removeResourceMemberships`. [ADR 0022](docs/decisions/0022-resource-roles.md#migration) has the details, and a path to Amazon Verified Permissions (Cedar) later without changing apps.
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -554,7 +658,8 @@ import { Backdrop } from 'auth-kit/backdrops/react';
 | 401 | Signed in, but this action needs a fresh sign-in (`WWW-Authenticate: … insufficient_user_authentication`) | `StepUpRequiredError` |
 | 403 | Signed in, and not allowed | `ForbiddenError` |
 | 403 | A password user without an authenticator code: send them to setup | `MfaEnrollmentRequiredError` |
-| 404 | The record isn't theirs (or doesn't exist; the route doesn't say which) | `NotFoundError` |
+| 403 | They can see the item, but not do this to it (a Reader editing) | `ForbiddenError` |
+| 404 | The item isn't theirs to see (or doesn't exist; the route doesn't say which) | `NotFoundError` |
 | 503 | Couldn't check (Cognito or its keys unreachable). Never treated as signed out or allowed; on pages, the error boundary says so (`isAuthUnavailableError`) | `AuthUnavailableError` |
 
 Pages turn 401 into a sign-in redirect with a safe `next` path (`&reauth=1` for step-up), missing TOTP into the setup page, and 403/404 into Next's not-found page.
@@ -618,13 +723,13 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Global sign-out; people manage their own passkeys | `MyAccount` (with a last-way-in guard); `people.signOutEverywhere` for admins | Pkg |
 | Step-up for risky actions via `auth_time` | `requireRecentSignIn`, `recentSignIn` option | Pkg |
 | Five token checks, access tokens only | `verifyAccessToken` (`aws-jwt-verify`) | Pkg |
-| Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and record memberships); live checks refuse disabled users at once | Pkg |
+| Removal is `AdminDisableUser` | `people.disable` (then removes admin roles and resource memberships, `removeResourceMemberships`); live checks refuse disabled users at once | Pkg |
 | Secure, SameSite cookies; strict CSP; origin check | `secureCookieOptions`; `amplifyCookieRuntimeOptions` (Secure, SameSite=Lax, refresh-token lifetime on server-written token cookies; `configureAuthClient` gives browser-written ones the same lifetime); `assertSameOrigin` with `expectedOrigin`; a per-request nonce CSP through the proxy (`nonceCspHeaders`), with the policy in the site ([template](https://github.com/davidyokum/site-auth-kit-template)) | Pkg / App |
 | Amplify `ssr: true` client | Server reads its cookies and verifies them itself; the adapter refreshes in the proxy | Pkg ([ADR 0007](docs/decisions/0007-verify-tokens-in-auth-kit.md)) |
 | **Enforcement** | | |
 | Default-deny proxy that validates tokens | `withAuthProxy` | Pkg |
 | Every route, action, data-loading component checks | `requireUser` / `requireGroup` / `requireCan`; the auth matrix's without-proxy pass fails a route that relies on the proxy, and its coverage check fails a route with no row (server actions need rows by hand) | Pkg + App |
-| Record-ID routes check the record; others get 404 | `requireRecordAccess`; the matrix demands 404 for a second member | Pkg |
+| Item-ID routes check the item; others get 404 | `requireResourceRole` (resource roles, [ADR 0022](docs/decisions/0022-resource-roles.md)); the matrix demands 404 for a second member | Pkg |
 | Sensitive data only through checked routes | Site code; posture check later | App |
 | Private pages `Cache-Control: private, no-store` | Proxy sets it on protected responses; `PRIVATE_NO_STORE` | Pkg + App |
 | Post-login redirects through `safeRedirect` | `safeRedirect`; `signInUrl` uses it | Pkg |
@@ -632,6 +737,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | **Roles and lifecycle** | | |
 | Roles only from Cognito groups | Preset groups `owner`, `superadmin`, `admin-content-people`, `admin-content`, `admin-view`, + app roles ([ADR 0020](docs/decisions/0020-site-wide-roles.md)) | Pkg |
 | Capabilities mapped in one file | `defineCapabilities` | Pkg |
+| Access to one item: Manager, Contributor, Reader, on top of the site role | `defineResourceTypes`, `requireResourceRole`, `createResourceActions` (every change audited; every item keeps a Manager), `ResourceAccessTable` ([ADR 0022](docs/decisions/0022-resource-roles.md)) | Pkg |
 | Admin routes re-read status and groups (~1 min cache) | `requireCan(…, { live: true })` | Pkg |
 | Self-signup off; `preSignUp` allowlist exception | Admin-create-only; `selfSignUp` + `preSignUpAllowlist` (synthesis fails without the trigger) | Pkg |
 | Unused invites disabled after 7 days, flagged | `inviteStatus`; `InviteExpirySweep` (an hourly schedule and a least-privilege Lambda, [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md)); never the last owner's, who is warned instead | Pkg |
