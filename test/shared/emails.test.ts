@@ -4,6 +4,7 @@ import {
   type RenderedEmail,
   accessRequestDigestEmail,
   accountDeletedEmail,
+  article,
   clockDateTime,
   confirmNewEmailEmail,
   emailChangedEmail,
@@ -136,5 +137,13 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
 
   it('formats clock times in Eastern by default', () => {
     expect(clockDateTime(AT)).toBe('Friday, October 23 at 5:00 PM Eastern');
+  });
+});
+
+describe('article', () => {
+  it('reads the first letter: "a" before a consonant, "an" before a vowel', () => {
+    expect(article('Budget Reports')).toBe('a');
+    expect(article('Example Reports')).toBe('an');
+    expect(article(' OSBM Reports')).toBe('an');
   });
 });

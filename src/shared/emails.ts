@@ -68,7 +68,7 @@ export function clockDate(date: Date, site: Pick<EmailSite, 'timeZone'> = {}): s
   return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: site.timeZone ?? 'America/New_York' }).format(date);
 }
 
-/** "a" or "an" before a word, by its first letter: "an OSBM Reports account", "an Example Reports account". */
+/** "a" or "an" before a word, by its first letter: "an OSBM Reports account", "a Budget Reports account". */
 export function article(word: string): 'a' | 'an' {
   return /^[aeiou]/i.test(word.trim()) ? 'an' : 'a';
 }
