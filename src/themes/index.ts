@@ -46,6 +46,11 @@ export interface ThemeColors {
   error: string;
   /** Field borders and outline buttons (3:1 on the card). */
   fieldBorder: string;
+  /**
+   * The family accent for icons: the passkey fingerprint (register E4d) and the password-field glyph.
+   * The primary button's color, which reaches 3:1 on the card (WCAG 1.4.11).
+   */
+  accent: string;
 }
 
 /**
@@ -98,22 +103,10 @@ export interface AuthTheme {
   showAuthorizedUse: boolean;
   /** `defined` (default): a line in the family ink that reaches 3:1 on every backdrop color. `soft`: a hairline. */
   cardEdge: CardEdge;
-  /**
-   * The passkey glyph (register E4d): `fingerprint` (default; Lucide's, ISC) or `fido`, the official
-   * FIDO passkey icon, which auth-kit doesn't bundle or imitate (a trademark under FIDO's usage
-   * agreement): a site that chooses it supplies the asset (`passkeyIconSrc`).
-   */
-  passkeyIcon: PasskeyIcon;
-  /** The site's own copy of the FIDO passkey icon (a URL or a root-relative path), with `passkeyIcon: 'fido'` only. */
-  passkeyIconSrc: string | null;
 }
 
-export type PasskeyIcon = 'fingerprint' | 'fido';
-
 /** What a site may change about its family's theme. */
-export interface AuthThemeOverrides extends Partial<Pick<AuthTheme, 'emailHint' | 'showAuthorizedUse' | 'cardEdge' | 'passkeyIcon'>> {
-  /** The FIDO passkey icon's URL or root-relative path; required with `passkeyIcon: 'fido'`. */
-  passkeyIconSrc?: string;
+export interface AuthThemeOverrides extends Partial<Pick<AuthTheme, 'emailHint' | 'showAuthorizedUse' | 'cardEdge'>> {
   /** The help mailbox (required before a deploy; `helpAddressProblems` says why one can't be used). */
   helpAddress?: string;
   /** Override whether screens name the owner: a public site in a named family says "the {Site} team". */
@@ -135,6 +128,7 @@ function colorsOf(family: ThemeFamily): ThemeColors {
     focus: card.focus,
     error: CORE.error,
     fieldBorder: family === 'personal' ? '#78716c' : CORE.fieldBorder,
+    accent: card.button,
   };
 }
 
@@ -144,8 +138,6 @@ const base = (family: ThemeFamily) => ({
   palette: BACKDROP_FAMILIES[family].palette,
   showAuthorizedUse: false,
   cardEdge: 'defined' as const,
-  passkeyIcon: 'fingerprint' as const,
-  passkeyIconSrc: null,
 });
 
 /** The three families, exactly as REPORT §7.2 and the register (E1, E2, E4) set them. Brand constants. */
@@ -204,7 +196,7 @@ export function isThemeFamily(value: unknown): value is ThemeFamily {
 export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {}): AuthTheme {
   if (!isThemeFamily(family)) throw new Error(`auth-kit/themes: family "${String(family)}" isn't one of ${THEME_FAMILIES.join(', ')}.`);
   for (const key of Object.keys(overrides)) {
-    if (!['emailHint', 'showAuthorizedUse', 'cardEdge', 'helpAddress', 'helpNamed', 'passkeyIcon', 'passkeyIconSrc'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
+    if (!['emailHint', 'showAuthorizedUse', 'cardEdge', 'helpAddress', 'helpNamed'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
   }
   if (overrides.cardEdge !== undefined && overrides.cardEdge !== 'defined' && overrides.cardEdge !== 'soft') {
     throw new Error(`auth-kit/themes: cardEdge must be 'defined' or 'soft'.`);
@@ -212,18 +204,6 @@ export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {
   if (overrides.showAuthorizedUse !== undefined && typeof overrides.showAuthorizedUse !== 'boolean') {
     throw new Error('auth-kit/themes: showAuthorizedUse must be true or false.');
   }
-  if (overrides.passkeyIcon !== undefined && overrides.passkeyIcon !== 'fingerprint' && overrides.passkeyIcon !== 'fido') {
-    throw new Error("auth-kit/themes: passkeyIcon must be 'fingerprint' or 'fido'.");
-  }
-  const iconSrc = overrides.passkeyIconSrc?.trim();
-  if (overrides.passkeyIcon === 'fido' && !iconSrc) {
-    throw new Error(
-      "auth-kit/themes: passkeyIcon 'fido' needs passkeyIconSrc, the site's own copy of the official FIDO passkey icon. auth-kit doesn't ship it or draw a look-alike: " +
-        "it's FIDO Alliance's trademark, used under their usage agreement. Use 'fingerprint' (the default) until the site has the asset and the agreement.",
-    );
-  }
-  if (iconSrc !== undefined && overrides.passkeyIcon !== 'fido') throw new Error("auth-kit/themes: passkeyIconSrc applies only with passkeyIcon: 'fido'.");
-  if (iconSrc !== undefined && !/^(https:\/\/[^\s"'<>]+|\/[^\s"'<>]*)$/.test(iconSrc)) throw new Error('auth-kit/themes: passkeyIconSrc must be an https URL or a root-relative path.');
   if (overrides.helpNamed !== undefined && typeof overrides.helpNamed !== 'boolean') throw new Error('auth-kit/themes: helpNamed must be true or false.');
   let helpAddress: string | undefined;
   if (overrides.helpAddress !== undefined) {
@@ -247,8 +227,6 @@ export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {
     ...(hint !== undefined && { emailHint: hint }),
     ...(overrides.showAuthorizedUse !== undefined && { showAuthorizedUse: overrides.showAuthorizedUse }),
     ...(overrides.cardEdge !== undefined && { cardEdge: overrides.cardEdge }),
-    ...(overrides.passkeyIcon !== undefined && { passkeyIcon: overrides.passkeyIcon }),
-    ...(iconSrc !== undefined && { passkeyIconSrc: iconSrc }),
   });
 }
 
@@ -367,6 +345,7 @@ export function themeCssVariables(theme: AuthTheme): Record<`--ak-${string}`, st
     '--ak-focus': c.focus,
     '--ak-error': c.error,
     '--ak-field-border': c.fieldBorder,
+    '--ak-accent': c.accent,
     '--ak-edge': cardEdgeColor(theme),
   };
 }

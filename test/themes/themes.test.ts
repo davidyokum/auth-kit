@@ -38,6 +38,7 @@ describe('families as themes (E1, E2, E4, A9)', () => {
     expect(() => authTheme('osbm', { emailHint: 'not an address' })).toThrow(/example address/);
     expect(() => authTheme('osbm', { footer: 'x' } as never)).toThrow(/can't be overridden/);
     expect(() => authTheme('osbm', { emailLetterhead: false } as never)).toThrow(/can't be overridden/);
+    expect(() => authTheme('osbm', { passkeyIcon: 'fido' } as never)).toThrow(/can't be overridden/);
     expect(() => authTheme('nope' as never)).toThrow(/isn't one of/);
   });
 
@@ -55,6 +56,8 @@ describe('families as themes (E1, E2, E4, A9)', () => {
       expect(contrastRatio(c.buttonText, c.button)).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(c.focus, c.surface)).toBeGreaterThanOrEqual(3);
       expect(contrastRatio(c.fieldBorder, c.surface)).toBeGreaterThanOrEqual(3);
+      // Icons in the family accent (the passkey fingerprint, register E4d) are graphics: 3:1.
+      expect(contrastRatio(c.accent, c.surface)).toBeGreaterThanOrEqual(3);
     }
   });
 });
@@ -77,19 +80,6 @@ describe('the help route (David, 2026-10-18; Card Studio v4)', () => {
     expect(helpAddressProblems('jordan.lee@example.org')[0]).toMatch(/person's own address/);
     expect(helpAddressProblems('not an address')[0]).toMatch(/isn't an email address/);
     expect(() => authTheme('osbm', { helpAddress: HELP_ADDRESS_PLACEHOLDER })).toThrow(/placeholder/);
-  });
-});
-
-describe('the passkey icon (register E4d)', () => {
-  it('defaults to the fingerprint glyph and never ships the FIDO icon', () => {
-    for (const theme of Object.values(FAMILY_THEMES)) expect([theme.passkeyIcon, theme.passkeyIconSrc]).toEqual(['fingerprint', null]);
-  });
-
-  it("takes the FIDO icon only with the site's own asset, and says why at build", () => {
-    expect(authTheme('osbm', { passkeyIcon: 'fido', passkeyIconSrc: '/brand/passkey.svg' })).toMatchObject({ passkeyIcon: 'fido', passkeyIconSrc: '/brand/passkey.svg' });
-    expect(() => authTheme('osbm', { passkeyIcon: 'fido' })).toThrow(/needs passkeyIconSrc.*trademark/s);
-    expect(() => authTheme('osbm', { passkeyIconSrc: '/x.svg' })).toThrow(/only with passkeyIcon: 'fido'/);
-    expect(() => authTheme('osbm', { passkeyIcon: 'fido', passkeyIconSrc: 'javascript:alert(1)' })).toThrow(/https URL or a root-relative path/);
   });
 });
 
