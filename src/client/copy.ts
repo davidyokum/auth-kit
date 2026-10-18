@@ -368,6 +368,10 @@ export const MY_ACCOUNT = {
   noPasskeys: 'No passkeys yet.',
   /** A passkey with no name of its own. */
   passkeyName: 'Passkey',
+  /** After the passkey's name: "(On a device, added Oct 18, 2026)". */
+  onDevice: 'On a device',
+  securityKeyOrPhone: 'Security key or phone',
+  added: (date: string) => `added ${date}`,
   addPasskey: 'Add a passkey',
   remove: 'Remove',
   removeLabel: (name: string) => `Remove ${name}`,
@@ -420,6 +424,7 @@ export const SHARED = {
 
 /** Progress and confirmations for the polite live region (never errors). */
 export const STATUS = {
+  signingIn: 'Signing in…',
   sendingCode: 'Sending a code…',
   sendingRequest: 'Sending your request…',
   checkingPassword: 'Checking the password…',

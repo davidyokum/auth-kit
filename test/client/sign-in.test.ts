@@ -109,11 +109,6 @@ function unstubPasskeyBrowser() {
   }
 }
 
-// jsdom has no CSS.escape (every browser does); the new-password screen uses it to focus its field.
-if (typeof globalThis.CSS === 'undefined') {
-  Object.defineProperty(globalThis, 'CSS', { value: { escape: (value: string) => value.replace(/[^\w-]/g, (c) => `\\${c}`) }, configurable: true });
-}
-
 // No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
 const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
 

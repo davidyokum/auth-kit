@@ -77,6 +77,7 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'MY_ACCOUNT.gateCheckFailed': () => [['Check your connection and try again.']],
   'MY_ACCOUNT.gateIntro': (c) => [[c.siteName]],
   'MY_ACCOUNT.newPasswordHint': () => [[15]],
+  'MY_ACCOUNT.added': () => [['Oct 18, 2026']],
 };
 
 interface Text {
@@ -248,6 +249,16 @@ function sourceTexts(): Text[] {
   return out;
 }
 
+/** A capitalized phrase: "Try again", "Signing in…", "Passkey saved." (identifiers, paths, and CSS don't match). */
+const SENTENCE = /^[A-Z][a-z’']+(?: [\w’'-]+)+[.…?!]?$|^[A-Z][a-z’']+[.…?!]$/;
+
+/** Capitalized strings in components that no person reads on a screen. */
+const NOT_SCREEN_WORDS: Record<string, string> = {
+  // SignIn.tsx: the error Cognito gives for a wrong password, rebuilt for the decoy paths (ADR 0018) and
+  // mapped to the deck's words by describeAuthError.
+  'Incorrect username or password.': 'Cognito’s own message, matched, never shown',
+};
+
 /** JSX attributes and object properties that carry words a person reads. */
 const WORD_ATTRIBUTES = /^(label|aria-label|title|placeholder|heading|intro|submitLabel|cancelLabel|alt|hint|status|busyStatus|error|message|reason)$/;
 
@@ -267,6 +278,10 @@ function componentWords(): string[] {
       if (ts.isJsxText(node) && /[A-Za-z]/.test(node.text)) out.push(`${at(node)}: ${node.text.replace(/\s+/g, ' ').trim()}`);
       if (ts.isJsxAttribute(node) && WORD_ATTRIBUTES.test(node.name.getText()) && isWords(node.initializer)) out.push(`${at(node)}: ${node.name.getText()}="${node.initializer.text}"`);
       if (ts.isPropertyAssignment(node) && WORD_ATTRIBUTES.test(node.name.getText()) && isWords(node.initializer)) out.push(`${at(node)}: ${node.name.getText()}: '${node.initializer.text}'`);
+      // Anything else that reads as a sentence or a label ("Signing in…", "Try again"), wherever it's passed.
+      else if (ts.isStringLiteralLike(node) && SENTENCE.test(node.text) && !Object.hasOwn(NOT_SCREEN_WORDS, node.text) && !(ts.isJsxAttribute(node.parent) || ts.isPropertyAssignment(node.parent))) {
+        out.push(`${at(node)}: '${node.text}'`);
+      }
       ts.forEachChild(node, visit);
     };
     visit(source);

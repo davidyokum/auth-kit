@@ -92,8 +92,8 @@ function nextLevel(level: HeadingLevel): HeadingLevel {
 }
 
 function describePasskey(passkey: PasskeyInfo): string {
-  const kind = passkey.authenticatorAttachment === 'platform' ? 'On a device' : passkey.authenticatorAttachment === 'cross-platform' ? 'Security key or phone' : null;
-  const added = passkey.createdAt ? `added ${new Date(passkey.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : null;
+  const kind = passkey.authenticatorAttachment === 'platform' ? MY_ACCOUNT.onDevice : passkey.authenticatorAttachment === 'cross-platform' ? MY_ACCOUNT.securityKeyOrPhone : null;
+  const added = passkey.createdAt ? MY_ACCOUNT.added(new Date(passkey.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })) : null;
   return [kind, added].filter(Boolean).join(', ');
 }
 

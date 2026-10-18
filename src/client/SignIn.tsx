@@ -582,7 +582,7 @@ export function SignIn(props: SignInProps) {
               secretRef.current?.focus();
               return;
             }
-            void attempt(view.challenge ? () => confirmPassword(secretValue) : firstFactor('password', () => signInWithPassword(email, secretValue)), 'sign-in', 'Signing in…');
+            void attempt(view.challenge ? () => confirmPassword(secretValue) : firstFactor('password', () => signInWithPassword(email, secretValue)), 'sign-in', STATUS.signingIn);
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -627,7 +627,7 @@ export function SignIn(props: SignInProps) {
               secretRef.current?.focus();
               return;
             }
-            void attempt(() => confirmCode(codeValue), 'totp', 'Checking the code…');
+            void attempt(() => confirmCode(codeValue), 'totp', STATUS.checkingCode);
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -671,7 +671,7 @@ export function SignIn(props: SignInProps) {
               return;
             }
             const sentAt = view.resentAt ?? view.sentAt;
-            void attempt(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : confirmCode(codeValue)), 'code', 'Checking the code…');
+            void attempt(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : confirmCode(codeValue)), 'code', STATUS.checkingCode);
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -710,7 +710,7 @@ export function SignIn(props: SignInProps) {
             const problem = newPasswordProblem(secretValue);
             if (problem) {
               set({ error: problem, field: 'new-password', status: null });
-              rootRef.current?.querySelector<HTMLInputElement>(`#${CSS.escape(ids.newPassword)}`)?.focus();
+              secretRef.current?.focus();
               return;
             }
             void (async () => {
@@ -721,7 +721,7 @@ export function SignIn(props: SignInProps) {
                 set({ error: breached, field: 'new-password' });
                 return;
               }
-              await attempt(() => completeNewPassword(secretValue), 'set-password', 'Saving…');
+              await attempt(() => completeNewPassword(secretValue), 'set-password', STATUS.saving);
             })();
           })}
           aria-busy={busy || undefined}
@@ -742,6 +742,7 @@ export function SignIn(props: SignInProps) {
             onChange={(e) => setSecretValue(e.target.value)}
             invalid={fb.field === 'new-password'}
             error={fb.field === 'new-password' ? fb.error : null}
+            inputRef={secretRef}
             classNames={classNames}
           />
           <Actions classNames={classNames}>
@@ -845,7 +846,7 @@ export function SignIn(props: SignInProps) {
                 return;
               }
               // The new password signs them straight in; the authenticator code comes next, as usual.
-              await attempt(firstFactor('password', () => signInWithPassword(email, password)), 'sign-in', 'Signing in…');
+              await attempt(firstFactor('password', () => signInWithPassword(email, password)), 'sign-in', STATUS.signingIn);
             })();
           })}
           aria-busy={busy || undefined}
@@ -865,6 +866,7 @@ export function SignIn(props: SignInProps) {
             onChange={(e) => setSecretValue(e.target.value)}
             invalid={fb.field === 'new-password'}
             error={fb.field === 'new-password' ? fb.error : null}
+            inputRef={secretRef}
             classNames={classNames}
           />
           <Actions classNames={classNames}>
