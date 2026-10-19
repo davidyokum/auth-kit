@@ -461,6 +461,8 @@ export interface CardEdgeCheck {
 /** Checks the theme's edge against every backdrop color (WCAG 1.4.11). Only `defined` is required to pass. */
 export function checkCardEdge(theme: AuthTheme): CardEdgeCheck {
   const color = cardEdgeColor(theme);
+  // Plain has no card and so no edge to check (the one exception to E4, register E5).
+  if (theme.cardStyle === 'plain') return { edge: theme.cardEdge, color, against: [], pass: true, required: false };
   const round = (n: number) => Math.round(n * 100) / 100;
   const against = (Object.keys(theme.palette) as (keyof BackdropPalette)[]).map((name) => {
     const value = theme.palette[name];
@@ -468,8 +470,6 @@ export function checkCardEdge(theme: AuthTheme): CardEdgeCheck {
     const surface = contrastRatio(theme.colors.surface, value);
     return { name, value, line: round(line), surface: round(surface), pass: Math.max(line, surface) >= CARD_EDGE_CONTRAST };
   });
-  // Plain has no card and so no edge to check (the one exception to E4, register E5).
-  if (theme.cardStyle === 'plain') return { edge: theme.cardEdge, color, against: [], pass: true, required: false };
   return { edge: theme.cardEdge, color, against, pass: against.every((a) => a.pass), required: theme.cardEdge === 'defined' };
 }
 
