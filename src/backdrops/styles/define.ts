@@ -85,6 +85,11 @@ export interface StyleVersion {
   readonly maxPixelRatio: number;
   /** The animation time shown as the still frame (reduced motion, SVG targets, previews). */
   readonly stillTime: number;
+  /**
+   * For a drawing that finishes (a plotted sheet): the animation time after which it holds still unless
+   * the pointer or a tap moves it. The renderer stops its loop there to save power. Absent: it never settles.
+   */
+  readonly settlesAt?: number;
   /** The palette mapping: the colors this version paints with, derived from the family palette. */
   colors(palette: BackdropPalette): unknown;
   create(setup: StyleSetup): StyleInstance;
@@ -95,6 +100,7 @@ export interface StyleVersionSpec<C> {
   readonly fps: number;
   readonly maxPixelRatio: number;
   readonly stillTime: number;
+  readonly settlesAt?: number;
   colors(palette: BackdropPalette): C;
   create(setup: StyleSetup, colors: C): StyleInstance;
 }
@@ -103,11 +109,13 @@ export interface StyleVersionSpec<C> {
 export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
   if (!Number.isInteger(spec.version) || spec.version < 1) throw new Error(`auth-kit/backdrops: style version ${spec.version} must be a positive integer.`);
   if (!(spec.fps >= 0 && spec.fps <= 30)) throw new Error(`auth-kit/backdrops: fps ${spec.fps} must be between 0 and 30.`);
+  if (spec.settlesAt !== undefined && !(spec.settlesAt > 0 && spec.settlesAt <= spec.stillTime)) throw new Error(`auth-kit/backdrops: settlesAt ${spec.settlesAt} must be after 0 and no later than stillTime.`);
   return Object.freeze({
     version: spec.version,
     fps: spec.fps,
     maxPixelRatio: spec.maxPixelRatio,
     stillTime: spec.stillTime,
+    ...(spec.settlesAt !== undefined && { settlesAt: spec.settlesAt }),
     colors: (palette: BackdropPalette) => spec.colors(palette),
     create: (setup: StyleSetup) => spec.create(setup, spec.colors(setup.palette)),
   });

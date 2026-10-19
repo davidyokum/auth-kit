@@ -44,11 +44,14 @@ describe.each(LATEST)('$style', ({ style, version, module }) => {
   });
 
   it('animates (or, if static, stays put) and responds to the pointer where it says it does', () => {
+    // A drawing that settles (a plotted sheet) is compared while it's still being drawn.
+    const settles = module.versions[version - 1]!.settlesAt;
+    const t0 = settles !== undefined ? settles * 0.25 : undefined;
     const still = createScene({ style, version, seed: 'motion' });
-    still.draw({ t: still.stillTime, dt: 0, pointer: NONE });
+    still.draw({ t: t0 ?? still.stillTime, dt: 0, pointer: NONE });
     const a = still.ctx.digest();
     const later = createScene({ style, version, seed: 'motion' });
-    later.draw({ t: later.stillTime + 4, dt: 0, pointer: NONE });
+    later.draw({ t: (t0 ?? later.stillTime) + 4, dt: 0, pointer: NONE });
     if (version > 0 && module.versions[version - 1]!.fps > 0) expect(later.ctx.digest()).not.toBe(a);
     if (module.interactivity === 'pointer') {
       const away = createScene({ style, version, seed: 'pointer' });
