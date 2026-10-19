@@ -3,10 +3,9 @@ import { safeRedirect } from '../server/redirect.js';
 import { type AccountCreationSettings, domainsInWords, mayCreateOwnAccount, normalizeAccountCreation, notOnListMessage } from '../shared/account-creation.js';
 import { codeLifetimeMinutes as checkedLifetime } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
-import { handOffEmail, postAccountForm } from './account-creation-client.js';
-import { confirmCode, fetchAuthFactors, requestEmailCode, saveName } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
-import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import { tagged, useDriver } from './driver.js';
+import { type AccountNotices, resolveNotices } from './notices.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
 import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP, STATUS } from './copy.js';
 import { checkedHref, hrefOr } from './href.js';
@@ -76,7 +75,8 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   fetch?: typeof fetch;
 }
 
-type View =
+/** Where the sign-up card is. Exported for the driver (ADR 0025), not from `auth-kit/client`. */
+export type SignUpView =
   | { name: 'email'; requestAccess?: boolean }
   | { name: 'code'; simulated: boolean; sentAt: number; resentAt?: number; expired?: boolean }
   | { name: 'name' }
@@ -84,6 +84,8 @@ type View =
   | { name: 'enroll-authenticator' }
   | { name: 'done'; emailed: boolean }
   | { name: 'finishing' };
+
+type View = SignUpView;
 
 /**
  * "Create your account" (REPORT §3.1b–c, Card Studio v4; register D1–D4, ADR 0023): the self-invite.
@@ -93,6 +95,8 @@ type View =
  */
 export function SignUp(props: SignUpProps) {
   const { classNames, siteName } = props;
+  const driver = useDriver();
+  const init = driver.initial('sign-up');
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
   const settings = useMemo(() => normalizeAccountCreation(props.accountCreation, 'SignUp accountCreation'), [props.accountCreation]);
   const notices = useMemo(() => resolveNotices(props.notices, 'SignUp'), [props.notices]);
@@ -106,14 +110,14 @@ export function SignUp(props: SignUpProps) {
   const ids = { email: `${uid}-email`, code: `${uid}-code`, given: `${uid}-given`, family: `${uid}-family` };
   const rootRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLInputElement>(null);
-  const fb = useFeedback();
+  const fb = useFeedback(init?.feedback);
   const { set } = fb;
-  const [view, setView] = useState<View>({ name: 'email' });
-  const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
-  const [given, setGiven] = useState('');
-  const [family, setFamily] = useState('');
-  const [resendReady, setResendReady] = useState(true);
+  const [view, setView] = useState<View>(init?.view ?? { name: 'email' });
+  const [email, setEmail] = useState(init?.email ?? '');
+  const [code, setCode] = useState(init?.code ?? '');
+  const [given, setGiven] = useState(init?.given ?? '');
+  const [family, setFamily] = useState(init?.family ?? '');
+  const [resendReady, setResendReady] = useState(init?.resendReady ?? true);
   useFocusOnViewChange(rootRef, view.name);
 
   useEffect(() => {
@@ -124,9 +128,9 @@ export function SignUp(props: SignUpProps) {
 
   const finish = useCallback(() => {
     const target = safeRedirect(props.next, props.defaultNext ?? '/', { ...(props.allowedRedirectPrefixes !== undefined && { allowedPrefixes: props.allowedRedirectPrefixes }) });
-    (props.navigate ?? ((path: string) => window.location.assign(path)))(target);
-  }, [props.next, props.defaultNext, props.allowedRedirectPrefixes, props.navigate]);
-  const navigate = (path: string) => (props.navigate ?? ((p: string) => window.location.assign(p)))(path);
+    (props.navigate ?? driver.navigate)(target);
+  }, [props.next, props.defaultNext, props.allowedRedirectPrefixes, props.navigate, driver]);
+  const navigate = (path: string) => (props.navigate ?? driver.navigate)(path);
 
   if (settings.mode !== 'domains' && settings.mode !== 'open') {
     throw new Error(`auth-kit: SignUp needs accountCreation mode 'domains' or 'open' (this site is '${settings.mode}').`);
@@ -151,7 +155,7 @@ export function SignUp(props: SignUpProps) {
       async () => {
         let step: SignInStep;
         try {
-          step = await requestEmailCode(email);
+          step = await driver.requestEmailCode(email);
         } catch (error) {
           // A disabled account (an expired invite included), or one whose password must be reset: an
           // unknown address gets a challenge here, so these read as "check your email" too (ADR 0018).
@@ -185,7 +189,7 @@ export function SignUp(props: SignUpProps) {
       return;
     }
     set({ busy: true, error: null, field: null, status: STATUS.sendingCode });
-    const outcome = await postAccountForm(props.endpoint ?? '/api/auth/sign-up', { email: typed }, { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address });
+    const outcome = await driver.postAccountForm(props.endpoint ?? '/api/auth/sign-up', { email: typed }, { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address });
     set({ busy: false, status: null });
     if (!outcome.ok) {
       const field = outcome.body?.field === 'email' ? 'email' : null;
@@ -206,7 +210,7 @@ export function SignUp(props: SignUpProps) {
     }
     const sentAt = view.resentAt ?? view.sentAt;
     const failed: { kind?: AuthErrorKind } = {};
-    const result = await fb.run(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : confirmCode(code)), {
+    const result = await fb.run(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : driver.confirmCode(code)), {
       context: 'code',
       words,
       busyStatus: STATUS.checkingCode,
@@ -227,7 +231,7 @@ export function SignUp(props: SignUpProps) {
     go({ name: 'finishing' });
     let factors: ClientAuthFactors | null = null;
     try {
-      factors = await (props.loadFactors ?? fetchAuthFactors)();
+      factors = await (props.loadFactors ?? driver.fetchAuthFactors)();
     } catch {
       // The server enforces the rules on every request; carry on with the new account's steps.
     }
@@ -247,7 +251,7 @@ export function SignUp(props: SignUpProps) {
       fieldRef.current?.focus();
       return;
     }
-    const result = await fb.run(() => saveName({ givenName: given, familyName: family }), { context: 'account', words, busyStatus: STATUS.saving });
+    const result = await fb.run(() => driver.saveName({ givenName: given, familyName: family }), { context: 'account', words, busyStatus: STATUS.saving });
     if (result.ok) go({ name: 'choose' });
   }
 
@@ -259,19 +263,28 @@ export function SignUp(props: SignUpProps) {
   );
   const fieldId = fb.field === 'email' ? ids.email : fb.field === 'code' ? ids.code : fb.field === 'given' ? ids.given : undefined;
   const summary = <ErrorSummary error={fb.error} fieldId={fieldId} classNames={classNames} />;
+  const signInNow = driver.act('sign-in');
   const signInLink = (
     <p {...slot(classNames, 'access')}>
       {SIGN_UP.alreadyHaveAccount}{' '}
-      <a href={signInHref} {...slot(classNames, 'link')}>
+      <a href={signInHref} onClick={signInNow} {...tagged(signInNow)} {...slot(classNames, 'link')}>
         {SIGN_UP.signIn}
       </a>
     </p>
   );
-  const link = (href: string, text: string) => (
-    <a href={href} {...slot(classNames, 'link')}>
-      {text}
-    </a>
-  );
+  const link = (href: string, text: string, name: string) => {
+    const open = driver.act(name);
+    return (
+      <a href={href} onClick={open} {...tagged(open)} {...slot(classNames, 'link')}>
+        {text}
+      </a>
+    );
+  };
+  /** A form's submit, named for the driver (ADR 0025): the props for the `<form>`. */
+  const form = (name: string, handler: (event: FormEvent) => Promise<void>) => {
+    const submit = driver.act(name, (event: FormEvent) => void handler(event));
+    return { onSubmit: submit, ...tagged(submit) };
+  };
 
   let body: ReactNode;
   let extra: ReactNode = null;
@@ -281,7 +294,7 @@ export function SignUp(props: SignUpProps) {
       const terms = open && termsUrl ? SIGN_UP.termsOpen(c) : null;
       const privacy = SIGN_UP.privacyDomains(c);
       body = (
-        <form noValidate onSubmit={(e) => void submitEmail(e)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...form('continue', submitEmail)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_UP.heading)}
           {open ? <Text classNames={classNames}>{SIGN_UP.openSub}</Text> : null}
@@ -308,10 +321,10 @@ export function SignUp(props: SignUpProps) {
               <Button
                 variant="link"
                 classNames={classNames}
-                onClick={() => {
-                  handOffEmail(email.trim());
+                onClick={driver.act('ask-for-access-instead', () => {
+                  driver.handOffEmail(email.trim());
                   navigate(requestAccessHref);
-                }}
+                })}
               >
                 {SIGN_UP.askForAccessInstead}
               </Button>
@@ -321,14 +334,14 @@ export function SignUp(props: SignUpProps) {
             {terms && termsUrl ? (
               <>
                 {terms[0]}
-                {link(termsUrl, terms[1])}
+                {link(termsUrl, terms[1], 'terms')}
                 {terms[2]}
-                {link(privacyNoticeUrl, terms[3])}
+                {link(privacyNoticeUrl, terms[3], 'privacy-notice')}
                 {terms[4]}
               </>
             ) : (
               <>
-                {link(privacyNoticeUrl, privacy[0])}
+                {link(privacyNoticeUrl, privacy[0], 'privacy-notice')}
                 {privacy[1]}
               </>
             )}
@@ -349,13 +362,13 @@ export function SignUp(props: SignUpProps) {
           <ErrorSummary error={ERRORS.sessionExpired(c)} classNames={classNames} />
           {heading(SIGN_UP.codeHeading)}
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={() => go({ name: 'email' })}>
+            <Button classNames={classNames} onClick={driver.act('start-again', () => go({ name: 'email' }))}>
               {SIGN_IN.startAgain}
             </Button>
           </Actions>
         </div>
       ) : (
-        <form noValidate onSubmit={(e) => void submitCode(e)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...form('submit-code', submitCode)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_UP.codeHeading)}
           <Text classNames={classNames}>{SIGN_UP.codeSub(c, email.trim())}</Text>
@@ -389,12 +402,13 @@ export function SignUp(props: SignUpProps) {
                 icon: 'refresh',
                 label: SIGN_IN.sendNewCode,
                 disabled: busy || !resendReady,
-                onClick: () =>
+                onClick: driver.act('resend-code', () =>
                   void sendCode().then((ok) => {
                     if (ok) setView((v) => (v.name === 'code' ? { ...v, resentAt: Date.now() } : v));
                   }),
+                ),
               },
-              { icon: 'back', label: SIGN_IN.differentEmail, onClick: () => go({ name: 'email' }), disabled: busy },
+              { icon: 'back', label: SIGN_IN.differentEmail, onClick: driver.act('different-email', () => go({ name: 'email' })), disabled: busy },
             ]}
             classNames={classNames}
           />
@@ -404,7 +418,7 @@ export function SignUp(props: SignUpProps) {
       break;
     case 'name':
       body = (
-        <form noValidate onSubmit={(e) => void submitName(e)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...form('submit-name', submitName)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_UP.nameHeading)}
           <Text classNames={classNames}>{SIGN_UP.nameSub(c)}</Text>
@@ -438,7 +452,7 @@ export function SignUp(props: SignUpProps) {
           headingLevel={level}
           onDone={(how) => {
             // ChooseFirstCredential has already set the passkey hint for accountName (register A5a; L9).
-            void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', emailed }));
+            void driver.sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
@@ -457,7 +471,7 @@ export function SignUp(props: SignUpProps) {
           <Text classNames={classNames}>{SIGN_UP.doneSub(c)}</Text>
           {view.name === 'done' && view.emailed ? <Text classNames={classNames}>{SIGN_UP.doneEmailed}</Text> : null}
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={finish}>
+            <Button classNames={classNames} onClick={driver.act('continue-to-site', finish)}>
               {FIRST_VISIT.continueTo(c)}
             </Button>
           </Actions>

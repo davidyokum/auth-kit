@@ -1,11 +1,10 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { registerPasskey, setFirstPassword } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { tagged, useDriver } from './driver.js';
 import { ERRORS, FIRST_VISIT, SIGN_IN, STATUS } from './copy.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
-import { rememberPasskey } from './passkey-hint.js';
-import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
+import type { PasswordCheckOptions } from './PasswordForm.js';
 import {
   Actions,
   AltLinks,
@@ -43,7 +42,9 @@ export interface ChooseFirstCredentialProps extends StyleProps, PasswordCheckOpt
   renderQrCode?: (otpauthUri: string) => ReactNode;
 }
 
-type Stage = 'choose' | 'create-passkey' | 'create-password' | 'add-totp';
+/** Where the chooser is. Exported for the driver (ADR 0025), not from `auth-kit/client`. */
+export type FirstCredentialStage = 'choose' | 'create-passkey' | 'create-password' | 'add-totp';
+type Stage = FirstCredentialStage;
 
 /**
  * "Choose how you'll sign in next time" (REPORT §3.1 step 4, Card Studio v4; register A1): after the
@@ -58,15 +59,19 @@ type Stage = 'choose' | 'create-passkey' | 'create-password' | 'add-totp';
  */
 export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
   const { classNames, passkeysEnabled } = props;
+  const driver = useDriver();
+  const init = driver.initial('choose-first-credential');
   const uid = useId();
-  const fb = useFeedback();
-  const [stage, setStage] = useState<Stage>(passkeysEnabled ? 'choose' : 'create-password');
-  const [passkeyFailed, setPasskeyFailed] = useState(false);
-  const [password, setPassword] = useState('');
+  const fb = useFeedback(init?.feedback);
+  const [stage, setStage] = useState<Stage>(init?.stage ?? (passkeysEnabled ? 'choose' : 'create-password'));
+  const [passkeyFailed, setPasskeyFailed] = useState(init?.passkeyFailed ?? false);
+  const [password, setPassword] = useState(init?.password ?? '');
   const level = props.headingLevel ?? 2;
   const rootRef = useRef<HTMLDivElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const started = useRef(0);
+  // A held chooser (preview mode) shows the passkey screen as it is once the browser's window opened:
+  // the first window counts as started, so none opens.
+  const started = useRef(driver.held ? 1 : 0);
   useFocusOnViewChange(rootRef, stage);
   const { set } = fb;
 
@@ -76,17 +81,17 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
     if (stage !== 'create-passkey' || started.current === passkeyAttempt + 1) return;
     started.current = passkeyAttempt + 1;
     setPasskeyFailed(false);
-    void fb.run(registerPasskey, { context: 'passkey-register' }).then((result) => {
+    void fb.run(driver.registerPasskey, { context: 'passkey-register' }).then((result) => {
       if (result.ok) {
         set({ status: STATUS.passkeySaved });
         // This browser now has a passkey for the address (register A5a): remember it before moving on.
         const email = props.accountName?.trim();
-        void (email ? rememberPasskey(email) : Promise.resolve()).then(() => props.onDone('passkey'));
+        void (email ? driver.rememberPasskey(email) : Promise.resolve()).then(() => props.onDone('passkey'));
       } else {
         setPasskeyFailed(true);
       }
     });
-    // fb.run and set are stable; onDone is read when the prompt finishes.
+    // fb.run, set, and the driver are stable; onDone is read when the prompt finishes.
   }, [stage, passkeyAttempt]);
 
   function go(next: Stage) {
@@ -104,14 +109,14 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
       return;
     }
     set({ busy: true, error: null, field: null, status: STATUS.checkingPassword });
-    const breached = await breachedPasswordProblem(password, props.checkBreachedPassword);
+    const breached = await driver.breachedPasswordProblem(password, props.checkBreachedPassword);
     if (breached) {
       set({ busy: false, error: breached, field: 'password', status: null });
       passwordRef.current?.focus();
       return;
     }
     set({ busy: false, status: null });
-    const result = await fb.run(() => setFirstPassword(password), { context: 'set-password', busyStatus: STATUS.saving });
+    const result = await fb.run(() => driver.setFirstPassword(password), { context: 'set-password', busyStatus: STATUS.saving });
     if (result.ok) {
       setPassword('');
       go('add-totp');
@@ -134,8 +139,9 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
     );
   } else if (stage === 'create-password') {
     const passwordId = `${uid}-new-password`;
+    const submitPassword = driver.act('submit-new-password', (e: FormEvent) => void savePassword(e));
     body = (
-      <form noValidate onSubmit={(e) => void savePassword(e)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
+      <form noValidate onSubmit={submitPassword} {...tagged(submitPassword)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
         <ErrorSummary error={fb.error} fieldId={fb.field === 'password' ? passwordId : undefined} classNames={classNames} />
         <Heading level={level} classNames={classNames}>
           {FIRST_VISIT.createPasswordHeading}
@@ -160,7 +166,9 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
             {SIGN_IN.continue}
           </Button>
         </Actions>
-        {passkeysEnabled ? <AltLinks links={[{ icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: () => go('create-passkey'), disabled: fb.busy }]} classNames={classNames} /> : null}
+        {passkeysEnabled ? (
+          <AltLinks links={[{ icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: driver.act('use-passkey', () => go('create-passkey')), disabled: fb.busy }]} classNames={classNames} />
+        ) : null}
         <StatusRegion status={fb.status} classNames={classNames} />
       </form>
     );
@@ -174,12 +182,12 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         <Text classNames={classNames}>{FIRST_VISIT.createPasskeySub}</Text>
         {passkeyFailed ? null : <Wait label={FIRST_VISIT.waitingForDevice} classNames={classNames} />}
         <Actions classNames={classNames}>
-          <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={() => setPasskeyAttempt((n) => n + 1)}>
+          <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={driver.act('try-again', () => setPasskeyAttempt((n) => n + 1))}>
             {SIGN_IN.tryAgain}
           </Button>
         </Actions>
         <Text classNames={classNames}>{FIRST_VISIT.passkeyOnPhone}</Text>
-        <AltLinks links={[{ icon: 'password', label: SIGN_IN.usePassword, onClick: () => go('create-password'), disabled: fb.busy }]} classNames={classNames} />
+        <AltLinks links={[{ icon: 'password', label: SIGN_IN.usePassword, onClick: driver.act('use-password', () => go('create-password')), disabled: fb.busy }]} classNames={classNames} />
         <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>
       </div>
     );
@@ -196,7 +204,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
             {FIRST_VISIT.passkeyOption} <span>{FIRST_VISIT.recommended}</span>
           </h2>
           <p>{FIRST_VISIT.passkeyOptionText}</p>
-          <Button classNames={classNames} onClick={() => go('create-passkey')}>
+          <Button classNames={classNames} onClick={driver.act('create-passkey', () => go('create-passkey'))}>
             {FIRST_VISIT.createPasskey}
           </Button>
         </section>
@@ -206,7 +214,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
             {FIRST_VISIT.passwordOption}
           </h2>
           <p>{FIRST_VISIT.passwordOptionText}</p>
-          <Button variant="link" classNames={classNames} onClick={() => go('create-password')}>
+          <Button variant="link" classNames={classNames} onClick={driver.act('use-password', () => go('create-password'))}>
             {SIGN_IN.usePassword}
           </Button>
         </section>

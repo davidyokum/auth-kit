@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import { SIGNED_OUT } from './copy.js';
+import { tagged, useDriver } from './driver.js';
 import { hrefOr } from './href.js';
 import { Actions, Card, Glyph, Heading, type HeadingLevel, type StyleProps, Text, slot } from './ui.js';
 
@@ -17,6 +18,7 @@ export function SignedOutEverywhere(props: SignedOutEverywhereProps) {
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
   const c = { siteName: props.siteName };
   const signInHref = hrefOr('signInHref', props.signInHref, '/sign-in');
+  const signIn = useDriver().act('sign-in-again');
   return (
     <Card name="signed-out" theme={theme} {...(props.className !== undefined && { className: props.className })} classNames={props.classNames}>
       <div {...slot(props.classNames, 'form')}>
@@ -26,7 +28,7 @@ export function SignedOutEverywhere(props: SignedOutEverywhereProps) {
         </Heading>
         <Text classNames={props.classNames}>{SIGNED_OUT.sub(c)}</Text>
         <Actions classNames={props.classNames}>
-          <a href={signInHref} {...slot(props.classNames, 'button')}>
+          <a href={signInHref} onClick={signIn} {...tagged(signIn)} {...slot(props.classNames, 'button')}>
             {SIGNED_OUT.signInAgain}
           </a>
         </Actions>
