@@ -1,3 +1,4 @@
+import { MATRIX_SERVER_MODE } from '../shared/matrix-protocol.js';
 import { type ResourceNeed, type ResourceTypes, decideResourceAccess, isResourceId, isResourceTypes, neededActions } from '../resources/policy.js';
 import type { ResourceAccessStore, ResourceMembership } from '../resources/types.js';
 import { type ResourceRole, SESSION_POLICY } from '../shared/policy.js';
@@ -26,16 +27,21 @@ export interface ServerAuthOptions<G extends string = string, C extends string =
   /** Where to find tokens. Default: `Authorization: Bearer`, then Amplify's `ssr: true` cookies. */
   tokenSource?: TokenSource;
   /**
-   * Refuse password users who haven't set up an authenticator code (`MfaEnrollmentRequiredError`).
-   * Default `true`. The TOTP setup page itself passes `allowMfaEnrollment: true`.
+   * Refuse password users who haven't set up an authenticator code (`MfaEnrollmentRequiredError`,
+   * register A2). Always `true` on a site: `false` is accepted only in the auth matrix's server mode
+   * (`matrixOverrides().serverAuth`), and throws anywhere else. The TOTP setup page itself passes
+   * `allowMfaEnrollment: true`.
    */
   requireTotpForPasswordUsers?: boolean;
   /**
    * Refuse accounts with no passkey and no password, only emailed codes
-   * (`FirstCredentialRequiredError`, register A1, ADR 0024). Default `true`. The page that shows
+   * (`FirstCredentialRequiredError`, register A1, ADR 0024). Always `true` on a site: `false` is
+   * accepted only in the auth matrix's server mode, and throws anywhere else. The page that shows
    * "Choose how you'll sign in next time" passes `allowFirstCredentialEnrollment: true`.
    */
   requireFirstCredential?: boolean;
+  /** Set by `matrixOverrides().serverAuth` (`auth-kit/testing/matrix-server`) only. */
+  matrixServerMode?: typeof MATRIX_SERVER_MODE;
   /** How the TOTP check reads factors: the person's own token (default) or the server's IAM role. */
   factorLookup?: 'access-token' | 'iam';
   /** How long a "has an authenticator" answer is reused. Default 300 seconds. */
@@ -246,6 +252,7 @@ const OPTION_KEYS = new Set<string>([
   'tokenSource',
   'requireTotpForPasswordUsers',
   'requireFirstCredential',
+  'matrixServerMode',
   'factorLookup',
   'factorCheckTtlSeconds',
   'liveCheckTtlSeconds',
@@ -280,6 +287,12 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
   if (options.requireFirstCredential !== undefined && typeof options.requireFirstCredential !== 'boolean') problems.push('requireFirstCredential must be true or false');
   if (options.requireTotpForPasswordUsers !== undefined && typeof options.requireTotpForPasswordUsers !== 'boolean') {
     problems.push('requireTotpForPasswordUsers must be true or false');
+  }
+  if (options.matrixServerMode !== undefined && options.matrixServerMode !== MATRIX_SERVER_MODE) problems.push('matrixServerMode comes only from matrixOverrides()');
+  for (const key of ['requireFirstCredential', 'requireTotpForPasswordUsers'] as const) {
+    if (options[key] === false && options.matrixServerMode !== MATRIX_SERVER_MODE) {
+      problems.push(`${key}: false breaks the standard (register ${key === 'requireFirstCredential' ? 'A1' : 'A2'}) and is accepted only in the auth matrix's server mode (matrixOverrides().serverAuth)`);
+    }
   }
   for (const key of ['tokenSource', 'jwksFetcher', 'now', 'context'] as const) {
     if (options[key] !== undefined && typeof options[key] !== 'function') problems.push(`${key} must be a function`);

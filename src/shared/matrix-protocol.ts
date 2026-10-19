@@ -23,3 +23,10 @@ export const PROXY_HANDLER_PASS = 'handler-pass';
  * passes to the dev server, as JSON. Read only under `next dev` with `AUTH_KIT_MATRIX=1`.
  */
 export const MATRIX_FIXTURE_ENV = 'AUTH_KIT_MATRIX_FIXTURE';
+
+/**
+ * The matrix server mode's sign on `createServerAuth` (`matrixOverrides().serverAuth` carries it): the
+ * only place the standard's server rules (`requireFirstCredential`, `requireTotpForPasswordUsers`) may
+ * be switched off, so a test can reach a persona the standard otherwise refuses (register A1, A2).
+ */
+export const MATRIX_SERVER_MODE: unique symbol = Symbol.for('auth-kit.matrix-server-mode') as never;
