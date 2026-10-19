@@ -4,7 +4,7 @@
  * functions, shared by the server actions and `auth-kit/admin/ui`.
  */
 import { type InviteMode, type PeopleAction, roleLabel } from './guardrails.js';
-import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
+import { INVITE_EXPIRY_DAYS, OWNER_CHOICE_LABEL, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
 import type { ActivityEntry, AuditEvent } from './types.js';
 
 export { roleLabel };
@@ -33,7 +33,7 @@ export const TRANSFER_OWNERSHIP_NOTE =
   'A site has exactly one owner. Transferring makes them the owner and you Super admin. It needs a sign-in in the last few minutes and their email address typed out, and both of you get an email; if it can’t be sent, the transfer is undone.';
 
 /** Where the owner is shown in a role picker: the role isn't one of the choices. */
-export const OWNER_ROLE_NOTE = 'Owner (only one): not a choice here. Ownership moves only by Transfer ownership, which the owner starts.';
+export const OWNER_ROLE_NOTE = `${OWNER_CHOICE_LABEL}: not a choice here. Ownership moves only by Transfer ownership, which the owner starts.`;
 
 /**
  * The note under every role picker: site roles aren't resource access (who can do what to one

@@ -49,7 +49,11 @@ export const ADMIN_ROLE_RANK: Readonly<Record<StandardGroup, number>> = {
   owner: 5,
 };
 
-/** Display names, exactly as screens show them (with an en dash). */
+/**
+ * Display names, exactly as screens show them (with an en dash). Where the role is a name (the People
+ * table, badges, the role-change line, Activity) the owner is plain "Owner"; where roles are chosen or
+ * compared it's `OWNER_CHOICE_LABEL` (register C1, 2026-10-19).
+ */
 export const ADMIN_ROLE_LABEL: Readonly<Record<StandardGroup, string>> = {
   owner: 'Owner',
   superadmin: 'Super admin',
@@ -57,6 +61,9 @@ export const ADMIN_ROLE_LABEL: Readonly<Record<StandardGroup, string>> = {
   'admin-content': 'Admin – content only',
   'admin-view': 'Admin – view only',
 };
+
+/** The owner's label where roles are chosen or compared: the role picker and the Compare roles grid (register C1). */
+export const OWNER_CHOICE_LABEL = 'Owner (only one)';
 
 /** The display name for `member` (no admin role). */
 export const MEMBER_LABEL = 'Member';

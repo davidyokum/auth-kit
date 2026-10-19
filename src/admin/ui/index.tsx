@@ -32,7 +32,7 @@ import {
   roleLabel,
   type PeopleActionDetail,
 } from '../copy.js';
-import { ADMIN_ROLE_RANK, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
+import { ADMIN_ROLE_RANK, OWNER_CHOICE_LABEL, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
 import {
   PEOPLE_FORM_FIELDS as F,
   PENDING_REQUESTS_SHOWN,
@@ -403,7 +403,7 @@ export function RoleMatrixTable({ caption }: { caption?: string }): ReactNode {
       <tbody>
         {ROLE_MATRIX.rows.map((row) => (
           <tr key={row.role}>
-            <th scope="row">{row.role === OWNER_GROUP ? `${row.label} (only one)` : row.label}</th>
+            <th scope="row">{row.role === OWNER_GROUP ? OWNER_CHOICE_LABEL : row.label}</th>
             {ROLE_MATRIX.columns.map((c) => {
               const cell = row.cells[c];
               return (
