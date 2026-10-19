@@ -165,7 +165,7 @@ describe('InviteExpirySweep', () => {
     expect(() => synth({ ownerWarnings: { ...base, fallbackEmail: 'ops' } })).toThrow(/fallbackEmail/);
   });
 
-  it("the scheduler's role: assumable only by this account's scheduler for this group, may only invoke the function", () => {
+  it("the scheduler's role: assumable only by this account's scheduler for this schedule group, may only invoke the function", () => {
     const { template } = synth();
     const role = Object.entries(template.findResources('AWS::IAM::Role')).find(([id]) => id.startsWith('InviteExpirySchedulerRole'))![1] as {
       Properties: { AssumeRolePolicyDocument: { Statement: { Principal: unknown; Condition: Record<string, Record<string, unknown>> }[] } };
@@ -173,8 +173,10 @@ describe('InviteExpirySweep', () => {
     const trust = role.Properties.AssumeRolePolicyDocument.Statement;
     expect(trust).toHaveLength(1);
     expect(trust[0]!.Principal).toEqual({ Service: 'scheduler.amazonaws.com' });
-    expect(trust[0]!.Condition.StringEquals).toEqual({ 'aws:SourceAccount': { Ref: 'AWS::AccountId' } });
-    expect(JSON.stringify(trust[0]!.Condition.ArnLike?.['aws:SourceArn'])).toMatch(/:scheduler:us-east-1:",\{"Ref":"AWS::AccountId"\},":schedule\/",\{"Ref":"InviteExpiryGroup[A-Z0-9]+"\},"\/\*/);
+    // Scheduler presents the schedule group's ARN as aws:SourceArn (test/admin/scheduler-roles.test.ts).
+    expect(trust[0]!.Condition).toEqual({
+      StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' }, 'aws:SourceArn': { 'Fn::GetAtt': [expect.stringMatching(/^InviteExpiryGroup[A-Z0-9]+$/), 'Arn'] } },
+    });
 
     const statements = policyStatements(template, 'InviteExpirySchedulerRole');
     expect(statements).toHaveLength(1);
