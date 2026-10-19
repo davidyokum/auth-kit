@@ -1049,7 +1049,7 @@ export function SignIn(props: SignInProps) {
           accountName={email.trim()}
           headingLevel={level}
           onDone={(how) => {
-            if (how === 'passkey') void rememberPasskey(email);
+            // ChooseFirstCredential has already set the passkey hint for accountName (register A5a).
             void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}

@@ -4,6 +4,7 @@ import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { ERRORS, FIRST_VISIT, SIGN_IN, STATUS } from './copy.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
+import { rememberPasskey } from './passkey-hint.js';
 import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
 import {
   Actions,
@@ -30,9 +31,13 @@ export interface ChooseFirstCredentialProps extends StyleProps, PasswordCheckOpt
   passkeysEnabled: boolean;
   /** The site's name, shown in the authenticator app. */
   issuer: string;
-  /** The account's email (for password managers and the authenticator label). */
+  /**
+   * The account's email (for password managers and the authenticator label). With it, a new passkey
+   * also sets this browser's passkey hint for the address (register A5a), so the next "Continue" opens
+   * the passkey prompt: pass it on a standalone chooser page too.
+   */
   accountName?: string;
-  /** Called once a passkey is saved, or a password and an authenticator are both set. */
+  /** Called once a passkey is saved (and the hint set), or a password and an authenticator are both set. */
   onDone: (how: FirstCredential) => void;
   headingLevel?: HeadingLevel;
   renderQrCode?: (otpauthUri: string) => ReactNode;
@@ -74,7 +79,9 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
     void fb.run(registerPasskey, { context: 'passkey-register' }).then((result) => {
       if (result.ok) {
         set({ status: STATUS.passkeySaved });
-        props.onDone('passkey');
+        // This browser now has a passkey for the address (register A5a): remember it before moving on.
+        const email = props.accountName?.trim();
+        void (email ? rememberPasskey(email) : Promise.resolve()).then(() => props.onDone('passkey'));
       } else {
         setPasskeyFailed(true);
       }
