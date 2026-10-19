@@ -85,6 +85,9 @@ export interface SetupInput {
   createLayer: (width: number, height: number, scale?: number) => Layer;
   loadImage?: StyleSetup['loadImage'];
   invalidate?: (durationMs?: number) => void;
+  subject?: string;
+  subjectSet?: string;
+  siteName?: string;
 }
 
 export function buildSetup(input: SetupInput): StyleSetup {
@@ -100,6 +103,9 @@ export function buildSetup(input: SetupInput): StyleSetup {
     ...(input.image !== undefined && { image: input.image }),
     ...(input.loadImage !== undefined && { loadImage: input.loadImage }),
     invalidate: input.invalidate ?? (() => undefined),
+    ...(input.subject !== undefined && { subject: input.subject }),
+    ...(input.subjectSet !== undefined && { subjectSet: input.subjectSet }),
+    ...(input.siteName !== undefined && { siteName: input.siteName }),
   };
 }
 

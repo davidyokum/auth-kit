@@ -45,6 +45,16 @@ export interface StyleSetup {
   readonly loadImage?: (src: string) => Promise<CanvasImageSource & { readonly width: number; readonly height: number }>;
   /** Asks for a redraw (a static style whose image arrived), animating for `durationMs` if motion is allowed. */
   invalidate(durationMs?: number): void;
+  /**
+   * Styles with `subjects` only: the subject this visit shows (a key from the module's `subjects`). The
+   * host picks it each visit (a tour, random, or the subject of the day; never stored server-side). The
+   * seed still locks the look. Absent or unknown: the style picks one from its seed and `subjectSet`.
+   */
+  readonly subject?: string;
+  /** Styles with `subjects` only: which named set the subject comes from. Absent: `subjects.defaultSet`. */
+  readonly subjectSet?: string;
+  /** The site's name, for styles that letter it (e.g. a title that falls apart). Absent: the style leaves it out. */
+  readonly siteName?: string;
 }
 
 export interface FrameInput {
@@ -105,6 +115,22 @@ export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
 
 export type BackdropInteractivity = 'pointer' | 'tap' | 'none';
 
+/**
+ * A style that shows one subject at a time (a county, a river basin, a constellation). The seed locks
+ * the look; the subject may rotate each visit (ADR 0021). Keys are stable: never rename one a site may
+ * pin.
+ */
+export interface StyleSubjects {
+  /** For people, singular: "county". */
+  readonly noun: string;
+  /** Named sets of subject keys, each in its tour order (e.g. `{ curated: [...40], all: [...88] }`). */
+  readonly sets: Readonly<Record<string, readonly string[]>>;
+  /** The set used when none is chosen. */
+  readonly defaultSet: string;
+  /** For people: a key's name ("Dare"). Default: the key. */
+  readonly label?: (key: string) => string;
+}
+
 export interface BackdropStyleModule<Id extends string = string> {
   readonly id: Id;
   /** For people: "Magnetic dots". */
@@ -119,6 +145,8 @@ export interface BackdropStyleModule<Id extends string = string> {
   readonly retired?: boolean;
   /** Every released version, oldest first. Never remove one. */
   readonly versions: readonly StyleVersion[];
+  /** Styles that show one subject at a time: what can rotate. */
+  readonly subjects?: StyleSubjects;
 }
 
 /** Declares a style module (checks its versions are 1, 2, 3, ... in order). */
@@ -128,5 +156,12 @@ export function defineStyle<const Id extends string>(module: BackdropStyleModule
   module.versions.forEach((v, i) => {
     if (v.version !== i + 1) throw new Error(`auth-kit/backdrops: style "${module.id}" lists version ${v.version} where ${i + 1} belongs.`);
   });
+  if (module.subjects) {
+    const { sets, defaultSet } = module.subjects;
+    if (!sets[defaultSet]?.length) throw new Error(`auth-kit/backdrops: style "${module.id}" has no subjects in its default set "${defaultSet}".`);
+    for (const [name, keys] of Object.entries(sets)) {
+      if (new Set(keys).size !== keys.length) throw new Error(`auth-kit/backdrops: style "${module.id}" repeats a subject in set "${name}".`);
+    }
+  }
   return Object.freeze({ ...module, versions: Object.freeze([...module.versions]) });
 }
