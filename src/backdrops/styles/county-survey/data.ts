@@ -1,3 +1,6 @@
+/*! auth-kit county-survey data: the lakes and rivers in this file are © OpenStreetMap contributors,
+ *  made available under the Open Database License 1.0 (https://opendatacommons.org/licenses/odbl/1-0/),
+ *  not under auth-kit's MIT License. See THIRD_PARTY_NOTICES.md and https://www.openstreetmap.org/copyright. */
 /**
  * county-survey data: North Carolina's 100 counties and their neighbours, interstates and US highways,
  * lakes and rivers, a 1 km elevation grid for the mountain counties, sound names, and the state outline.

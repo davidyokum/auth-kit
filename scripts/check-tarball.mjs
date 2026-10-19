@@ -1,7 +1,11 @@
 // Checks a packed release tarball (ADR 0012): every subpath export's and bin's files are inside, nothing from
-// src/ or test/ leaked in, and the package runs no lifecycle scripts on install.
+// src/ or test/ leaked in, the package runs no lifecycle scripts on install, and the OpenStreetMap-derived
+// data carries its ODbL notice.
 // Usage: node scripts/check-tarball.mjs auth-kit-<version>.tgz
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const tarball = process.argv[2];
 if (!tarball) throw new Error('usage: node scripts/check-tarball.mjs <tarball>');
@@ -39,6 +43,34 @@ for (const file of files) {
 }
 for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack']) {
   if (pkg.scripts?.[hook]) problems.push(`package.json has a "${hook}" script; installs must run nothing`);
+}
+// The OpenStreetMap-derived data is under the ODbL 1.0, not MIT (L8): the notices file says so, and so
+// does every built chunk that carries the data (the County Survey and River Basins styles' code).
+const unpacked = mkdtempSync(join(tmpdir(), 'auth-kit-tarball-'));
+try {
+  execFileSync('tar', ['-xzf', tarball, '-C', unpacked]);
+  const read = (path) => readFileSync(join(unpacked, 'package', path), 'utf8');
+  const notices = files.has('THIRD_PARTY_NOTICES.md') ? read('THIRD_PARTY_NOTICES.md') : '';
+  for (const needed of ['Open Database License 1.0', 'src/backdrops/styles/county-survey/data.ts', 'src/backdrops/styles/river-basins/data.ts', 'not MIT']) {
+    if (!notices.includes(needed)) problems.push(`THIRD_PARTY_NOTICES.md doesn't state the OpenStreetMap data's licence (missing "${needed}")`);
+  }
+  const osmData = { COUNTY_DATA: 0, BASIN_DATA: 0 };
+  for (const file of files) {
+    if (!/^dist\/.*\.js$/.test(file)) continue;
+    const code = read(file);
+    for (const name of Object.keys(osmData)) {
+      if (!new RegExp(`\\b(?:var|const|let) ${name}\\b`).test(code)) continue;
+      osmData[name]++;
+      if (!/© OpenStreetMap\s+(?:\*\s+)?contributors/.test(code) || !/Open Database License 1\.0/.test(code)) {
+        problems.push(`${file} carries ${name} (OpenStreetMap-derived) without its ODbL notice`);
+      }
+    }
+  }
+  for (const [name, count] of Object.entries(osmData)) {
+    if (count === 0) problems.push(`no built chunk carries ${name}: the OpenStreetMap notice check found nothing to check`);
+  }
+} finally {
+  rmSync(unpacked, { recursive: true, force: true });
 }
 
 if (problems.length > 0) {

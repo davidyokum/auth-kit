@@ -1032,4 +1032,4 @@ Decisions are recorded as ADRs here, in [docs/decisions](docs/decisions): what w
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The OpenStreetMap-derived map data in the County Survey and River Basins backdrops is © OpenStreetMap contributors under the Open Database License 1.0, not MIT: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
