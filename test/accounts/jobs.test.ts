@@ -39,7 +39,7 @@ function seedAccounts(pool: ReturnType<typeof fakeUserPool>) {
   pool.add({ sub: 'verified', email: 'verified@example.com', origin: 'signup', emailVerified: true, createdAt: new Date(NOW - 10 * DAY) });
   // A sign-up account someone gave a role: the owner above all must stay.
   pool.add({ sub: 'owner', email: 'owner@example.org', ...signUp, createdAt: new Date(NOW - 10 * DAY) }, OWNER_GROUP);
-  pool.add({ sub: 'given-role', email: 'role@example.com', ...signUp, createdAt: new Date(NOW - 2 * DAY) }, 'editors');
+  pool.add({ sub: 'given-role', email: 'role@example.com', ...signUp, createdAt: new Date(NOW - 2 * DAY) }, 'reviewers');
   pool.add({ sub: 'disabled', email: 'disabled@example.com', ...signUp, enabled: false, createdAt: new Date(NOW - 3 * DAY) });
 }
 
@@ -374,9 +374,9 @@ function seedAdmins(pool: ReturnType<typeof fakeUserPool>) {
   pool.add({ sub: 'acp-1', email: 'acp@example.org' }, 'admin-content-people');
   pool.add({ sub: 'acp-off', email: 'acp-off@example.org', enabled: false }, 'admin-content-people');
   pool.add({ sub: 'no-address', email: '' }, 'superadmin');
-  pool.add({ sub: 'content-1', email: 'content@example.org' }, 'admin-content');
+  pool.add({ sub: 'content-1', email: 'content@example.org' }, 'reviewers');
   pool.add({ sub: 'view-1', email: 'view@example.org' }, 'admin-view');
-  pool.add({ sub: 'editor-1', email: 'editor@example.org' }, 'editors');
+  pool.add({ sub: 'content-admin-1', email: 'content-admin@example.org' }, 'reviewers');
   pool.add({ sub: 'member-1', email: 'member@example.org' });
 }
 
@@ -527,7 +527,7 @@ describe('createAccessRequestDigest', () => {
     const { pool, store, sent, run } = digestSetup();
     pool.add({ sub: 'acp-off', email: 'acp-off@example.org', enabled: false }, 'admin-content-people');
     pool.add({ sub: 'no-address', email: '' }, OWNER_GROUP);
-    pool.add({ sub: 'content-1', email: 'content@example.org' }, 'admin-content');
+    pool.add({ sub: 'content-1', email: 'content@example.org' }, 'reviewers');
     await store.create({ email: 'nia@example.com', now: new Date(NOW - DAY) });
     await expect(run()).rejects.toThrow(/requests are waiting, but nobody who manages people has an email address/);
     expect(sent).toEqual([]);
@@ -552,11 +552,11 @@ describe('createAccessRequestDigest', () => {
   });
 
   it('takes the app’s own recipient groups, and refuses none or a pool ID that isn’t one', async () => {
-    const { pool, store, sent, run } = digestSetup({ recipientGroups: ['editors'] });
+    const { pool, store, sent, run } = digestSetup({ recipientGroups: ['reviewers'] });
     seedAdmins(pool);
     await store.create({ email: 'nia@example.com', now: new Date(NOW - DAY) });
     expect(await run()).toMatchObject({ sent: true, recipients: 1 });
-    expect(sent[0]!.to).toEqual(['editor@example.org']);
+    expect(sent[0]!.to).toEqual(['content-admin@example.org']);
     const base = { requests: createMemoryAccessRequestStore(), mailer: recordingMailer().mailer, site: { ...SITE, help: 'help@example.org' }, peopleUrl: PEOPLE_URL };
     expect(() => createAccessRequestDigest({ ...base, userPoolId: POOL_ID, recipientGroups: [] })).toThrow(/at least one recipient group/);
     expect(() => createAccessRequestDigest({ ...base, userPoolId: 'not-a-pool' })).toThrow(/isn't a Cognito user pool ID/);
@@ -644,7 +644,7 @@ describe('the access-request digest handler', () => {
   }
 
   it('builds the digest once from the environment, and logs one line of counts', async () => {
-    const { handler, lines, createDigest } = handlerWith({ ...ENV, AUTH_KIT_RECIPIENT_GROUPS: 'owner,editors' });
+    const { handler, lines, createDigest } = handlerWith({ ...ENV, AUTH_KIT_RECIPIENT_GROUPS: 'owner,reviewers' });
     expect(await handler()).toEqual({ event: 'auth-kit.access-request-digest', pending: 2, truncated: false, sent: true, recipients: 3, purged: 1 });
     await handler();
     expect(createDigest).toHaveBeenCalledTimes(1);
@@ -652,7 +652,7 @@ describe('the access-request digest handler', () => {
     expect(options).toMatchObject({
       userPoolId: POOL_ID,
       peopleUrl: PEOPLE_URL,
-      recipientGroups: ['owner', 'editors'],
+      recipientGroups: ['owner', 'reviewers'],
       site: { siteName: 'Example Reports', theme: 'unc', signInUrl: 'https://reports.example.org/sign-in', help: 'help@example.org' },
     });
     expect(options.requests).toEqual(expect.objectContaining({ purge: expect.any(Function), list: expect.any(Function) }));

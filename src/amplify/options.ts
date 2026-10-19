@@ -160,7 +160,8 @@ export interface AuthStandardOptions {
   tier: AuthTier;
   /**
    * Configure this backend's pool as a Tier 3 admin pool: MFA required, no emailed codes, recovery by
-   * an admin only, and passkeys (once `passkeys` is set) as the way in. Amplify allows one auth
+   * an admin only; admins use passkeys day to day (once `passkeys` is set) and keep a password plus an
+   * authenticator as the second way in (register A3). Amplify allows one auth
    * resource per backend, so an admin pool lives in its own Amplify backend.
    */
   adminPool?: boolean;
