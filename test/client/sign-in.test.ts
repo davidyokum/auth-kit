@@ -1385,7 +1385,9 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
 
   it('keeps hashes, never addresses; and choosing another way in twice from the hint’s prompt forgets it', async () => {
     const stored = window.localStorage.getItem('auth-kit:passkey-hint:v1') ?? '';
-    expect(stored).not.toContain('ada');
+    // Not the address: hex never holds '@' or 'example' (a check for 'ada' failed when the random salt held it).
+    expect(stored).not.toContain('@');
+    expect(stored).not.toContain('example');
     expect(JSON.parse(stored).hashes[0]).toMatch(/^[0-9a-f]{64}$/);
     for (let i = 0; i < 2; i++) {
       const { user } = setup();
