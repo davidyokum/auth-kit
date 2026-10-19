@@ -21,6 +21,9 @@ export const authKitStyles = `
 :where([data-auth-kit] [data-auth-kit-slot="field"]) { display: grid; gap: 0.375rem; }
 :where([data-auth-kit] [data-auth-kit-slot="label"]) { font-weight: 600; color: var(--ak-ink, #092940); }
 :where([data-auth-kit] [data-auth-kit-slot="input"]) { font: inherit; font-size: max(1rem, 16px); min-height: 48px; box-sizing: border-box; padding: 0.625rem 0.75rem; color: var(--ak-ink, #092940); background: #fff; border: 1px solid var(--ak-field-border, #6b7480); border-radius: 8px; }
+:where([data-auth-kit] [data-auth-kit-slot="inputWrap"]) { position: relative; display: grid; }
+:where([data-auth-kit] [data-auth-kit-slot="inputWrap"] > svg) { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: var(--ak-muted, #56606b); pointer-events: none; }
+:where([data-auth-kit] [data-auth-kit-slot="input"][data-auth-kit-has-icon]) { padding-left: 44px; }
 :where([data-auth-kit] textarea[data-auth-kit-slot="input"]) { min-height: 6rem; resize: vertical; }
 :where([data-auth-kit] [data-auth-kit-slot="input"]::placeholder) { color: #646e79; }
 :where([data-auth-kit] [data-auth-kit-slot="input"][aria-invalid="true"]) { border-color: var(--ak-error, #b42318); border-width: 2px; }

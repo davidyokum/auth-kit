@@ -58,7 +58,9 @@ export type AuthKitSlot =
   | 'choice'
   | 'small'
   | 'showButton'
-  | 'glyph';
+  | 'glyph'
+  | 'inputWrap'
+  | 'monogram';
 
 export type AuthKitClassNames = Partial<Record<AuthKitSlot, string>>;
 
@@ -107,14 +109,31 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   inputRef?: Ref<HTMLInputElement>;
   /** Something after the input on the same row (the password's Show button). */
   after?: ReactNode;
+  /**
+   * An icon inside the field, hidden from screen readers (the label says what it is). Email fields get
+   * the envelope by default (register A9); `false` leaves it out.
+   */
+  icon?: IconName | false;
 }
 
-export function Field({ label, hint, invalid, errorId, error, optional, classNames, inputRef, after, id: idProp, ...input }: FieldProps) {
+export function Field({ label, hint, invalid, errorId, error, optional, classNames, inputRef, after, icon, id: idProp, ...input }: FieldProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
   const hintId = hint ? `${id}-hint` : undefined;
   const inlineId = invalid && error ? `${id}-error` : undefined;
   const describedBy = [hintId, inlineId, invalid ? errorId : undefined].filter(Boolean).join(' ');
+  const iconName = icon === false ? undefined : (icon ?? (input.type === 'email' ? 'mail' : undefined));
+  const field = (
+    <input
+      id={id}
+      ref={inputRef}
+      aria-invalid={invalid ? true : undefined}
+      aria-describedby={describedBy || undefined}
+      data-auth-kit-has-icon={iconName ? '' : undefined}
+      {...slot(classNames, 'input')}
+      {...input}
+    />
+  );
   return (
     <div {...slot(classNames, 'field')}>
       <label htmlFor={id} {...slot(classNames, 'label')}>
@@ -132,14 +151,14 @@ export function Field({ label, hint, invalid, errorId, error, optional, classNam
           {error}
         </p>
       ) : null}
-      <input
-        id={id}
-        ref={inputRef}
-        aria-invalid={invalid ? true : undefined}
-        aria-describedby={describedBy || undefined}
-        {...slot(classNames, 'input')}
-        {...input}
-      />
+      {iconName ? (
+        <span {...slot(classNames, 'inputWrap')}>
+          <Icon name={iconName} />
+          {field}
+        </span>
+      ) : (
+        field
+      )}
       {after}
     </div>
   );

@@ -249,6 +249,15 @@ describe('the email step', () => {
     }
   });
 
+  it('the email field carries an envelope icon, hidden from screen readers (register A9)', () => {
+    setup();
+    const wrap = emailField().parentElement!;
+    expect(wrap.getAttribute('data-auth-kit-slot')).toBe('inputWrap');
+    const icon = wrap.querySelector('svg[data-auth-kit-icon="mail"]');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(emailField().hasAttribute('data-auth-kit-has-icon')).toBe(true);
+  });
+
   it('the hint shows on every email field, and the format error names it', async () => {
     const { user } = setup({ theme: 'osbm' });
     await user.type(emailField(), 'ada{Enter}');
