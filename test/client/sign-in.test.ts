@@ -355,12 +355,15 @@ describe('the card', () => {
     expect(slotText('footer')).toBeNull();
   });
 
-  it('shows the authorized-use line only when the theme turns it on', () => {
+  it('Quiet by default with no monogram; the Monogram style adds the site’s initials above the heading (register E5)', () => {
     setup({ theme: 'osbm' });
-    expect(slotText('notice')).toBeNull();
+    expect(document.querySelector('[data-auth-kit="sign-in"]')?.getAttribute('data-auth-kit-style')).toBe('quiet');
+    expect(slotText('monogram')).toBeNull();
     cleanup();
-    setup({ theme: authTheme('osbm', { showAuthorizedUse: true }) });
-    expect(slotText('notice')).toBe('This is a State of North Carolina system for authorized use.');
+    setup({ theme: authTheme('osbm', { cardStyle: 'monogram' }) });
+    expect(document.querySelector('[data-auth-kit="sign-in"]')?.getAttribute('data-auth-kit-style')).toBe('monogram');
+    expect(slotText('monogram')).toBe('ER');
+    expect(document.querySelector('[data-auth-kit-slot="monogram"]')?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('"Trouble signing in?" sits inside the card by default, and just below it with troubleLink "below"', () => {

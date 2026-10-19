@@ -141,7 +141,7 @@ function copyTexts(): Text[] {
   }
   for (const family of THEME_FAMILIES) {
     const theme = authTheme(family);
-    for (const text of [theme.footer, theme.authorizedUseLine, theme.help.verify, theme.help.itDesk, theme.help.devDesk]) if (text) out.push({ where: `theme(${family})`, text });
+    for (const text of [theme.footer, theme.help.verify, theme.help.itDesk, theme.help.devDesk]) if (text) out.push({ where: `theme(${family})`, text });
   }
   for (const [domains, requestsAlso] of [[['example.org'], false], [['example.org', 'edu'], true], [['example.org', 'example.net', 'edu'], true]] as const) {
     out.push({ where: 'notOnListMessage', text: notOnListMessage(SITE, domains, requestsAlso) });

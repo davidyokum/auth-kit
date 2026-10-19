@@ -96,7 +96,7 @@ export function SignUp(props: SignUpProps) {
   const settings = useMemo(() => normalizeAccountCreation(props.accountCreation, 'SignUp accountCreation'), [props.accountCreation]);
   const lifetime = checkedLifetime(props.codeLifetimeMinutes, 'SignUp codeLifetimeMinutes');
   const open = settings.mode === 'open';
-  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: lifetime, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }) };
+  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: lifetime, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }), publicSite: settings.mode === 'open' };
   const words: MessageWords = { siteName, codeLifetimeMinutes: lifetime, helpAddress: props.help.address };
   const level = props.headingLevel ?? 1;
   const hint = props.emailHint?.trim() || (open ? 'name@example.com' : theme.emailHint);
@@ -465,7 +465,7 @@ export function SignUp(props: SignUpProps) {
   }
 
   return (
-    <Card name="sign-up" view={view.name} theme={theme} bottom={{ extra }} rootRef={rootRef} {...(props.className !== undefined && { className: props.className })} classNames={classNames}>
+    <Card name="sign-up" view={view.name} theme={theme} siteName={siteName} bottom={{ extra }} rootRef={rootRef} {...(props.className !== undefined && { className: props.className })} classNames={classNames}>
       {body}
       <StatusRegion status={fb.status} classNames={classNames} />
     </Card>

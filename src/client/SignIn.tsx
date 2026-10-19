@@ -247,6 +247,8 @@ export function SignIn(props: SignInProps) {
     codeLifetimeMinutes: lifetime,
     helpAddress: props.help.address,
     ...(props.help.owner !== undefined && { ownerName: props.help.owner }),
+    // Open sign-up sites are public: "the {Site} team", never a person, and no Teams check (E4c).
+    publicSite: accountCreation.mode === 'open',
   };
   const words: MessageWords = { siteName, codeLifetimeMinutes: lifetime, helpAddress: props.help.address };
   const emailCodeEnabled = props.emailCodeEnabled ?? true;
@@ -574,7 +576,6 @@ export function SignIn(props: SignInProps) {
   switch (view.name) {
     case 'email':
       bottom.access = props.reauth ? undefined : accessLine();
-      bottom.notice = true;
       body = (
         <form noValidate onSubmit={onSubmit(() => requireEmail() && (passkeysEnabled ? startPasskey() : go({ name: 'password', challenge: false })))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
@@ -1098,6 +1099,7 @@ export function SignIn(props: SignInProps) {
   return (
     <Card
       name="sign-in"
+      siteName={siteName}
       view={view.name}
       theme={theme}
       bottom={bottom}

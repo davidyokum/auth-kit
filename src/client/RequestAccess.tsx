@@ -96,6 +96,7 @@ export function RequestAccess(props: RequestAccessProps) {
   return (
     <Card
       name="request-access"
+      siteName={siteName}
       view={sent ? 'sent' : 'form'}
       theme={theme}
       bottom={sent ? {} : { back: { label: SIGN_IN.backToSignIn, onClick: () => navigate(signInHref) } }}

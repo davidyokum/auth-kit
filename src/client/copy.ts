@@ -19,11 +19,21 @@ export interface CopyContext {
   helpAddress: string;
   /** The person who looks after the site, named when the family names owners (`theme.help.named`). */
   ownerName?: string;
+  /**
+   * A public site (open sign-up): it never names a person, so it says "the {Site} team" and leaves out
+   * the Teams check, whatever the family (register E4c).
+   */
+  publicSite?: boolean;
+}
+
+/** Whether the screens name the site's owner: families that name owners, on sites that aren't public. */
+export function namesOwner(c: CopyContext): boolean {
+  return c.theme.help.named && !c.publicSite && Boolean(c.ownerName);
 }
 
 /** "Jordan Lee", or "the Example Reports team" (Card Studio's `team`). */
 export function team(c: CopyContext): string {
-  return c.theme.help.named && c.ownerName ? c.ownerName : `the ${c.siteName} team`;
+  return namesOwner(c) ? c.ownerName! : `the ${c.siteName} team`;
 }
 
 /** The same, at the start of a sentence (Card Studio's `Team`). */
@@ -256,7 +266,7 @@ export const CONTACT = {
   /** Before the help address: "Email apps-help@…." */
   email: 'Email',
   /** "Jordan Lee looks after Example Reports.", in families that name owners. */
-  looksAfter: (c: CopyContext) => (c.theme.help.named && c.ownerName ? `${c.ownerName} looks after ${c.siteName}.` : null),
+  looksAfter: (c: CopyContext) => (namesOwner(c) ? `${c.ownerName} looks after ${c.siteName}.` : null),
   neverSend: 'Never send a password or code.',
 } as const;
 
@@ -268,7 +278,7 @@ export function contactLines(c: CopyContext, options: { teams?: boolean } = {}):
     address: c.helpAddress,
     lines: [
       ...(named ? [named] : []),
-      ...(options.teams === true && c.theme.help.teamsCheck ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
+      ...(options.teams === true && c.theme.help.teamsCheck && !c.publicSite ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
       CONTACT.neverSend,
     ],
   };
