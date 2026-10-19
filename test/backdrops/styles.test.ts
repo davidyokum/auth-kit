@@ -2,6 +2,7 @@
  * Every style: deterministic from its seed, distinct across seeds and families, and cheap per frame
  * (a budget of canvas work, a time budget for the JavaScript, and no allocation on the per-frame path).
  */
+import './preload.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BACKDROP_FAMILY_IDS } from '../../src/backdrops/families.js';
 import { STYLE_MODULES } from '../../src/backdrops/styles/registry.js';

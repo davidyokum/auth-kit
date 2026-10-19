@@ -2,6 +2,7 @@
  * Everything the renderer needs from the browser, behind one interface, so tests can drive the
  * frame loop, visibility, reduced motion, and the pointer by hand.
  */
+import { type SubjectEnvironment, browserSubjectEnvironment } from './subjects.js';
 import type { CanvasFactory } from './frame.js';
 
 export interface PointerLike {
@@ -41,7 +42,16 @@ export interface BackdropHost {
   readonly onViewportChange: (callback: () => void) => () => void;
   readonly createCanvas: CanvasFactory;
   readonly loadImage: (src: string) => Promise<Drawable>;
+  /** The browser asked to save data (`navigator.connection.saveData`). Absent: no. */
+  readonly saveData?: () => boolean;
+  /** The device reports little memory (`navigator.deviceMemory` of 2 GB or less). Absent: no. */
+  readonly lowMemory?: () => boolean;
+  /** Where subject rotation keeps this browser's tour (`localStorage`) and draws its chance. Absent: no storage (a tour falls back to the subject of the day). */
+  readonly subjectEnvironment?: () => SubjectEnvironment;
 }
+
+/** `navigator.deviceMemory` at or below this (GB) draws a still frame. */
+export const LOW_MEMORY_GB = 2;
 
 const noop = () => undefined;
 
@@ -120,6 +130,15 @@ export function browserHost(): BackdropHost {
       canvas.height = height;
       return canvas;
     },
+    saveData() {
+      const connection = (win.navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+      return connection?.saveData === true;
+    },
+    lowMemory() {
+      const memory = (win.navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+      return typeof memory === 'number' && memory <= LOW_MEMORY_GB;
+    },
+    subjectEnvironment: browserSubjectEnvironment,
     loadImage(src) {
       return new Promise((resolve, reject) => {
         const image = new Image();

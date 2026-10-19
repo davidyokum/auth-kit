@@ -1,3 +1,4 @@
+import './preload.js';
 // @vitest-environment jsdom
 /**
  * The dev-only picker: nine variations behind the real card, shuffle, style filter, family preview,

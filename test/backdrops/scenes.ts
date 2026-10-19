@@ -2,6 +2,7 @@
  * Shared scenes for the backdrop tests: a style version drawn into a recording canvas through the
  * same setup the renderer builds, frame by frame, with a scripted pointer and tap.
  */
+import './preload.js';
 import { buildSetup, layerFactory, resolveArt } from '../../src/backdrops/frame.js';
 import type { FrameInput, StyleInstance } from '../../src/backdrops/styles/define.js';
 import { STYLE_MODULES } from '../../src/backdrops/styles/registry.js';

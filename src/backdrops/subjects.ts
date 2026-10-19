@@ -55,7 +55,7 @@ const PICKED = new Map<string, PickedSubject>();
 
 /** The browser's environment, safely: storage that throws on access counts as none. */
 export function browserSubjectEnvironment(): SubjectEnvironment {
-  let storage: SubjectEnvironment['storage'] = null;
+  let storage: SubjectEnvironment['storage'];
   try {
     storage = typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
   } catch {

@@ -1,3 +1,4 @@
+import './preload.js';
 // @vitest-environment jsdom
 /**
  * `<Backdrop>`: server-renders as a plain block, draws in the browser behind its children, stays out

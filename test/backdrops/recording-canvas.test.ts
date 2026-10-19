@@ -2,6 +2,7 @@
  * The recording canvas's text calls: `fillText` is recorded into the hash, and `measureText` gives
  * deterministic widths (characters × 0.55 × the font's pixel size), so lettered styles are frozen too.
  */
+import './preload.js';
 import { describe, expect, it } from 'vitest';
 import { nullContext, RecordingCanvas } from './recording-canvas.js';
 

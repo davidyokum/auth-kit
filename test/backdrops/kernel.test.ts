@@ -1,3 +1,4 @@
+import './preload.js';
 import { describe, expect, it } from 'vitest';
 import { contrastRatio, fromOklab, mix, over, parseHex, relativeLuminance, rgba, toHex, toOklab } from '../../src/backdrops/kernel/v1/color.js';
 import { createNoise } from '../../src/backdrops/kernel/v1/noise.js';

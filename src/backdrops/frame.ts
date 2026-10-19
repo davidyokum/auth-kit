@@ -8,6 +8,7 @@ import { defaultCardRect } from './card.js';
 import type { Ctx2D, Layer, StyleInstance, StyleSetup, StyleVersion } from './styles/define.js';
 import { type BackdropStyleId, resolveStyleVersion } from './styles/registry.js';
 import type { BackdropStyleModule } from './styles/define.js';
+import type { BackdropSubjectOptions } from './subjects.js';
 import type { BackdropFamily, BackdropImage, BackdropPalette, BackdropPointer, BackdropRect } from './types.js';
 
 /** What to draw. */
@@ -23,6 +24,13 @@ export interface BackdropArtOptions {
   palette?: Partial<BackdropPalette>;
   /** `painted` only: the image. */
   image?: BackdropImage;
+  /**
+   * Styles with subjects (County Survey, River Basins, Star Chart): how the subject rotates each visit
+   * (register E3; default a tour, kept in this browser only). The seed still locks the look.
+   */
+  subject?: BackdropSubjectOptions;
+  /** The site's name, for styles that letter it (Yokum magnetic's falling title). */
+  siteName?: string;
 }
 
 export type CanvasFactory = (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas;

@@ -2,6 +2,7 @@
  * yokum-magnetic's toy: the site's name in letters that fall when the pointer touches them, and the
  * rose magnet (shown only while a letter is away) that springs them all home on a tap.
  */
+import './preload.js';
 import { describe, expect, it } from 'vitest';
 import type { FrameInput } from '../../src/backdrops/styles/define.js';
 import { nullContext } from './recording-canvas.js';

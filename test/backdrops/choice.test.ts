@@ -1,6 +1,7 @@
 /**
  * Choosing and locking a backdrop, and the card's contrast guarantee.
  */
+import './preload.js';
 import { describe, expect, it } from 'vitest';
 import {
   BACKDROP_FAMILIES,
@@ -120,25 +121,25 @@ describe('the card’s place', () => {
 });
 
 describe('drawBackdropStill', () => {
-  it('draws a still frame into any 2D context, the same every time, with nothing over the art', () => {
-    const draw = () => {
+  it('draws a still frame into any 2D context, the same every time, with nothing over the art', async () => {
+    const draw = async () => {
       const canvas = new RecordingCanvas(640, 400);
       const ctx = canvas.getContext('2d');
-      drawBackdropStill(ctx as unknown as CanvasRenderingContext2D, { style: 'aurora', seed: 'still', family: 'unc', width: 320, height: 200, pixelRatio: 2, createCanvas: recordingCanvasFactory() });
+      await drawBackdropStill(ctx as unknown as CanvasRenderingContext2D, { style: 'aurora', seed: 'still', family: 'unc', width: 320, height: 200, pixelRatio: 2, createCanvas: recordingCanvasFactory() });
       return ctx;
     };
-    const ctx = draw();
+    const ctx = await draw();
     // Aurora's frame is its field and its grain: two image copies, and no veil over the card.
     expect(ctx.counts.images).toBe(2);
-    expect(draw().counts).toEqual(ctx.counts);
+    expect((await draw()).counts).toEqual(ctx.counts);
   });
 
-  it('refuses bad seeds, families, and palettes', () => {
+  it('refuses bad seeds, families, and palettes', async () => {
     const base = { style: 'aurora' as const, width: 10, height: 10, createCanvas: recordingCanvasFactory() };
     const ctx = new RecordingCanvas().getContext('2d') as unknown as CanvasRenderingContext2D;
-    expect(() => drawBackdropStill(ctx, { ...base, seed: '' })).toThrow(/seed/);
-    expect(() => drawBackdropStill(ctx, { ...base, seed: 'x', family: 'acme' as never })).toThrow(/family/);
-    expect(() => drawBackdropStill(ctx, { ...base, seed: 'x', palette: { page: 'white' } })).toThrow(/palette.page/);
+    await expect(drawBackdropStill(ctx, { ...base, seed: '' })).rejects.toThrow(/seed/);
+    await expect(drawBackdropStill(ctx, { ...base, seed: 'x', family: 'acme' as never })).rejects.toThrow(/family/);
+    await expect(drawBackdropStill(ctx, { ...base, seed: 'x', palette: { page: 'white' } })).rejects.toThrow(/palette.page/);
   });
 });
 

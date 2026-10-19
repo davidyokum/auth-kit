@@ -7,6 +7,7 @@
  * Adding a version: run `AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts` once.
  * It records hashes for versions that have none, and never rewrites an existing one.
  */
+import './preload.js';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

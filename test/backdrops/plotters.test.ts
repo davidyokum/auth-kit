@@ -3,6 +3,7 @@
  * desktop and phone sizes without an error, the plot is finished by the version's `settlesAt`, the host's
  * subject choice is honoured (and an unknown one falls back to the seed), and the readout and taps work.
  */
+import './preload.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildSetup, layerFactory, resolveArt } from '../../src/backdrops/frame.js';
 import type { StyleSetup } from '../../src/backdrops/styles/define.js';
