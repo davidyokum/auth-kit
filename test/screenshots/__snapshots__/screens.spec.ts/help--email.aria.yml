@@ -1,0 +1,16 @@
+- heading "Can’t get into your email?" [level=1]
+- paragraph: We can’t help you get back into your email. For that, contact your agency’s IT help desk.
+- list:
+  - listitem: Have your passkey, or your password and authenticator app? You can still sign in to Example Reports. Go back and use one of those.
+  - listitem: Moved to a new email address for good? Email help@example.org from the new address. After confirming it’s you, Jordan Lee will move your account to it.
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@example.org":
+    - /url: mailto:help@example.org
+  - text: .
+- paragraph: Jordan Lee looks after Example Reports.
+- paragraph: Never send a password or code.
+- status
+- button "Back"
+- paragraph: This site is managed by the NC Office of State Budget and Management

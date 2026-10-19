@@ -1,0 +1,5 @@
+- heading "You’re signed out everywhere" [level=1]
+- paragraph: You’ve been signed out of Example Reports on all your devices.
+- link "Sign in again":
+  - /url: /sign-in
+- paragraph: This site is managed by the NC Office of State Budget and Management

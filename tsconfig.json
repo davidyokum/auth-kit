@@ -20,5 +20,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "test", "tsup.config.ts", "tsup.lambda.config.ts", "vitest.config.ts"]
+  "include": ["src", "test", "tsup.config.ts", "tsup.lambda.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

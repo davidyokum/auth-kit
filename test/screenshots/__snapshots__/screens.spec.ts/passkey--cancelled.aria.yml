@@ -1,0 +1,18 @@
+- heading "Use your passkey" [level=1]
+- paragraph: Confirm with your face, fingerprint, or device PIN when your browser asks.
+- paragraph:
+  - text: Signing in as
+  - strong: ada@example.org
+  - button "Change email address"
+- status:
+  - paragraph: We didn’t get a passkey. Try again, or use another way below.
+- button "Try again"
+- paragraph: Passkey on your phone? Choose the phone option in the window that opens.
+- list:
+  - listitem:
+    - button "Use a password instead"
+  - listitem:
+    - button "Email me a code instead"
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

@@ -1,0 +1,16 @@
+- heading "Didn’t get a code?" [level=1]
+- list:
+  - listitem: Wait a minute.
+  - listitem: Check your junk or quarantine folder for an email from Example Reports.
+  - listitem: /Send a new code and use the newest one\. It works for \d+ minutes\./
+- paragraph: Accounts with an authenticator app can’t get emailed codes. Use your password and authenticator code, or your passkey.
+- button "Send a new code"
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@yokum.app":
+    - /url: mailto:help@yokum.app
+  - text: .
+- paragraph: Never send a password or code.
+- status
+- button "Back"

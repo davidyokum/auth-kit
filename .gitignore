@@ -15,3 +15,6 @@ test/e2e/app/next-env.d.ts
 test/e2e/app/AGENTS.md
 # Preview mode's standalone files (npm run build:preview): release assets, never committed or packed
 release/
+# Playwright output (npm run test:screenshots)
+test-results/
+playwright-report/

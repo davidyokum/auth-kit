@@ -1,0 +1,21 @@
+- heading "Create your account" [level=1]
+- paragraph: You’ll confirm your address with a code.
+- text: Email address
+- textbox "Email address":
+  - /placeholder: name@example.com
+- paragraph:
+  - text: By creating an account you agree to the Example Reports
+  - link "terms":
+    - /url: /terms
+  - text: and
+  - link "privacy notice":
+    - /url: /privacy
+  - text: .
+- button "Continue"
+- paragraph: Protected against automated sign-ups.
+- status
+- paragraph:
+  - text: Already have an account?
+  - link "Sign in":
+    - /url: /sign-in
+- paragraph: This site is managed by the NC Office of State Budget and Management

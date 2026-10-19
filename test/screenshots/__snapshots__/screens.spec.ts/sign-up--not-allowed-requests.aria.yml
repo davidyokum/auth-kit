@@ -1,0 +1,23 @@
+- alert:
+  - link "Example Reports accounts are for example.org addresses. Use one of those, or ask for access.":
+    - /url: "#_akp1-r_0_-email"
+- heading "Create your account" [level=1]
+- text: Email address
+- paragraph: Use your example.org email address
+- paragraph: "Error: Example Reports accounts are for example.org addresses. Use one of those, or ask for access."
+- textbox "Email address" [invalid]:
+  - /placeholder: name@osbm.nc.gov
+  - text: ada@example.net
+- paragraph:
+  - button "Ask for access instead"
+- paragraph:
+  - link "Privacy notice":
+    - /url: /privacy
+  - text: ": what Example Reports keeps about you, and why."
+- button "Continue"
+- status
+- paragraph:
+  - text: Already have an account?
+  - link "Sign in":
+    - /url: /sign-in
+- paragraph: This site is managed by the NC Office of State Budget and Management

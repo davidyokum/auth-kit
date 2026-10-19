@@ -1,0 +1,17 @@
+- heading "Sign in to Example Reports" [level=1]
+- text: Email address
+- textbox "Email address":
+  - /placeholder: name@osbm.nc.gov
+- button "Continue"
+- list:
+  - listitem:
+    - button "Use a password instead"
+  - listitem:
+    - button "Email me a code instead"
+- status
+- paragraph:
+  - text: New to Example Reports?
+  - link "Request access":
+    - /url: /request-access
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

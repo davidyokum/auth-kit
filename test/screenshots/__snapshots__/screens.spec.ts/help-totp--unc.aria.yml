@@ -1,0 +1,18 @@
+- heading "Lost your authenticator app?" [level=1]
+- paragraph: Codes can’t be emailed to accounts that use an authenticator app, so Jordan Lee has to reset it on your Example Reports account. Then you can set up a new one.
+- list:
+  - listitem: Email help@example.org from the address you sign in with, and say you’ve lost your authenticator app.
+  - listitem: Jordan Lee will confirm it’s you by phone or in person, then reset it on your account.
+  - listitem: Sign in with your password, then set up a new authenticator app, or a passkey instead.
+- paragraph: We can reset your Example Reports account, but we can’t help with the app itself. For that, try the app’s own help, or the UNC IT help desk. Saved a passkey? You can still sign in with it.
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@example.org":
+    - /url: mailto:help@example.org
+  - text: .
+- paragraph: Jordan Lee looks after Example Reports.
+- paragraph: Never send a password or code.
+- status
+- button "Back"
+- paragraph: This site is managed by UNC-Chapel Hill

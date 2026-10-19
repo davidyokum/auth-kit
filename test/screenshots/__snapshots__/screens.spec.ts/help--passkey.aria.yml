@@ -1,0 +1,22 @@
+- heading "Can’t use your passkey?" [level=1]
+- paragraph: You can still get in with an emailed code, then make a new passkey on this device.
+- list:
+  - listitem:
+    - text: Go back and choose
+    - strong: Email me a code instead
+    - text: .
+  - listitem: Enter the 8-digit code we email you.
+  - listitem: When asked, create a new passkey.
+- paragraph: Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, your agency’s IT help desk can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.
+- button "Email me a code"
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@example.org":
+    - /url: mailto:help@example.org
+  - text: .
+- paragraph: Jordan Lee looks after Example Reports.
+- paragraph: Never send a password or code.
+- status
+- button "Back"
+- paragraph: This site is managed by the NC Office of State Budget and Management

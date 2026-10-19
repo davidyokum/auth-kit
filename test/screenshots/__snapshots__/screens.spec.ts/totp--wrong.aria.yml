@@ -1,0 +1,14 @@
+- alert:
+  - link /That code didn’t work\. Codes change every \d+ seconds, so enter the newest one\./:
+    - /url: "#_akp1-r_0_-code"
+- heading "Enter your authenticator code" [level=1]
+- paragraph: Open your authenticator app or password manager and enter the 6-digit code for Example Reports.
+- text: 6-digit code
+- paragraph: "/Error: That code didn’t work\\. Codes change every \\d+ seconds, so enter the newest one\\./"
+- textbox "6-digit code" [invalid]: /\d+/
+- button "Sign in"
+- paragraph:
+  - button "Lost your authenticator app?"
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

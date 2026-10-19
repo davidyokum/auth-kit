@@ -1,0 +1,13 @@
+- heading "Need access to Example Reports?" [level=1]
+- paragraph: Example Reports is invite-only. The Example Reports team adds people and sends each one an email invitation.
+- paragraph: Already invited? Find the email from Example Reports, then sign in with the address it was sent to.
+- paragraph:
+  - strong: Ask for an invitation
+- paragraph:
+  - text: Email
+  - link "help@yokum.app":
+    - /url: mailto:help@yokum.app
+  - text: .
+- paragraph: Never send a password or code.
+- status
+- button "Back to sign in"

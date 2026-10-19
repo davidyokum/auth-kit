@@ -1,0 +1,17 @@
+- heading "Request access to Example Reports" [level=1]
+- paragraph: Jordan Lee reviews requests. If they approve, you’ll get an email invitation.
+- text: Name
+- textbox "Name"
+- text: Email address
+- textbox "Email address":
+  - /placeholder: name@osbm.nc.gov
+- text: What do you need it for? (optional)
+- textbox "What do you need it for? (optional)"
+- paragraph:
+  - text: We use this only to decide on your request.
+  - link "Privacy notice":
+    - /url: /privacy
+- button "Send request"
+- status
+- button "Back to sign in"
+- paragraph: This site is managed by the NC Office of State Budget and Management

@@ -1,0 +1,10 @@
+- heading "Enter your authenticator code" [level=1]
+- paragraph: Open your authenticator app or password manager and enter the 6-digit code for Example Reports.
+- text: 6-digit code
+- textbox "6-digit code"
+- button "Sign in"
+- paragraph:
+  - button "Lost your authenticator app?"
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

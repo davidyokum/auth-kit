@@ -1,0 +1,14 @@
+- heading "Check your email" [level=1]
+- paragraph: /We’ve emailed ada@example\.org\. Enter the 8-digit code from that email\. It works for \d+ minutes and confirms the address is yours\./
+- paragraph: Already have an account? The email explains how to sign in instead.
+- text: 8-digit code
+- textbox "8-digit code"
+- button "Continue"
+- list:
+  - listitem:
+    - button "Send a new code"
+  - listitem:
+    - button "Use a different email address"
+- paragraph: No email after a minute? Check your junk folder, then send a new code.
+- status
+- paragraph: This site is managed by the NC Office of State Budget and Management

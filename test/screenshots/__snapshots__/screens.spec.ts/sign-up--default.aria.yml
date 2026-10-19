@@ -1,0 +1,16 @@
+- heading "Create your account" [level=1]
+- text: Email address
+- paragraph: Use your example.org email address
+- textbox "Email address":
+  - /placeholder: name@osbm.nc.gov
+- paragraph:
+  - link "Privacy notice":
+    - /url: /privacy
+  - text: ": what Example Reports keeps about you, and why."
+- button "Continue"
+- status
+- paragraph:
+  - text: Already have an account?
+  - link "Sign in":
+    - /url: /sign-in
+- paragraph: This site is managed by the NC Office of State Budget and Management

@@ -1,0 +1,16 @@
+- heading "Add an authenticator app" [level=1]
+- paragraph: You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute.
+- status
+- img "A sample QR code (it encodes nothing)"
+- paragraph: Can’t scan it? Enter this setup key in your app instead.
+- paragraph:
+  - code: JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP
+  - button "Copy setup key"
+- paragraph:
+  - link "On this device? Open the setup link.":
+    - /url: otpauth://totp/Example%20Reports:ada%40example.org?secret=JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP&issuer=Example%20Reports
+- text: 6-digit code
+- textbox "6-digit code"
+- button "Continue"
+- status
+- paragraph: This site is managed by the NC Office of State Budget and Management
