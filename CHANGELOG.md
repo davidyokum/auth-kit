@@ -30,6 +30,16 @@ Not changed: **the card's edge line on a dark page** stays faint (OSBM 2.81:1, U
 
 A site that passed `nameButton` to `SignUp` removes it (none of the known sites do). A site that draws the card on a dark page declares `color-scheme: dark` there, so Frosted thickens.
 
+### Release assets
+
+Built by CI from the tag. All three are covered by one provenance attestation (`gh attestation verify <file> --repo davidyokum/auth-kit`, verified 2026-10-19: SLSA provenance v1, built by `.github/workflows/ci.yml` at `refs/tags/v0.1.10-alpha.1`, commit `3f54fa3`). A local `npm run build:preview` of the tag reproduces both preview files byte for byte.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `auth-kit-0.1.10-alpha.1.tgz` | 1,521,504 | `2400bf9c856d0864784826a2ecc612dd4e037b1f65a6a6ceb92179093a51124f` |
+| `auth-kit-preview.js` | 390,471 (119,927 gzipped) | `e62fdae010b2284af03250c1e3368867f2fb1d2a1be47ee425cde44e7b680e1c` |
+| `auth-kit-preview-backdrops.js` | 609,204 (372,308 gzipped) | `782ee4c46fc768ab62f2b96908fce7d07b8a546f37b39aa85001e8d0a9cce3cc` |
+
 ## [0.1.10-alpha] - 2026-10-19
 
 Preview mode (register E9, [ADR 0025](docs/decisions/0025-preview-mode.md)): the real sign-in card, held at any screen and state with sample data, inert, for the Sign-in Studio, the primer's walkthrough, and screenshot tests. Pre-release. No breaking changes; `auth-kit/client`'s API and behaviour are unchanged.
