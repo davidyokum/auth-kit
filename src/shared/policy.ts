@@ -275,7 +275,7 @@ export const RESOURCE_POLICY = {
  * What each resource role can and can't do, one line each, in the app's own words: pass its noun
  * ("project") and screens say "this project". Describes the default actions.
  */
-export function resourceRoleDescriptions(noun = 'item'): Readonly<Record<ResourceRole, RoleDescription>> {
+export function resourceRoleDescriptions(noun: string): Readonly<Record<ResourceRole, RoleDescription>> {
   return {
     manager: {
       can: `See and edit this ${noun}, choose who has access to it, and invite someone new to it.`,
@@ -292,8 +292,6 @@ export function resourceRoleDescriptions(noun = 'item'): Readonly<Record<Resourc
   };
 }
 
-/** `resourceRoleDescriptions()` with the generic noun "item". */
-export const RESOURCE_ROLE_DESCRIPTIONS: Readonly<Record<ResourceRole, RoleDescription>> = resourceRoleDescriptions();
 
 /** One row of the combined comparison: a site role or a resource role, and the actions it grants. */
 export interface ResourceAccessMatrixRow {
