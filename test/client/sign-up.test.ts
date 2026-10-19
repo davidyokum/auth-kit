@@ -63,13 +63,16 @@ async function submitEmail(user: User, email = 'ada@example.org') {
 
 // No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
 const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
+// The account-change notice route is the site's own (register A10: notices are on by default); here it isn't mounted.
+const guardedFetch = (input: unknown) =>
+  String(input) === '/api/auth-kit/account-notice' ? Promise.resolve(new Response('', { status: 404 })) : noNetwork(input);
 
 beforeEach(() => {
   resetAmplifyMocks();
   window.sessionStorage.clear();
   auth.signIn.mockResolvedValue(CODE_SENT);
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
-  vi.stubGlobal('fetch', noNetwork);
+  vi.stubGlobal('fetch', guardedFetch);
 });
 afterEach(() => {
   cleanup();
@@ -284,7 +287,7 @@ describe('SignUp: the code and after', () => {
 
   it('names the owner in a named family, says when a note was emailed, and "Finish" when the site chose it', async () => {
     auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
-    const { user } = setup({ theme: 'osbm', help: { address: 'apps-help@example.org', owner: 'Jordan Lee' }, nameButton: 'finish', securityNotices: true, passkeysEnabled: false });
+    const { user } = setup({ theme: 'osbm', help: { address: 'apps-help@example.org', owner: 'Jordan Lee' }, nameButton: 'finish', notices: { fetch: vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true }))) }, passkeysEnabled: false });
     await submitEmail(user, 'ada@osbm.example.org');
     await user.type(await screen.findByLabelText('8-digit code'), '12345678{Enter}');
     await heading('Your name');

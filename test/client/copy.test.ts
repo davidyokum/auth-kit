@@ -217,6 +217,8 @@ function emailTexts(): { texts: Text[]; rendered: Set<string> } {
       ],
       ['emailChangedEmail', emails.emailChangedEmail(site, { newEmail: 'new@example.org', at })],
       ['emailChangedEmail', emails.emailChangedEmail(site, { newEmail: 'new@example.org', at, byAdmin: OWNER })],
+      ['passkeyAddedEmail', emails.passkeyAddedEmail(site, { at })],
+      ['passwordChangedEmail', emails.passwordChangedEmail(site, { at })],
       ['accountDeletedEmail', emails.accountDeletedEmail(site, { email: EMAIL, at, comeBack: 'sign-up' })],
       ['accountDeletedEmail', emails.accountDeletedEmail(site, { email: EMAIL, at, byAdmin: OWNER, items: 'Your reports stay with the team.', comeBack: 'invite' })],
     ];

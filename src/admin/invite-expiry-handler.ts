@@ -89,7 +89,7 @@ export function inviteExpiryConfig(env: Readonly<Record<string, string | undefin
     if (fallbackEmail !== undefined && !EMAIL_RE.test(fallbackEmail)) problems.push(`${INVITE_EXPIRY_ENV.ownerWarningFallback} must be an email address`);
     ownerWarnings = {
       siteName: siteName ?? '',
-      family: (isThemeFamily(family) ? family : 'personal') as ThemeFamily,
+      family: isThemeFamily(family) ? family : 'personal',
       helpEmail: helpEmail ?? '',
       from: from ?? '',
       ...(signInUrl !== undefined && { signInUrl }),

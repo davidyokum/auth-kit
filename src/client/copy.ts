@@ -453,6 +453,9 @@ export const STATUS = {
   authenticatorOn: 'Your authenticator is on.',
   passwordSaved: 'Password saved.',
   passwordChanged: 'Password changed.',
+  /** After a notice the site's route confirmed it sent (register A10). */
+  passkeySavedEmailed: 'Passkey saved. We’ve emailed you a note about this.',
+  passwordChangedEmailed: 'Password changed. We’ve emailed you a note about this.',
   signingOutEverywhere: 'Signing out everywhere…',
 } as const;
 

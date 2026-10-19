@@ -441,6 +441,8 @@ export const ACCOUNT_CREATION_POLICY = {
      */
     requestSite: { limit: 100, windowMinutes: 24 * 60 },
     emailChangePerAccount: { limit: 5, windowMinutes: 60 },
+    /** Account-change notices (a passkey added, a password changed) one account may ask for an hour. */
+    noticePerAccount: { limit: 6, windowMinutes: 60 },
     /** Codes sent to one new address an hour, whichever accounts ask (one inbox can't be flooded by many accounts). */
     emailChangePerTarget: { limit: 5, windowMinutes: 60 },
   } satisfies Record<string, RateLimitRule>,

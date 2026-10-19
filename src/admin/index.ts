@@ -78,6 +78,8 @@ export {
   accessRequestDigestEmail,
   DIGEST_MAX_LISTED,
   emailChangedEmail,
+  passkeyAddedEmail,
+  passwordChangedEmail,
   accountDeletedEmail,
   signInCodeEmail,
   signUpCodeEmail,

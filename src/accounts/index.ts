@@ -78,3 +78,12 @@ export {
   type NormalizedAccountCreation,
 } from '../shared/account-creation.js';
 export { ACCOUNT_CREATION_POLICY, CODE_LIFETIME_POLICY, codeLifetimeMinutes } from '../shared/policy.js';
+export {
+  createAccountNoticeRoute,
+  ACCOUNT_NOTICE_EVENTS,
+  ACCOUNT_NOTICE_PATH,
+  type AccountNoticeEvent,
+  type AccountNoticeRoute,
+  type AccountNoticeRouteConfig,
+  type AccountNoticeBody,
+} from './notices.js';

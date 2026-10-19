@@ -58,6 +58,7 @@ const findSummary = () => screen.findByRole('alert');
 const inlineError = (field: HTMLElement) => document.getElementById(`${field.id}-error`)?.textContent ?? null;
 const submitButtons = () => [...root().querySelectorAll('button[type="submit"]')].map((b) => b.textContent);
 const slotText = (name: string) => root().querySelector(`[data-auth-kit-slot="${name}"]`)?.textContent ?? null;
+const noticeSent = () => vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
 const emailField = () => screen.getByLabelText<HTMLInputElement>('Email address');
 // Buttons with screen-reader-only words ("Change<span> email address</span>"). Browsers keep the
 // span's leading space in the accessible name; jsdom's dom-accessibility-api drops it.
@@ -111,12 +112,15 @@ function unstubPasskeyBrowser() {
 
 // No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
 const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
+// The account-change notice route is the site's own (register A10: notices are on by default); here it isn't mounted.
+const guardedFetch = (input: unknown) =>
+  String(input) === '/api/auth-kit/account-notice' ? Promise.resolve(new Response('', { status: 404 })) : noNetwork(input);
 
 beforeEach(() => {
   resetAmplifyMocks();
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
   window.localStorage.clear();
-  vi.stubGlobal('fetch', noNetwork);
+  vi.stubGlobal('fetch', guardedFetch);
 });
 afterEach(() => {
   cleanup();
@@ -463,12 +467,12 @@ describe('trouble signing in', () => {
   });
 
   it('a help screen’s action asks for the address when it wasn’t typed yet', async () => {
-    const { user } = setup();
+    const { user } = setup({ notices: false });
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.getByText('We’ll email you a code so you can choose a new one.')).toBeTruthy();
-    // Said only where the site sends the notice.
+    // Said only where the site sends the notice (on by default, register A10; this site turned it off).
     expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Send a reset code' }));
     expect(summary().textContent).toBe('Enter your email address');
@@ -485,7 +489,7 @@ describe('trouble signing in', () => {
 
   it('the help screens’ buttons: an emailed code (only where the pool has them) and a new code', async () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
-    const { user } = setup({ codeLifetimeMinutes: 10, securityNotices: true });
+    const { user } = setup({ codeLifetimeMinutes: 10 });
     await enterEmail(user);
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
@@ -879,7 +883,8 @@ describe('emailed code (the backstop) and joining', () => {
   it('joining with a password: Create a password (15 or more), Add an authenticator app, then You’re set up', async () => {
     auth.signIn.mockResolvedValue(next({ signInStep: 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE' }));
     auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
-    const { user, navigate } = setup({ securityNotices: true }, [FRESH_INVITE]);
+    const notice = noticeSent();
+    const { user, navigate } = setup({ notices: { fetch: notice } }, [FRESH_INVITE]);
     await askForCode(user);
     await user.type(screen.getByLabelText('8-digit code'), '12345678{Enter}');
 
@@ -908,6 +913,8 @@ describe('emailed code (the backstop) and joining', () => {
 
     await heading('You’re set up');
     expect(screen.getByText('Next time, sign in with your password and a code from your authenticator app. We’ve emailed you a note about this.')).toBeTruthy();
+    // The note is said only because the site's notice route answered yes (register A10).
+    expect(notice).toHaveBeenCalledWith('/api/auth-kit/account-notice', expect.objectContaining({ method: 'POST', body: JSON.stringify({ event: 'password-changed' }) }));
     await user.click(screen.getByRole('button', { name: 'Continue to Example Reports' }));
     expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes');
   });

@@ -17,6 +17,8 @@ import {
   signInWithPassword,
 } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import type { AccountNoticeEvent } from '../shared/notices.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
 import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
 import { hrefOr } from './href.js';
@@ -99,10 +101,12 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   /** Where "Need access? Request it." goes. Default `/request-access`. A same-site path or an http(s) URL (anything else throws). */
   requestAccessHref?: string;
   /**
-   * The site emails security notices (a passkey added, a password changed; REPORT §5.2f), so the
-   * screens may say "We've emailed you a note about this." Default false: auth-kit doesn't send them yet.
+   * Account-change notices (register A10: on by default): after the first passkey or password, or a
+   * password reset, `SignIn` asks the site's notice route (`createAccountNoticeRoute`, mounted at
+   * `/api/auth-kit/account-notice` unless `url` says otherwise) to email the account, and says "We've
+   * emailed you a note about this." only when it did. `false` for a site that doesn't send them.
    */
-  securityNotices?: boolean;
+  notices?: AccountNotices;
   /** The `next` search parameter. Goes through `safeRedirect` (same-site paths only). */
   next?: string | null;
   /** Where to go when `next` is missing or unsafe. Default `/`. */
@@ -141,7 +145,7 @@ type View =
   | { name: 'check-failed' }
   | { name: 'enroll-authenticator' }
   | { name: 'first-credential' }
-  | { name: 'done'; how: FirstCredential }
+  | { name: 'done'; how: FirstCredential; emailed: boolean }
   | { name: 'offer-passkey' }
   | { name: 'trouble' }
   /** `askEmail`: the address wasn't typed when the screen opened, so its action asks for it (and keeps asking while it's typed). */
@@ -258,6 +262,8 @@ export function SignIn(props: SignInProps) {
   const signUpHref = hrefOr('signUpHref', props.signUpHref, '/sign-up');
   const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
   const passkeyOptions = props.passkey;
+  const notices = useMemo(() => resolveNotices(props.notices, 'SignIn'), [props.notices]);
+  const pendingNotice = useRef<AccountNoticeEvent | null>(null);
   const uid = useId();
   const ids = { email: `${uid}-email`, password: `${uid}-password`, code: `${uid}-code`, newPassword: `${uid}-new-password` };
   const rootRef = useRef<HTMLDivElement>(null);
@@ -319,6 +325,11 @@ export function SignIn(props: SignInProps) {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
     userIdRef.current = (await currentUser())?.userId;
+    if (pendingNotice.current) {
+      const event = pendingNotice.current;
+      pendingNotice.current = null;
+      await sendAccountNotice(notices, event);
+    }
     let factors: ClientAuthFactors | null | undefined;
     try {
       factors = await (props.loadFactors ?? fetchAuthFactors)();
@@ -344,7 +355,7 @@ export function SignIn(props: SignInProps) {
       case 'done':
         return finish();
     }
-  }, [finish, go, passkeysEnabled, props.loadFactors, props.reauth, set]);
+  }, [finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set]);
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
@@ -883,7 +894,9 @@ export function SignIn(props: SignInProps) {
                 }
                 return;
               }
-              // The new password signs them straight in; the authenticator code comes next, as usual.
+              // The new password signs them straight in; the authenticator code comes next, as usual. Once
+              // they're in, the account gets the "password changed" notice (register A10).
+              pendingNotice.current = 'password-changed';
               await attempt(firstFactor('password', () => signInWithPassword(email, password)), 'sign-in', STATUS.signingIn);
             })();
           })}
@@ -952,7 +965,9 @@ export function SignIn(props: SignInProps) {
           issuer={siteName}
           accountName={email.trim()}
           headingLevel={level}
-          onDone={(how) => go({ name: 'done', how })}
+          onDone={(how) => {
+            void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
+          }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
           classNames={classNames}
@@ -966,7 +981,7 @@ export function SignIn(props: SignInProps) {
           {heading(FIRST_VISIT.doneHeading)}
           <Text classNames={classNames}>
             {view.how === 'password' ? FIRST_VISIT.donePassword : FIRST_VISIT.donePasskey(c)}
-            {props.securityNotices ? ` ${FIRST_VISIT.emailedNote}` : ''}
+            {view.emailed ? ` ${FIRST_VISIT.emailedNote}` : ''}
           </Text>
           <Actions classNames={classNames}>
             <Button classNames={classNames} onClick={finish}>
@@ -987,9 +1002,10 @@ export function SignIn(props: SignInProps) {
               classNames={classNames}
               disabled={busy}
               onClick={() =>
-                void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then((r) => {
+                void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then(async (r) => {
                   if (r.ok) {
                     set({ status: STATUS.passkeySaved });
+                    await sendAccountNotice(notices, 'passkey-added');
                     finish();
                   }
                 })
@@ -1033,7 +1049,7 @@ export function SignIn(props: SignInProps) {
       break;
     case 'help': {
       bottom.back = { label: SIGN_IN.back, onClick: () => go({ name: 'trouble' }) };
-      const screen = helpScreen(view.topic, c, { securityNotices: props.securityNotices === true });
+      const screen = helpScreen(view.topic, c, { securityNotices: notices !== null });
       const contact = contactLines(c, { teams: screen.teams === true });
       const action = screen.button;
       const runAction = () => {

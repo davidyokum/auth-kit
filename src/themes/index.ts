@@ -517,6 +517,8 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
     '--ak-mono-ink': brand.monoInk,
   };
   switch (theme.cardStyle) {
+    case 'quiet':
+      break;
     case 'monogram':
       Object.assign(v, {
         '--ak-card-bg': '#fffefc',
