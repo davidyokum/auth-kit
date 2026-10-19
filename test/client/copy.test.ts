@@ -51,6 +51,8 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'SIGN_IN.resetCodeSub': () => [[EMAIL]],
   'SIGN_IN.checkFailed': (c) => [[c]],
   'ACCESS_LINE.inviteOnly': (c) => [[c]],
+  'ACCESS_LINE.newTo': (c) => [[c]],
+  'ACCESS_LINE.withDomains': () => [['nc.gov'], ['example.org or .edu']],
   'FIRST_VISIT.donePasskey': (c) => [[c]],
   'FIRST_VISIT.continueTo': (c) => [[c]],
   'ACCESS_HELP.heading': (c) => [[c]],
@@ -136,7 +138,9 @@ function copyTexts(): Text[] {
     out.push(
       { where: 'access line (invite, sentence)', text: `${copy.ACCESS_LINE.inviteOnly(c)} ${copy.ACCESS_LINE.askToBeAdded}` },
       { where: 'access line (invite, link)', text: `${copy.ACCESS_LINE.inviteOnly(c)} ${copy.ACCESS_LINE.needAccess}` },
-      { where: 'access line (domains, open)', text: `${copy.ACCESS_LINE.newHere} ${copy.ACCESS_LINE.createAccount}` },
+      { where: 'access line (request)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.requestAccess}` },
+      { where: 'access line (domains)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.createAccount}${copy.ACCESS_LINE.withDomains('nc.gov')}` },
+      { where: 'access line (open)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.createAccount}` },
     );
   }
   for (const family of THEME_FAMILIES) {
@@ -430,8 +434,8 @@ describe('Card Studio v4’s words', () => {
   });
 
   it('the access lines', () => {
-    expect(copy.ACCESS_LINE.request).toBe('Need access? Request it.');
-    expect(`${copy.ACCESS_LINE.newHere} ${copy.ACCESS_LINE.createAccount}`).toBe('New here? Create an account');
+    expect(`${copy.ACCESS_LINE.newTo(personal)} ${copy.ACCESS_LINE.requestAccess}`).toBe('New to Example Reports? Request access');
+    expect(`${copy.ACCESS_LINE.newTo(personal)} ${copy.ACCESS_LINE.createAccount}${copy.ACCESS_LINE.withDomains('nc.gov')}`).toBe('New to Example Reports? Create an account with your nc.gov email address.');
     expect(copy.ACCESS_LINE.inviteOnly(personal)).toBe('New to Example Reports? It’s invite-only.');
     expect(copy.ACCESS_LINE.askToBeAdded).toBe('Ask the person who runs it to add you.');
     expect(copy.ACCESS_LINE.needAccess).toBe('Need access?');

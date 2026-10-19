@@ -115,11 +115,13 @@ export const SIGN_IN = {
   notNow: 'Not now',
 } as const;
 
-/** The card's account-creation line (Card Studio's ACCESSLINE; register D1). */
+/** The card's account-creation line, one per mode, so the card says which one applies (Card Studio's ACCESSLINE; register D1). */
 export const ACCESS_LINE = {
-  request: 'Need access? Request it.',
-  newHere: 'New here?',
+  newTo: (c: CopyContext) => `New to ${c.siteName}?`,
+  requestAccess: 'Request access',
   createAccount: 'Create an account',
+  /** Sign-up for approved domains: "… with your nc.gov email address." */
+  withDomains: (domains: string) => ` with your ${domains} email address.`,
   inviteOnly: (c: CopyContext) => `New to ${c.siteName}? It’s invite-only.`,
   needAccess: 'Need access?',
   askToBeAdded: 'Ask the person who runs it to add you.',

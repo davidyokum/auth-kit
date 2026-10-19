@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { safeRedirect } from '../server/redirect.js';
-import { type AccountCreationSettings, normalizeAccountCreation } from '../shared/account-creation.js';
+import { type AccountCreationSettings, domainsInWords, normalizeAccountCreation } from '../shared/account-creation.js';
 import { codeLifetimeMinutes as checkedLifetime } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import {
@@ -554,18 +554,22 @@ export function SignIn(props: SignInProps) {
     switch (accountCreation.mode) {
       case 'request':
         return line(
-          <a href={requestAccessHref} {...slot(classNames, 'link')}>
-            {ACCESS_LINE.request}
-          </a>,
+          <>
+            {ACCESS_LINE.newTo(c)}{' '}
+            <a href={requestAccessHref} {...slot(classNames, 'link')}>
+              {ACCESS_LINE.requestAccess}
+            </a>
+          </>,
         );
       case 'domains':
       case 'open':
         return line(
           <>
-            {ACCESS_LINE.newHere}{' '}
+            {ACCESS_LINE.newTo(c)}{' '}
             <a href={signUpHref} {...slot(classNames, 'link')}>
               {ACCESS_LINE.createAccount}
             </a>
+            {accountCreation.mode === 'domains' ? ACCESS_LINE.withDomains(domainsInWords(accountCreation.domains)) : null}
           </>,
         );
       case 'invite':

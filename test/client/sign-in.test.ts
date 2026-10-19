@@ -312,16 +312,21 @@ describe('the card', () => {
     cleanup();
 
     setup({ accountCreation: { mode: 'request' } });
-    expect(slotText('access')).toBe('Need access? Request it.');
-    expect(screen.getByRole('link', { name: 'Need access? Request it.' }).getAttribute('href')).toBe('/request-access');
+    expect(slotText('access')).toBe('New to Example Reports? Request access');
+    expect(slotText('access')).toBe('New to Example Reports? Request access');
+    expect(screen.getByRole('link', { name: 'Request access' }).getAttribute('href')).toBe('/request-access');
     cleanup();
     setup({ accountCreation: { mode: 'request' }, requestAccessHref: '/ask-for-access' });
-    expect(screen.getByRole('link', { name: 'Need access? Request it.' }).getAttribute('href')).toBe('/ask-for-access');
+    expect(screen.getByRole('link', { name: 'Request access' }).getAttribute('href')).toBe('/ask-for-access');
     cleanup();
 
-    for (const accountCreation of [{ mode: 'domains', domains: ['example.org'] }, { mode: 'open' }] as const) {
+    // One line per mode, so the card says which one applies (register D1).
+    for (const [accountCreation, words] of [
+      [{ mode: 'domains', domains: ['example.org', 'edu'] }, 'New to Example Reports? Create an account with your example.org or .edu email address.'],
+      [{ mode: 'open' }, 'New to Example Reports? Create an account'],
+    ] as const) {
       setup({ accountCreation });
-      expect(slotText('access')).toBe('New here? Create an account');
+      expect(slotText('access')).toBe(words);
       expect(screen.getByRole('link', { name: 'Create an account' }).getAttribute('href')).toBe('/sign-up');
       cleanup();
       setup({ accountCreation, signUpHref: '/join' });
