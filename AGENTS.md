@@ -12,7 +12,8 @@ A public TypeScript package (ESM, Node 22+) that implements David Yokum's login 
 - **No AWS calls** from code or tests that create, modify, or delete anything. Tests use the local issuer, the fake Cognito, and CDK synthesis, and run with `AWS_BLOCKED_ENV` (`test/package/no-aws.test.ts` is the canary). Never send a token to a server without a preloaded key set: its verifier would fetch the pool's JWKS from Cognito.
 - **Verify API shapes** against the installed packages' type definitions and AWS documentation. Where Amplify lacks a setting, use an L1 override and record why (see `docs/decisions/0006-*`).
 - **Fail closed.** "Couldn't check" is 503 (`AuthUnavailableError`), never a pass and never "signed out".
-- **Help addresses** are role-based and required: never commit a real one; examples use the placeholder `apps-help@replace-me.invalid` (which the code refuses) or `help@example.org` in tests.
+- **Help addresses** are role-based and required (a person's own only with `{ address, personal: true }`, register E4c): never commit a real one, except the personal family's decided defaults in `src/themes` (`help@yokum.app`, `sign-in@yokum.app`; register F11); examples use the placeholder `apps-help@replace-me.invalid` (which the code refuses) or `help@example.org` in tests.
+- **Senders** are the site's reply-able `sign-in@` mailbox with the family's display name, never `noreply@` (register A10, E4a); the preset, the SES mailer, and the CDK jobs refuse anything else.
 - **Capabilities, not role names**, in any example or code path. The resource roles' site floor is by capability too (`RESOURCE_SITE_FLOOR`).
 - **Backdrops are decorative, never security.** No code or copy asks anyone to recognize a picture (ADR 0021). Released style versions and `kernel/v1` never change; see Layout.
 - Write files with escapes intact: some tools turn `\uXXXX` escapes into literal characters, which breaks regexes (use `String.fromCharCode` in tests).
