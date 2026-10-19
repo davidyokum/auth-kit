@@ -2,6 +2,62 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.9-alpha] - Unreleased
+
+auth-kit brought fully in line with the passwords-flow decisions register as answered on 2026-10-19 (A6, A7, A10, B1, C1, C5, D1, D3, E4a, E4c, E4d, E5, F7, F11). Pre-release. Breaking: see Migration.
+
+### Security
+
+- **Every sign-up gets the silent WAF check** (D3): the preset fails synthesis without `siteWebAclArn` in `domains` mode as well as `open`, and the sign-up route refuses requests without AWS WAF's token in both.
+- **A sign-up site must deploy the unverified-account sweep** (D3): `applyAuthStandard` fails synthesis on a `domains` or `open` pool that no `UnverifiedAccountSweep` sweeps.
+- **The standard's server rules can't be switched off on a site** (A1, A2): `createServerAuth`'s `requireFirstCredential: false` and `requireTotpForPasswordUsers: false` are accepted only in the auth matrix's server mode and throw anywhere else.
+- **Account-change notices, on by default** (A10): "A passkey was added to your account" and "Your password was changed", emailed to the account's own address by `createAccountNoticeRoute` (`auth-kit/accounts`), which the screens call after the change. The route checks the session, checks a passkey notice against the account's passkeys, and is rate-limited. ("Your email address changed" already went to the old address.)
+- **Every sender is a reply-able `sign-in@` mailbox, never `noreply@`, with the family's suffix** (A10, E4a): checked in the preset, `createSesInviteMailer`, the invite-expiry owner warnings, and the digest.
+- **A person's own help address only with an explicit acknowledgement** (E4c): `{ address, personal: true }` in config, and the same rule (an "on purpose" box) for the Super admin's Settings override.
+- **One shared web ACL per account** (F7): a deployed pool reuses it (`waf: { webAclArn }`); a pool's own ACL needs `waf: { ownWebAcl: true }` outside a sandbox.
+
+### Added
+
+- `auth-kit/themes`: `cardStyle` (`'quiet'` default, `'monogram'`, `'frosted'`, `'plain'`, `'porcelain'`; register E5, matching Card Studio's directions), `CARD_STYLES`, `cardStyleVariables`; `HelpAddressSetting`, `readHelpSetting`, `helpSettingProblems`; `senderAddressProblems`, `senderNameProblems`, `senderProblems`, `parseSender`, `formatSenderAddress`, `siteSender`, `SENDER_LOCAL_PART`; `theme.senderAddress` and `theme.help.personal`.
+- `auth-kit/accounts`: `createAccountNoticeRoute`, `ACCOUNT_NOTICE_PATH` (`/api/auth-kit/account-notice`), `ACCOUNT_NOTICE_EVENTS`. `auth-kit/admin`: `passkeyAddedEmail`, `passwordChangedEmail`, `OWNER_CHOICE_LABEL`, `ACCOUNT_NOTICE_COGNITO_ACTIONS`.
+- `auth-kit/client`: the `notices` prop on `SignIn`, `SignUp`, and `MyAccount` (on by default; `false` turns it off), `sendAccountNotice`, `monogramOf`; the envelope icon in every email field (A9; `Field`'s `icon`); the Monogram badge.
+- `auth-kit/backdrops`: `CARD_WIDTH` (380).
+- `auth-kit/amplify`: `waf.ownWebAcl`; `email.family`; `UNVERIFIED_SWEEP_MARK` (on `UnverifiedAccountSweep`).
+- `auth-kit/testing`: `itemRoute` (`recordRoute` stays as an alias).
+
+### Changed
+
+- **The button words are decided** (A6), not options: Continue on the email, password, and in-between steps, the sign-up code step included (it said "Verify"); Sign in on the steps that finish.
+- **Emailed codes work for 10 minutes by default** (A7): `codeLifetimeMinutes` (and Cognito's `AuthSessionValidity`) default to 10, and every screen and email says so.
+- **The card** (E5): 380px, "Trouble signing in?" inside, the defined 3:1 edge, no monogram, by default; the backdrop assumes the same 380px card (it assumed 440px).
+- **The card's line names its mode** (D1): "New to {Site}? Request access", "… Create an account with your {domains} email address.", "… Create an account".
+- **Open sign-up sites say "the {Site} team"** and leave out the Teams line, automatically (E4c).
+- **Admin alerts carry the footer** (E4a): the Super admin grant, ownership transfer, Manager's invite, help-address change, and last-owner warning use the shared email layout.
+- **"Owner (only one)"** where roles are chosen or compared; plain "Owner" where it names someone (C1; ADR 0020 amended).
+- **The personal family lives on yokum.app** (F11): sender `sign-in@yokum.app`, default help mailbox `help@yokum.app`, family domain `yokum.app`; the backdrop family's label is "Personal".
+- **Resource screens always use the type's noun** (C5): `noun` is required on `ResourceAccessTable`, `ResourceRolesSummary`, and `resourceRoleDescriptions`, and a failed access list carries it.
+- **My account's passkey line** (E4d): "Sign in with your face, fingerprint, or device PIN. Passkeys saved in a password manager work too."
+- `accountCreationAppPolicy` takes `accountCreation` (the preset's setting) instead of `selfSignUp`, and grants the notice route's read.
+- Docs: B1 ("no role overrides in the browser") in ADR 0009 and the localhost guide; ADRs 0002, 0006, 0013, 0020, 0023, and 0024 amended; "record" → "item" in the matrix docs; "Editor" → "Admin – content only" in the View as examples; the stale "owner line" and "4px rule" comments.
+
+### Removed
+
+- The OSBM authorized-use line (`theme.authorizedUseLine`, `showAuthorizedUse`; A10 dropped it). Nothing hooks MyNCID colours or an NCID slot (backlog).
+- `RESOURCE_ROLE_DESCRIPTIONS` (the generic "item" wording).
+- `SignIn`'s and `SignUp`'s `securityNotices` (replaced by `notices`, on by default).
+
+### Migration
+
+1. **Senders.** Send from the site's `sign-in@` mailbox with the family's name: the preset's `email: { fromAddress: 'sign-in@…', fromName: senderDisplayName(siteName, family), family, replyTo }` (`family` is new and required). `createSesInviteMailer({ from: siteSender(siteName, family, 'sign-in@…'), site: { siteName, theme: family, help } })` (`site` is new and required). `InviteExpirySweep`'s `ownerWarnings` takes `family` and `helpEmail` (both required) and a `from` with the family's name. Verify the `sign-in@` address's domain in SES first.
+2. **WAF.** Sign-up sites in `domains` mode now need `siteWebAclArn` (`createSiteWebAcl`), like `open`. Every deployed pool needs `waf: { webAclArn }` (the account's `createSharedAuthWebAcl`) or `waf: { ownWebAcl: true }`.
+3. **Sweep.** Sign-up sites (`domains`, `open`) must add `new UnverifiedAccountSweep(stack, 'UnverifiedSweep', { userPool, auditLog })`.
+4. **Notices.** Mount the notice route at `app/api/auth-kit/account-notice/route.ts`: `export const POST = createAccountNoticeRoute({ auth, siteName, signInUrl, theme, help, mailer, rateLimits }).POST` (a `RateLimitTable`). Replace `securityNotices` with nothing (on by default) or `notices={false}`. `accountCreationAppPolicy({ …, accountCreation })` replaces `selfSignUp`.
+5. **Help address.** A first.last-shaped help address now needs `{ address, personal: true }`; role mailboxes are unchanged.
+6. **Themes.** Remove `showAuthorizedUse` (it throws). Pick a card style with `authTheme(family, { cardStyle })` if the site wants one other than Quiet.
+7. **Resources.** Pass `noun` to `ResourceAccessTable` and `ResourceRolesSummary`; use `resourceRoleDescriptions(noun)` instead of `RESOURCE_ROLE_DESCRIPTIONS`.
+8. **Server.** Remove `requireFirstCredential: false` and `requireTotpForPasswordUsers: false` from `createServerAuth` (they throw outside the matrix server mode).
+9. **Code lifetime.** Sites that passed `codeLifetimeMinutes: 3` keep 3 minutes; the rest get 10. Pass the same value to the preset, the screens, and the custom message trigger.
+
 ## [0.1.8-alpha.1] - 2026-10-19
 
 Fixes the scheduled jobs' deploy. Pre-release. No API changes; logical IDs are unchanged, so a deployed job is updated in place.
@@ -186,7 +242,7 @@ The invite-expiry sweep keeps the site's last owner. Pre-release.
 
 ### Security
 
-- **The invite-expiry sweep never disables the site's last owner** (David's decision). `people.expireStaleInvites()` and `InviteExpirySweep` disabled every invite unused after 7 days, owners included, so a site whose only owner hadn't signed in yet lost its owner. Now an expired owner invite is disabled only while another enabled owner remains (read live with `ListUsersInGroup`, not counting anyone the run tried to disable): with two owners, the unused one is still disabled. The last owner keeps their account and role; the run writes a refused audit row ("skipped: last owner") and warns them ("Your owner invite to {Site} hasn't been used"), plus a separate copy to an optional fallback address, on the first run after the invite expired and then once a day. Non-owner invites expire as before. The owner role is read from `OWNER_GROUP` in the shared policy (today `superadmin`), not named in the sweep. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-last-owner), amended.
+- **The invite-expiry sweep never disables the site's last owner** (David's decision). `people.expireStaleInvites()` and `InviteExpirySweep` disabled every invite unused after 7 days, owners included, so a site whose only owner hadn't signed in yet lost its owner. Now an expired owner invite is disabled only while another enabled owner remains (read live with `ListUsersInGroup`, not counting anyone the run tried to disable): with two owners, the unused one is still disabled. The last owner keeps their account and role; the run writes a refused audit row ("skipped: last owner") and warns them ("Your owner invite to {Site} hasn't been used"), plus a separate copy to an optional fallback address, on the first run after the invite expired and then once a day. Non-owner invites expire as before. The owner role is read from `OWNER_GROUP` in the shared policy (today `superadmin`), not named in the sweep. [ADR 0019](docs/decisions/0019-invite-expiry-sweep.md#amendment-2026-10-18-never-the-owner), amended.
 - **Fail closed toward keeping the owner.** An owner count the sweep can't read skips the owner (a refused row, `owner_count_unknown`) and fails the run. A due invite whose groups can't be read is skipped and reported too; before, it was disabled as if it had no groups, keeping its roles.
 
 ### Added
