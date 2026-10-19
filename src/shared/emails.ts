@@ -371,7 +371,7 @@ export function inviteEmail(site: EmailSite, input: InviteEmailContent): Rendere
         items: [
           ['Go to ', link(url)],
           ['Enter this email address: ', strong(input.email)],
-          ['Choose ', strong('Email me a code instead'), '. We’ll email you an 8-digit code. Enter it, then set up a passkey so signing in next time takes a second.'],
+          ['Choose ', strong('Email me a code'), '. We’ll email you an 8-digit code. Enter it, then set up a passkey so signing in next time takes a second.'],
         ],
       },
       p(`This invitation expires on ${clockDateTime(input.expiresAt, site)}.`),

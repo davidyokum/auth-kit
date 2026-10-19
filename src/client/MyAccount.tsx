@@ -15,6 +15,7 @@ import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
 import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import { forgetPasskey, rememberPasskey } from './passkey-hint.js';
 import { checkedHref, hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
@@ -158,6 +159,8 @@ export function MyAccount(props: MyAccountProps) {
     const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: STATUS.waitingForPasskey });
     if (result.ok) {
       fb.set({ status: STATUS.passkeySaved });
+      // This browser now has a passkey for the account: Continue opens the prompt next time (register A5a).
+      if (emailValue !== undefined) await rememberPasskey(emailValue);
       if (await sendAccountNotice(notices, 'passkey-added')) fb.set({ status: STATUS.passkeySavedEmailed });
       reloadPasskeys();
       reloadFactors();
@@ -170,6 +173,8 @@ export function MyAccount(props: MyAccountProps) {
     focusPasskeysHeading();
     if (result.ok) {
       fb.set({ status: STATUS.passkeyRemoved });
+      // The account's last passkey is gone: this browser stops opening the prompt first (register A5a).
+      if (emailValue !== undefined && passkeys.state === 'ready' && passkeys.value.length <= 1) await forgetPasskey(emailValue);
       reloadPasskeys();
       reloadFactors();
     }

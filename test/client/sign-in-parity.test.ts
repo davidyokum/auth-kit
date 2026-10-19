@@ -189,6 +189,13 @@ async function settled(card: 'sign-in' | 'sign-up' = 'sign-in'): Promise<string>
   return snapshot(card);
 }
 
+/** Continue on the email step; with no passkey hint for the address (register A5a), "Use a passkey" on the choice screen. */
+async function pressContinue(user: { click: (el: Element) => Promise<void> }) {
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  const choose = await screen.findByRole('heading', { name: 'How do you want to sign in?' }, { timeout: 300 }).catch(() => null);
+  if (choose) await user.click(screen.getByRole('button', { name: /^Use a passkey/ }));
+}
+
 const alertSays = (text: string) => waitFor(() => expect(screen.getByRole('alert').textContent).toBe(text), { timeout: 3000 });
 const typeEmail = (user: ReturnType<typeof userEvent.setup>) => user.type(screen.getByLabelText('Email address'), EMAIL);
 
@@ -198,7 +205,7 @@ const SCRIPTS: Record<string, Script> = {
   'Continue (the passkey screen), then Try again': {
     run: async (user, frames) => {
       await typeEmail(user);
-      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await pressContinue(user);
       await screen.findByText(PASSKEY_NOTE, undefined, { timeout: 3000 });
       frames.push(await settled());
       await user.click(screen.getByRole('button', { name: 'Try again' }));
@@ -221,7 +228,7 @@ const SCRIPTS: Record<string, Script> = {
     props: { passkeysEnabled: false },
     run: async (user, frames) => {
       await typeEmail(user);
-      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await pressContinue(user);
       await screen.findByRole('heading', { name: 'Enter your password' });
       frames.push(snapshot());
       await user.type(screen.getByLabelText('Password'), 'a guessed password{Enter}');
@@ -334,7 +341,7 @@ describe('the same screens for every address (ADR 0018)', () => {
       promptShown = 0;
       const user = renderSignIn();
       await user.type(screen.getByLabelText('Email address'), EMAIL);
-      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await pressContinue(user);
       await screen.findByText(PASSKEY_NOTE, undefined, { timeout: 3000 });
       // Either Cognito sent a challenge (Amplify prompted: the mocked closed prompt stands for it) or the decoy did.
       const cognitoPrompted = await account.WEB_AUTHN().then(

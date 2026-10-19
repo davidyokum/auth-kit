@@ -17,6 +17,7 @@ import {
   signInWithPassword,
 } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { hasPasskeyHint, passkeyHintSkipped, rememberPasskey } from './passkey-hint.js';
 import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
 import type { AccountNoticeEvent } from '../shared/notices.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
@@ -131,7 +132,10 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
 
 type View =
   | { name: 'email' }
-  | { name: 'passkey'; cancelled: boolean }
+  /** `fromHint`: this browser's passkey hint opened the prompt straight from the email step (register A5a). */
+  | { name: 'passkey'; cancelled: boolean; fromHint?: boolean }
+  /** "How do you want to sign in?" (register A5a): Continue with no passkey hint for the address. */
+  | { name: 'choose' }
   | { name: 'password'; challenge: boolean }
   /** "Check your email". `simulated`: nothing was sent (no account, or no emailed codes for it); the screen is the same. */
   | { name: 'email-code'; simulated: boolean; sentAt: number; resentAt?: number; expired?: boolean }
@@ -223,7 +227,7 @@ function clockTime(at: number): string {
 }
 
 /** The views that carry "Trouble signing in?" (Card Studio: every sign-in screen, not setup or help). */
-const TROUBLE_VIEWS = new Set<View['name']>(['email', 'passkey', 'password', 'totp', 'email-code', 'reset-code', 'reset-password']);
+const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'password', 'totp', 'email-code', 'reset-code', 'reset-password']);
 
 /**
  * The sign-in card (REPORT §3, Card Studio v4; ADR 0024). Email first: "Continue" opens the passkey
@@ -262,6 +266,8 @@ export function SignIn(props: SignInProps) {
   const signUpHref = hrefOr('signUpHref', props.signUpHref, '/sign-up');
   const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
   const passkeyOptions = props.passkey;
+  /** The first factor last asked for: a passkey sign-in sets this browser's passkey hint (register A5a). */
+  const methodRef = useRef<'passkey' | 'password' | 'email-code' | null>(null);
   const notices = useMemo(() => resolveNotices(props.notices, 'SignIn'), [props.notices]);
   const pendingNotice = useRef<AccountNoticeEvent | null>(null);
   const uid = useId();
@@ -325,6 +331,7 @@ export function SignIn(props: SignInProps) {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
     userIdRef.current = (await currentUser())?.userId;
+    if (methodRef.current === 'passkey') await rememberPasskey(email);
     if (pendingNotice.current) {
       const event = pendingNotice.current;
       pendingNotice.current = null;
@@ -355,7 +362,7 @@ export function SignIn(props: SignInProps) {
       case 'done':
         return finish();
     }
-  }, [finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set]);
+  }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set]);
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
@@ -451,19 +458,36 @@ export function SignIn(props: SignInProps) {
     return false;
   }
 
-  function startPasskey() {
-    go({ name: 'passkey', cancelled: false });
+  function startPasskey(fromHint = false) {
+    methodRef.current = 'passkey';
+    go({ name: 'passkey', cancelled: false, fromHint });
     void attempt(firstFactor('passkey', () => signInWithPasskey(email), passkeyOptions), 'sign-in').then((kind) => {
       // A closed window, or no passkey here (indistinguishable): a calm note, not an error.
       if (kind === 'passkey-cancelled') {
         set({ error: null, field: null });
-        setView({ name: 'passkey', cancelled: true });
+        setView({ name: 'passkey', cancelled: true, fromHint });
       }
+    });
+  }
+
+  /**
+   * Continue on the email step (register A5a): the passkey prompt only when this browser remembers a
+   * passkey sign-in for the address; otherwise "How do you want to sign in?". The hint never leaves
+   * the browser, so the server sees the same requests for every address until the person chooses.
+   */
+  function continueFromEmail() {
+    if (!requireEmail()) return;
+    if (!passkeysEnabled) return go({ name: 'password', challenge: false });
+    const typed = email;
+    void hasPasskeyHint(typed).then((hinted) => {
+      if (hinted) startPasskey(true);
+      else go({ name: 'choose' });
     });
   }
 
   function sendEmailCode() {
     if (!requireEmail()) return;
+    methodRef.current = 'email-code';
     void attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', STATUS.sendingCode);
   }
 
@@ -548,6 +572,14 @@ export function SignIn(props: SignInProps) {
   const passwordAlt: AltLink = { icon: 'password', label: SIGN_IN.usePassword, onClick: () => (requireEmail() ? go({ name: 'password', challenge: false }) : undefined), disabled: busy };
   const passkeyAlt: AltLink = { icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: () => requireEmail() && startPasskey(), disabled: busy };
   const codeAlt: AltLink = { icon: 'mail', label: SIGN_IN.emailCode, onClick: sendEmailCode, disabled: busy };
+  /** Another way in, from the prompt the hint opened: twice in a row forgets the hint (register A5a). */
+  const skipped = (alt: AltLink): AltLink => ({
+    ...alt,
+    onClick: () => {
+      void passkeyHintSkipped(email);
+      alt.onClick();
+    },
+  });
 
   function accessLine(): ReactNode {
     const line = (children: ReactNode) => <p {...slot(classNames, 'access')}>{children}</p>;
@@ -592,7 +624,7 @@ export function SignIn(props: SignInProps) {
     case 'email':
       bottom.access = props.reauth ? undefined : accessLine();
       body = (
-        <form noValidate onSubmit={onSubmit(() => requireEmail() && (passkeysEnabled ? startPasskey() : go({ name: 'password', challenge: false })))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate onSubmit={onSubmit(continueFromEmail)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(title)}
           {reauthNote}
@@ -606,6 +638,43 @@ export function SignIn(props: SignInProps) {
         </form>
       );
       break;
+    case 'choose':
+      body = (
+        <div {...slot(classNames, 'form')}>
+          {summary}
+          {heading(SIGN_IN.chooseHeading)}
+          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
+          <ul {...slot(classNames, 'list')}>
+            <li {...slot(classNames, 'listItem')}>
+              <button type="button" disabled={busy} onClick={() => startPasskey()} data-auth-kit-choice="passkey" {...slot(classNames, 'secondaryButton')}>
+                <Icon name="fingerprint" />
+                <span>
+                  {SIGN_IN.choosePasskey} <span data-auth-kit-recommended="">{SIGN_IN.chooseRecommended}</span>
+                  <small {...slot(classNames, 'small')}>{SIGN_IN.choosePasskeySub}</small>
+                </span>
+                <Icon name="chevron" />
+              </button>
+            </li>
+            <li {...slot(classNames, 'listItem')}>
+              <button type="button" disabled={busy} onClick={() => go({ name: 'password', challenge: false })} data-auth-kit-choice="password" {...slot(classNames, 'secondaryButton')}>
+                <Icon name="password" />
+                <span>{SIGN_IN.choosePassword}</span>
+                <Icon name="chevron" />
+              </button>
+            </li>
+            {emailCodeEnabled ? (
+              <li {...slot(classNames, 'listItem')}>
+                <button type="button" disabled={busy} onClick={sendEmailCode} data-auth-kit-choice="email-code" {...slot(classNames, 'secondaryButton')}>
+                  <Icon name="mail" />
+                  <span>{SIGN_IN.chooseCode}</span>
+                  <Icon name="chevron" />
+                </button>
+              </li>
+            ) : null}
+          </ul>
+        </div>
+      );
+      break;
     case 'passkey':
       body = (
         <div {...slot(classNames, 'form')}>
@@ -615,12 +684,12 @@ export function SignIn(props: SignInProps) {
           <Who lead={SIGN_IN.signingInAs} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
           {view.cancelled ? <Note classNames={classNames}>{ERRORS.passkeyCancelled}</Note> : fb.error ? null : <Wait label={SIGN_IN.waitingForPasskey} classNames={classNames} />}
           <Actions classNames={classNames}>
-            <Button variant="secondary" disabled={busy} classNames={classNames} onClick={startPasskey}>
+            <Button variant="secondary" disabled={busy} classNames={classNames} onClick={() => startPasskey(view.fromHint === true)}>
               {SIGN_IN.tryAgain}
             </Button>
           </Actions>
           <Text classNames={classNames}>{SIGN_IN.passkeyOnPhone}</Text>
-          <AltLinks links={[passwordAlt, ...(emailCodeEnabled ? [codeAlt] : [])]} classNames={classNames} />
+          <AltLinks links={(view.fromHint ? [skipped(passwordAlt), ...(emailCodeEnabled ? [skipped(codeAlt)] : [])] : [passwordAlt, ...(emailCodeEnabled ? [codeAlt] : [])])} classNames={classNames} />
         </div>
       );
       break;
@@ -635,6 +704,7 @@ export function SignIn(props: SignInProps) {
               secretRef.current?.focus();
               return;
             }
+            if (!view.challenge) methodRef.current = 'password';
             void attempt(view.challenge ? () => confirmPassword(secretValue) : firstFactor('password', () => signInWithPassword(email, secretValue)), 'sign-in', STATUS.signingIn);
           })}
           aria-busy={busy || undefined}
@@ -970,6 +1040,7 @@ export function SignIn(props: SignInProps) {
           accountName={email.trim()}
           headingLevel={level}
           onDone={(how) => {
+            if (how === 'passkey') void rememberPasskey(email);
             void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
@@ -1009,6 +1080,7 @@ export function SignIn(props: SignInProps) {
                 void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then(async (r) => {
                   if (r.ok) {
                     set({ status: STATUS.passkeySaved });
+                    await rememberPasskey(email);
                     await sendAccountNotice(notices, 'passkey-added');
                     finish();
                   }

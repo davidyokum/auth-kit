@@ -1,3 +1,4 @@
+import { hasPasskeyHint } from '../../src/client/passkey-hint.js';
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -134,9 +135,12 @@ describe('MyAccount', () => {
     auth.listWebAuthnCredentials.mockResolvedValueOnce({ credentials: [] }).mockResolvedValueOnce({ credentials: [MACBOOK] });
     const { user } = setup({ configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] });
     expect(await screen.findByText('No passkeys yet.')).toBeTruthy();
+    await screen.findByText('ada@example.org');
     await user.click(screen.getByRole('button', { name: 'Add a passkey' }));
     expect(auth.associateWebAuthnCredential).toHaveBeenCalled();
     expect(await screen.findByText('MacBook')).toBeTruthy();
+    // This browser now opens the passkey prompt first for the account (register A5a).
+    await waitFor(async () => expect(await hasPasskeyHint('ada@example.org')).toBe(true));
   });
 
   it('explains a passkey that already exists on this device', async () => {
