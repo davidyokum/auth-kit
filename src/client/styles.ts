@@ -59,6 +59,16 @@ export const authKitStyles = `
 :where([data-auth-kit] [data-auth-kit-slot="alts"] [data-auth-kit-slot="linkButton"]) { width: 100%; min-height: 44px; text-decoration: none; }
 :where([data-auth-kit] [data-auth-kit-slot="alts"] [data-auth-kit-slot="linkButton"] span) { flex: 1; text-align: start; text-decoration: underline; }
 :where([data-auth-kit] [data-auth-kit-slot="list"] [data-auth-kit-slot="secondaryButton"]) { width: 100%; justify-content: space-between; }
+:where([data-auth-kit] [data-auth-kit-slot="ways"]) { margin: 0.5rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+:where([data-auth-kit] [data-auth-kit-slot="way"]) { font: inherit; font-weight: 600; font-size: 17px; line-height: 22px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 60px; margin: 0; padding: 12px 14px 12px 16px; text-align: start; color: var(--ak-ink, #092940); background: transparent; border: 1px solid var(--ak-option-border, #d8dde0); border-radius: max(10px, calc(var(--ak-card-radius, 12px) - 2px)); cursor: pointer; }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]) { background: var(--ak-status, rgba(9, 41, 64, 0.045)); border-color: transparent; }
+:where([data-auth-kit] [data-auth-kit-slot="way"]:hover:not(:disabled)) { border-color: var(--ak-field-border, #6b7480); }
+:where([data-auth-kit] [data-auth-kit-slot="way"]:hover:not(:disabled) [data-auth-kit-slot="wayLabel"]) { text-decoration: underline; text-underline-offset: 3px; }
+:where([data-auth-kit] [data-auth-kit-slot="way"] > svg) { flex: none; width: 22px; height: 22px; color: var(--ak-link, #1668b0); }
+:where([data-auth-kit] [data-auth-kit-slot="way"] > [data-auth-kit-icon="chevron"]) { margin-left: auto; width: 18px; height: 18px; color: var(--ak-muted, #56606b); }
+:where([data-auth-kit] [data-auth-kit-slot="wayText"]) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+:where([data-auth-kit] [data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]) { font-weight: 400; color: var(--ak-text, #3c434b); }
+:where([data-auth-kit] [data-auth-kit-slot="wayDescription"]) { display: block; font-weight: 400; font-size: 16px; line-height: 22px; color: var(--ak-text, #3c434b); }
 :where([data-auth-kit] [data-auth-kit-slot="steps"]) { margin: 0; padding-inline-start: 1.25rem; display: grid; gap: 0.5rem; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"]) { display: grid; gap: 0.5rem; padding: 1rem; border: 1px solid var(--ak-field-border, #6b7480); border-radius: 10px; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"] h2) { margin: 0; font-size: 1.0625rem; color: var(--ak-ink, #092940); display: flex; gap: 0.5rem; align-items: center; }

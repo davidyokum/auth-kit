@@ -519,6 +519,8 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
     '--ak-card-padding-phone': '28px 22px 20px',
     '--ak-card-shadow': `0 1px 2px ${sh(0.05)}, 0 16px 36px -16px ${sh(0.22)}`,
     '--ak-hair': mixHex(ink, W, 0.9),
+    // The choice screen's rows (Card Studio's --c-opt-bd): the card's own light border, a hairline on the see-through styles.
+    '--ak-option-border': mixHex(ink, W, 0.84),
     '--ak-status': sh(0.045),
     '--ak-well': 'transparent',
     '--ak-button-bg': theme.colors.button,
@@ -535,6 +537,7 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
         '--ak-card-solid': '#fffefc',
         '--ak-surface': '#fffefc',
         '--ak-hair': '#ebe6de',
+        '--ak-option-border': '#e2dcd2',
         '--ak-text': '#3f3933',
         '--ak-muted': '#625a51',
         '--ak-field-border': '#7d746a',
@@ -549,6 +552,7 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
         '--ak-card-bg': 'rgba(255,255,255,0.66)',
         '--ak-card-solid': toHex(over(W, 0.66, theme.palette.page)),
         '--ak-hair': sh(0.12),
+        '--ak-option-border': sh(0.12),
         '--ak-status': 'rgba(255,255,255,0.62)',
         '--ak-muted': mixHex(theme.colors.muted, ink, 0.25),
         '--ak-card-radius': '18px',
@@ -562,6 +566,7 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
         '--ak-card-solid': theme.palette.page,
         '--ak-card-shadow': 'none',
         '--ak-card-radius': '0',
+        '--ak-option-border': mixHex(ink, W, 0.9),
         '--ak-status': sh(0.05),
       });
       break;
@@ -569,6 +574,7 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
       const [r, g, b] = parseHex(theme.colors.button);
       Object.assign(v, {
         '--ak-hair': sh(0.08),
+        '--ak-option-border': sh(0.08),
         '--ak-field-border': mixHex(ink, W, 0.48),
         '--ak-well': mixHex(brand.tint, W, 0.45),
         '--ak-status': mixHex(brand.tint, W, 0.4),
