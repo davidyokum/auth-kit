@@ -2,6 +2,48 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.9-alpha.2] - 2026-10-19
+
+The nine low findings and four info items from the security review of v0.1.9-alpha.1 (no critical, high, or medium findings). Pre-release. Breaking only for sites configured against the rules: see Migration.
+
+### Security
+
+- **`requireWafToken: false` throws on a production server** (L4): in `domains` and `open` modes, `createAccountCreationRoutes` refuses it when `NODE_ENV` is `production` (every `next build` output, Amplify's included). Outside production it still works and is reported once through `onError` when the routes are made.
+- **The unverified-account sweep must be for this pool** (L6, register D3): `applyAuthStandard` counts a sweep only when its pool is this pool's L1, the L2 whose resource it is, or an imported pool whose ID is this pool's own. An imported pool with a fixed ID or one known only at deploy, or a construct that isn't a pool, fails synthesis with a message naming the sweep; a typo'd pool ID no longer passes and sweeps nothing.
+- **The matrix server mode has two locks** (L7, defence in depth): its sign is a module-private `Symbol()` (it was `Symbol.for`, which a site could name in one line), handed out only by `matrixServerOverrides()`, and `createServerAuth` accepts it, and with it `requireFirstCredential: false` and `requireTotpForPasswordUsers: false`, only where `NODE_ENV` isn't `production` and `AUTH_KIT_MATRIX=1`. ADR 0016 amended.
+- **The personal family's sender is enforced** (info I3, register F11): a personal site's sender must be `sign-in@yokum.app`; the preset, `createSesInviteMailer`, the invite-expiry owner warnings, the digest, and `siteSender` refuse any other address (`senderAddressProblems(address, family)`), instead of SES refusing it at send time.
+- **A password notice needs a password on the account** (L2): the notice route reads the account's factors with the person's own token (a failed read still sends). That's the only check Cognito allows: it keeps no time for a password change, so a session holder can still request a notice without a change, only to the account's own inbox. The route's header, ADR 0024, and the README say so.
+
+### Fixed
+
+- **My account's first-password notice** (L3): the notice route lets a password user without an authenticator yet through (`allowMfaEnrollment: true`), so the notice My account sends before the authenticator step is no longer refused with 403 once the factor cache expires.
+- **`SignUp` sets the passkey hint** after creating a passkey (L9, register A5a), as `SignIn` does: the next Continue opens the passkey prompt.
+- **"Forgot your password?" promises a note only where the route is mounted** (L5): "We'll email you a note when your password changes." needs `notices: { mounted: true }`. Notices stay on by default, and "We've emailed you a note about this." still depends on the route's answer.
+- **My account forgets the passkey hint when it deletes the account** (info I1).
+
+### Changed
+
+- **The help address's "personal" acknowledgement is on the record** (L1, register E4c): the Super admin's override set with "This is a person's own address, on purpose" carries `personal: true` in the audit row (`after`, and `before` when the previous override had it), in `SignInHelpChangedAlert`, and in the action's answer; the owner and Super admin alert says "set to a personal address" in its subject and body, and so does the Settings page.
+- The passkey hint reads only the 32-hex-character salt it writes (info I2).
+- The notice route refuses a declared `Content-Length` over 1 KB before reading the body (info I5).
+
+### Licensing
+
+- **The OpenStreetMap-derived map data is under the ODbL 1.0, not MIT** (L8): `THIRD_PARTY_NOTICES.md` opens with "Licences in this package" (the lakes, rivers, and creeks in the County Survey and River Basins data and the chunks built from them), each `data.ts` carries a legal comment the build keeps at the end of its chunk, and the tarball check fails without either. The sheets keep their own attribution. auth-kit's own licence is unchanged (MIT).
+
+### Docs
+
+- ADR 0024: the shared-computer note says plainly what the passkey hint discloses (info I1), what a notice does and doesn't prove (L2), and the `mounted` rule (L5). `allowedOrigins` says a site on both apex and `www` lists both (info I5). `auth-kit/admin/cdk` notes that tokenised sender settings are checked at runtime (info I4).
+
+### Migration
+
+1. **Notices.** A site that mounted `createAccountNoticeRoute` passes `notices={{ mounted: true }}` to `SignIn` to keep "We'll email you a note when your password changes." on "Forgot your password?".
+2. **Personal-family senders** send from `sign-in@yokum.app` (verified in SES); anything else now fails synthesis or construction.
+3. **`requireWafToken: false`** stays in local development; remove it from any production config.
+4. **The sweep:** pass the pool itself, `new UnverifiedAccountSweep(stack, 'UnverifiedSweep', { userPool: backend.auth.resources.userPool, auditLog })`, not an imported one.
+5. **The matrix:** nothing to change when `lib/auth.ts` spreads `matrixOverrides()?.serverAuth` into `createServerAuth` (both come from the same bundle) and `startMatrixServer` runs it. A test that builds server auth with `matrixServerMode` itself sets `AUTH_KIT_MATRIX=1`.
+6. **Custom alert renderers** (`renderSignInHelpChanged`) can show `alert.personal`.
+
 ## [0.1.9-alpha.1] - 2026-10-19
 
 The register's A5a, decided the same day after v0.1.9-alpha shipped. Pre-release. No breaking changes.

@@ -6,6 +6,8 @@ import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { UnauthenticatedError, createServerAuth, toRequestContext, type RequestContext } from '../../src/server/index.js';
 import { MATRIX_FIXTURE_ENV, createTestIssuer, matrixFixture, parseMatrixFixture, type MatrixFixture } from '../../src/testing/index.js';
+import type * as AdminNamespace from '../../src/admin/index.js';
+import type * as ServerNamespace from '../../src/server/index.js';
 import type * as MatrixServerNamespace from '../../src/testing/matrix-server.js';
 import { CLIENT_ID, POOL_ID, capabilities } from '../helpers.js';
 
@@ -19,7 +21,7 @@ const SHARED = Symbol.for('auth-kit.matrix-server.shared.v1');
  * in the same bundle. The matrix server mode's sign is module-private (L7), so the app's
  * createServerAuth must come from the same bundle as its matrixOverrides(), as it does in Next.
  */
-async function freshBundle(): Promise<MatrixServerModule & { server: typeof import('../../src/server/index.js'); admin: typeof import('../../src/admin/index.js') }> {
+async function freshBundle(): Promise<MatrixServerModule & { server: typeof ServerNamespace; admin: typeof AdminNamespace }> {
   vi.resetModules();
   const matrix = await import('../../src/testing/matrix-server.js');
   const server = await import('../../src/server/index.js');

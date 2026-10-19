@@ -146,7 +146,10 @@ describe('Settings → Sign-in help (ADR 0024)', () => {
   });
 
   it('says when the override was set as a person’s own address, on purpose (register E4c, L1)', () => {
-    const personal: SignInHelpSettingsView = { ...ok, override: { ...(ok as Extract<SignInHelpSettingsView, { state: 'ok' }>).override!, address: 'jordan.lee@agency.example.org', personal: true } };
+    const personal: SignInHelpSettingsView = {
+      ...ok,
+      override: { address: 'jordan.lee@agency.example.org', personal: true, updatedAt: '2026-10-18T12:00:00.000Z', updatedBy: { sub: 's1', email: 'sa@example.org' }, reason: 'New desk' },
+    };
     const html = renderToStaticMarkup(h(SignInHelpSettings, { view: personal, actions: { set: noop, clear: noop } }));
     expect(html).toContain('Set as a personal address: a person’s own mailbox, on purpose.');
     expect(html).toContain('name="personal" checked=""');
