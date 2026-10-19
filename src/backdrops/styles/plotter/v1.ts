@@ -1863,24 +1863,24 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
     }
   }
 
-  /** Notes still being lettered (kept off the card). */
+  /** Notes still being lettered. */
   function drawNotes(x: Ctx2D, t: number): void {
     const w = penW[PEN_R] as number;
-    let open = false;
+    x.lineCap = 'round';
+    x.lineJoin = 'round';
+    x.strokeStyle = penC[PEN_R] as string;
     for (let i = 0; i < NOTE_SLOTS; i++) {
       const sl = notes[i] as InkSlot;
       if (!sl.used || sl.baked || t < sl.t0) continue;
-      if (!open) {
-        x.save();
-        clipCard(x);
-        x.lineCap = 'round';
-        x.lineJoin = 'round';
-        x.strokeStyle = penC[PEN_R] as string;
-        open = true;
-      }
       drawSlot(x, sl, (t - sl.t0) * 260 * u, w, w);
     }
-    if (open) x.restore();
+  }
+
+  /** Whether any note or cloud is on the sheet (in ink but not yet baked, or fading). */
+  function inkOverlays(): boolean {
+    for (let i = 0; i < NOTE_SLOTS; i++) if ((notes[i] as InkSlot).used && !(notes[i] as InkSlot).baked) return true;
+    for (let i = 0; i < CLOUD_SLOTS; i++) if ((clouds[i] as InkSlot).used) return true;
+    return false;
   }
 
   function drawClouds(x: Ctx2D, t: number): void {
@@ -1961,8 +1961,6 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
     const cx = Math.round(sx) + 0.5;
     const cy = Math.round(sy) + 0.5;
     const g = 7 * u;
-    x.save();
-    clipCard(x);
     x.globalAlpha = crossA * 0.55;
     x.strokeStyle = COL.dim;
     x.lineWidth = 0.75;
@@ -2037,7 +2035,6 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
         x.stroke();
       }
     }
-    x.restore();
     x.globalAlpha = 1;
   }
 
@@ -2111,17 +2108,22 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
       bakeNotes(t);
       ctx.drawImage(bg.canvas, 0, 0, W, H);
       ctx.drawImage(ink.canvas, 0, 0, W, H);
-      drawNotes(ctx, t);
-      drawClouds(ctx, t);
       drawRev(ctx);
+      let pa = 0;
+      const p = frame.pointer;
       if (motion) {
         const fadeIn = clamp(t / 0.5, 0, 1);
-        const pa = V < total ? fadeIn : fadeIn * clamp(1 - (t - total) / 0.8, 0, 1);
-        if (pa > 0.01 && nStrokes > 0) drawPen(ctx, pa);
-        const p = frame.pointer;
+        pa = nStrokes === 0 ? 0 : V < total ? fadeIn : fadeIn * clamp(1 - (t - total) / 0.8, 0, 1);
         const want = p.strength > 0 && !inCard(p.x, p.y, 2) ? p.strength : 0;
         crossA += (want - crossA) * Math.min(1, frame.dt * 8);
         if (want > crossA && frame.dt === 0) crossA = want;
+      }
+      // Everything over the plot (notes, clouds, the pen, the crosshair) stays off the card.
+      if (pa > 0.01 || crossA > 0.01 || inkOverlays()) {
+        clipCard(ctx);
+        drawNotes(ctx, t);
+        drawClouds(ctx, t);
+        if (pa > 0.01) drawPen(ctx, pa);
         if (crossA > 0.01) drawCross(ctx, p.x, p.y);
       }
       ctx.restore();
@@ -2138,6 +2140,7 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
       resetInk,
       bakeNotes,
       drawNotes,
+      inkOverlays,
       drawClouds,
       drawSlot,
       drawCross,
