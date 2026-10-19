@@ -263,12 +263,14 @@ describe('SignUp: the code and after', () => {
     expect(screen.getByText('This is how you’ll appear on Example Reports.')).toBeTruthy();
     expect(screen.getByLabelText('First name').getAttribute('autocomplete')).toBe('given-name');
     expect(screen.getByLabelText('Last name').getAttribute('autocomplete')).toBe('family-name');
-    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    // Continue, never "Create account" or "Finish": choosing how you'll sign in follows (register A6).
+    expect(screen.queryByRole('button', { name: /Create account|Finish/ })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
     expect(screen.getByRole('alert').textContent).toBe('Enter your name');
     expect(auth.updateUserAttributes).not.toHaveBeenCalled();
     await user.type(screen.getByLabelText('First name'), ' Ada ');
     await user.type(screen.getByLabelText('Last name'), 'Lovelace');
-    await user.click(screen.getByRole('button', { name: 'Create account' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
       expect(auth.updateUserAttributes).toHaveBeenCalledWith({ userAttributes: { given_name: 'Ada', family_name: 'Lovelace', name: 'Ada Lovelace' } }),
     );
@@ -291,15 +293,14 @@ describe('SignUp: the code and after', () => {
     expect(navigate).toHaveBeenCalledWith('/reports');
   });
 
-  it('names the owner in a named family, says when a note was emailed, and "Finish" when the site chose it', async () => {
+  it('names the owner in a named family, and says when a note was emailed', async () => {
     auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
-    const { user } = setup({ theme: 'osbm', help: { address: 'apps-help@example.org', owner: 'Jordan Lee' }, nameButton: 'finish', notices: { fetch: vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true }))) }, passkeysEnabled: false });
+    const { user } = setup({ theme: 'osbm', help: { address: 'apps-help@example.org', owner: 'Jordan Lee' }, notices: { fetch: vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true }))) }, passkeysEnabled: false });
     await submitEmail(user, 'ada@osbm.example.org');
     await user.type(await screen.findByLabelText('8-digit code'), '12345678{Enter}');
     await heading('Your name');
-    expect(screen.queryByRole('button', { name: 'Create account' })).toBeNull();
     await user.type(screen.getByLabelText('First name'), 'Ada');
-    await user.click(screen.getByRole('button', { name: 'Finish' }));
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
     // Passkeys off: straight to the password.
     await heading('Create a password');
     window.localStorage.clear();

@@ -108,13 +108,33 @@ describe('every screen and state draws the real card, held', () => {
       ['email', ''], ['choose', ''], ['passkey', ''], ['password', ''], ['totp', ''], ['email-code', ''], ['email-code', 'resent'],
       ['first-credential', ''], ['create-passkey', ''], ['create-password', ''], ['totp-setup', ''], ['done', 'passkey'], ['done', 'password'],
       ['access-help', ''], ['request-access', ''], ['request-access', 'missing'], ['request-access', 'sent'], ['sign-up', ''], ['sign-up', 'not-allowed'],
-      ['sign-up-code', ''], ['sign-up-name', 'finish'], ['sign-up-name', 'create-account'], ['done', 'new-account'],
+      ['sign-up-code', ''], ['sign-up-name', ''], ['sign-up-name', 'missing'], ['done', 'new-account'],
       ['email', 'empty'], ['email', 'invalid'], ['passkey', 'cancelled'], ['password', 'wrong'], ['totp', 'wrong'], ['email-code', 'wrong'], ['email-code', 'expired'],
       ['email', 'throttled'], ['email', 'offline'], ['create-passkey', 'failed'], ['create-password', 'too-short'],
       ['trouble', ''], ['help', 'passkey'], ['help', 'password'], ['help', 'totp'], ['help', 'code'], ['help', 'email'], ['help', 'else'],
       ['reset-code', ''], ['reset-password', ''], ['signed-out', ''],
     ] as const;
     for (const [screen, state] of studio) expect(() => resolvePreviewSpec({ screen, state }), `${screen}/${state}`).not.toThrow();
+  });
+
+  it('draws a retired state ID as the state that replaced it (hosts store IDs)', () => {
+    // v0.1.10-alpha.1: the name step's "Create account" and "Finish" became one Continue (register A6).
+    for (const retired of ['create-account', 'finish']) {
+      expect(resolvePreviewSpec({ screen: 'sign-up-name', state: retired }).state).toBe('');
+      const { stage } = draw({ screen: 'sign-up-name', state: retired, family: 'osbm' });
+      expect([...stage.querySelectorAll('button')].map((b) => b.textContent)).toContain('Continue');
+      expect(stage.textContent).not.toMatch(/Create account|Finish/);
+    }
+    // Only on the screen that retired them, and never through the prototype.
+    expect(() => resolvePreviewSpec({ screen: 'sign-up-code', state: 'create-account' })).toThrow(/has no state "create-account"/);
+    expect(() => resolvePreviewSpec({ screen: 'sign-up-name', state: 'toString' })).toThrow(/has no state "toString"/);
+  });
+
+  it('the name step says Continue, and its missing-name state shows the field error', () => {
+    const { stage } = draw({ screen: 'sign-up-name', state: 'missing', family: 'osbm' });
+    expect(stage.querySelector('[data-auth-kit-slot="button"]')?.textContent).toBe('Continue');
+    expect(stage.querySelector('[data-auth-kit-slot="fieldError"]')?.textContent).toContain('Enter your name');
+    expect(stage.querySelector('input[name="given-name"]')?.getAttribute('aria-invalid')).toBe('true');
   });
 
   it.each(ALL)('$screen/$state: one real component, its heading, the stage marked, nothing happened', ({ screen, state }) => {

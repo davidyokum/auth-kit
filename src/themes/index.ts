@@ -36,7 +36,9 @@ export type CardEdge = 'defined' | 'soft';
  * The card's style (register E5, decided 2026-10-19; Card Studio's directions, `design/shared/sign-in-card.js`):
  * - `quiet` (default): a white card, the defined edge, a soft shadow, generous spacing, no accent line;
  * - `monogram`: Quiet plus the site's initials as a small badge above the heading, warmer neutrals, rounder corners;
- * - `frosted`: a translucent, blurred panel (solid where the browser can't blur);
+ * - `frosted`: a translucent, blurred panel (solid where the browser can't blur); 66% white on a light page,
+ *   and 90% white where the page is dark (`color-scheme: dark`), so its words, links, errors, focus ring,
+ *   and fields keep their contrast over the dark page;
  * - `plain`: no card: the form sits in a soft, readable column the backdrop fades into (the one
  *   exception to E4's no-fade rule, kept for some sites; it has no edge);
  * - `porcelain`: a luminous sheet: the edge, layered soft shadows with a faint glow in the family
@@ -649,6 +651,10 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
     case 'frosted':
       Object.assign(v, {
         '--ak-card-bg': 'rgba(255,255,255,0.66)',
+        // On a dark page (`color-scheme: dark`; `authKitStyles` picks it with light-dark()): at 66% the page
+        // shows through enough to sink links to 2.2:1 and the focus ring to 1.6:1 (v0.1.10-alpha). At 90%
+        // every family's links, errors, muted text, focus ring, and fields pass over its darkest colour.
+        '--ak-card-bg-dark': 'rgba(255,255,255,0.9)',
         '--ak-card-solid': toHex(over(W, 0.66, theme.palette.page)),
         '--ak-hair': sh(0.12),
         '--ak-option-border': sh(0.12),

@@ -26,8 +26,6 @@ export interface PreviewPlacement {
   held: Partial<HeldStates>;
   /** `SignIn`'s step-up (`reauth`). */
   reauth?: boolean;
-  /** `SignUp`'s "Your name" button. */
-  nameButton?: 'create' | 'finish';
   /** The setting a sign-up screen draws with (`domains` or `open`). */
   signUpSetting?: NormalizedAccountCreation;
 }
@@ -355,8 +353,11 @@ const SCREENS: readonly ScreenDef[] = [
     label: 'Your name',
     group: 'access',
     component: 'sign-up',
-    states: [state('create-account', '“Create account”'), state('finish', '“Finish”')],
-    place: (r, s) => signUp(r, { view: { name: 'name' }, email: r.email }, { nameButton: s === 'finish' ? 'finish' : 'create' }),
+    states: [state('', 'As it first shows'), state('missing', 'Name missing', true)],
+    place: (r, s) =>
+      s === 'missing'
+        ? signUp(r, { view: { name: 'name' }, email: r.email, feedback: { error: ERRORS.emptyName, field: 'given' } })
+        : signUp(r, { view: { name: 'name' }, email: r.email }),
   },
   // Trouble signing in
   {
@@ -404,6 +405,15 @@ const SCREENS: readonly ScreenDef[] = [
 
 const BY_ID: ReadonlyMap<string, ScreenDef> = new Map(SCREENS.map((s) => [s.id, s]));
 
+/**
+ * State IDs a release has retired, and the state each now draws. Hosts store IDs, so a retired one keeps
+ * working. v0.1.10-alpha.1: the name step's two buttons ("Create account", "Finish") became one, Continue
+ * (register A6).
+ */
+const RETIRED_STATES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'sign-up-name': { 'create-account': '', finish: '' },
+};
+
 /** Every screen and its states, in flow order (for a host's lists and menus). */
 export const PREVIEW_SCREENS: readonly PreviewScreen[] = Object.freeze(
   SCREENS.map((s) => Object.freeze({ id: s.id, label: s.label, group: s.group, component: s.component, states: Object.freeze(s.states.map((st) => Object.freeze({ ...st }))) })),
@@ -413,7 +423,9 @@ export const PREVIEW_SCREENS: readonly PreviewScreen[] = Object.freeze(
 export function findScreen(screen: string, stateId: string): { screen: ScreenDef; state: string } | { problem: string } {
   const def = BY_ID.get(screen);
   if (!def) return { problem: `there's no screen "${screen}". Screens: ${SCREENS.map((s) => s.id).join(', ')}.` };
-  const resolved = stateId === '' ? def.states[0]!.id : stateId;
+  const retired = Object.hasOwn(RETIRED_STATES, screen) ? RETIRED_STATES[screen]! : {};
+  const current = Object.hasOwn(retired, stateId) ? retired[stateId]! : stateId;
+  const resolved = current === '' ? def.states[0]!.id : current;
   if (!def.states.some((s) => s.id === resolved)) {
     return { problem: `the "${screen}" screen has no state "${stateId}". States: ${def.states.map((s) => (s.id === '' ? "'' (the default)" : s.id)).join(', ')}.` };
   }

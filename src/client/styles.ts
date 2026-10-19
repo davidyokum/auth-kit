@@ -9,6 +9,10 @@
  *
  * The phone layout applies under 480px, and wherever an ancestor carries `data-auth-kit-device="phone"`
  * (a preview drawing a phone on a wide page, ADR 0025): the same declarations either way.
+ *
+ * The card is light on any page. The see-through Frosted style thickens where the page is dark: a page that is
+ * dark declares `color-scheme: dark`, and the card's fill follows it (`light-dark()`, in browsers that have it;
+ * elsewhere it keeps its light-page fill).
  */
 /** The phone layout's rules, scoped: `''` for the media query, an ancestor selector for a forced phone. */
 const phoneRules = (scope: string) =>
@@ -21,6 +25,7 @@ export const authKitStyles = `
 :where([data-auth-kit] [data-auth-kit-slot="card"]) { position: relative; display: grid; gap: 1rem; box-sizing: border-box; padding: var(--ak-card-padding, 36px 32px 24px); background: var(--ak-card-bg, var(--ak-surface, #fff)); color: var(--ak-text, #3c434b); border: 1px solid var(--ak-edge, #4a5f73); border-radius: var(--ak-card-radius, 12px); box-shadow: var(--ak-card-shadow, 0 1px 2px rgba(9, 41, 64, 0.05), 0 16px 36px -16px rgba(9, 41, 64, 0.22)); font-size: 1rem; line-height: 1.5; }
 :where([data-auth-kit] [data-auth-kit-slot="monogram"]) { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; background: var(--ak-mono, #092940); color: var(--ak-mono-ink, #fff); font-weight: 700; font-size: 17px; letter-spacing: 0.05em; line-height: 1; margin-bottom: 6px; }
 :where([data-auth-kit-style="frosted"] [data-auth-kit-slot="card"]) { -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5); }
+@supports (color: light-dark(#000, #fff)) { :where([data-auth-kit-style="frosted"] [data-auth-kit-slot="card"]) { background: light-dark(var(--ak-card-bg, rgba(255, 255, 255, 0.66)), var(--ak-card-bg-dark, rgba(255, 255, 255, 0.9))); } }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { :where([data-auth-kit-style="frosted"] [data-auth-kit-slot="card"]) { background: var(--ak-card-solid, #fff); } }
 :where([data-auth-kit-style="plain"]) { position: relative; isolation: isolate; }
 :where([data-auth-kit-style="plain"])::before { content: ""; position: fixed; z-index: -1; top: 0; bottom: 0; left: 50%; width: calc(var(--ak-card-width, 380px) + 184px); transform: translateX(-50%); pointer-events: none; background: linear-gradient(90deg, transparent 0, var(--ak-ground, #f3f4f6) 56px, var(--ak-ground, #f3f4f6) calc(100% - 56px), transparent 100%); }
@@ -45,7 +50,7 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] textarea[data-auth-kit-slot="input"]) { min-height: 6rem; resize: vertical; }
 :where([data-auth-kit] [data-auth-kit-slot="input"]::placeholder) { color: #646e79; }
 :where([data-auth-kit] [data-auth-kit-slot="input"][aria-invalid="true"]) { border-color: var(--ak-error, #b42318); border-width: 2px; }
-:where([data-auth-kit] :focus-visible) { outline: 3px solid var(--ak-focus, #3892e1); outline-offset: 2px; }
+:where([data-auth-kit] :focus-visible) { outline: 3px solid var(--ak-focus, #2881cd); outline-offset: 2px; }
 :where([data-auth-kit] [data-auth-kit-slot="fieldError"]) { margin: 0; color: var(--ak-error, #b42318); font-weight: 600; }
 :where([data-auth-kit] [data-auth-kit-slot="summary"]) { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.75rem 0.875rem; border: 2px solid var(--ak-error, #b42318); border-radius: 8px; color: var(--ak-error, #b42318); font-weight: 600; }
 :where([data-auth-kit] [data-auth-kit-slot="summary"][hidden]) { display: none; }

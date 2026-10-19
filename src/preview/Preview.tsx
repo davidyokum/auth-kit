@@ -86,7 +86,6 @@ export function PreviewCard(props: { r: ResolvedPreviewSpec; placement: ReturnTy
           passkeysEnabled={r.passkeysEnabled}
           notices={{ mounted: true }}
           checkBreachedPassword={false}
-          {...(placement.nameButton && { nameButton: placement.nameButton })}
           {...(r.qrCode && { renderQrCode: sampleQrCode })}
         />
       );

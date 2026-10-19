@@ -145,8 +145,10 @@ describe('drawBackdropStill', () => {
 
 describe('families', () => {
   it('pins the brand colors from the design report (a change here is a brand decision)', () => {
-    expect(BACKDROP_FAMILIES.osbm.card).toMatchObject({ heading: '#092940', body: '#3c434b', link: '#1668b0', button: '#1e79c8', focus: '#3892e1', rule: '#092940', border: '#4a5f73' });
-    expect(BACKDROP_FAMILIES.unc.card).toMatchObject({ link: '#007fae', button: '#13294b', rule: '#4b9cd3', border: '#2c4266' });
+    // v0.1.10-alpha.1: the focus ring (was #3892e1) and UNC's links (were #007fae) deepened, same hues, to pass on
+    // every card style's surfaces (test/screenshots measures them); #007fae stays in UNC's backdrop palette.
+    expect(BACKDROP_FAMILIES.osbm.card).toMatchObject({ heading: '#092940', body: '#3c434b', link: '#1668b0', button: '#1e79c8', focus: '#2881cd', rule: '#092940', border: '#4a5f73' });
+    expect(BACKDROP_FAMILIES.unc.card).toMatchObject({ link: '#006d9b', button: '#13294b', rule: '#4b9cd3', border: '#2c4266', focus: '#2881cd' });
     expect(BACKDROP_FAMILIES.personal.card).toMatchObject({ link: '#1c326e', button: '#1c1917', rule: '#1c326e', border: '#57514c' });
     expect(backdropPalette('osbm')).toMatchObject({ page: '#f3f4f6', primary: '#1e79c8', ink: '#092940' });
     expect(backdropPalette('unc')).toMatchObject({ primary: '#4b9cd3', secondary: '#007fae', ink: '#13294b' });
