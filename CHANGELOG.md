@@ -39,6 +39,16 @@ Preview mode (register E9, [ADR 0025](docs/decisions/0025-preview-mode.md)): the
 
 None for sites. A site that bundled `auth-kit/preview` into a production build (none should) now fails `auth-kit check-prod-build`.
 
+### Release assets
+
+Built by CI from the tag. All three are covered by one provenance attestation (`gh attestation verify <file> --repo davidyokum/auth-kit`, verified 2026-10-19). A local `npm run build:preview` of the tag reproduces both preview files byte for byte.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `auth-kit-0.1.10-alpha.tgz` | 1,517,953 | `44aee6cbe4078acfaf3b1aed660d83dea7170ace8541eb448a7a7045640c2370` |
+| `auth-kit-preview.js` | 390,146 (119,847 gzipped) | `7faa20c23c85b1d2beb555aa3f1539eda1a68d2aef7a38c338b812ed45d783dc` |
+| `auth-kit-preview-backdrops.js` | 609,200 (372,305 gzipped) | `00000d95085d5304ebe2cce4ca6b0b1ca3a2efa2aa508e12d761a07597baa25d` |
+
 ## [0.1.9-alpha.3] - 2026-10-19
 
 Three fixes the template and demo upgrade to v0.1.9 found, released right after v0.1.9-alpha.2 (which had already shipped). Pre-release. No breaking changes.
