@@ -63,6 +63,7 @@ import {
 import { ACCESS_REQUEST_TABLE_SCHEMA, RATE_LIMIT_TABLE_SCHEMA, SITE_SETTINGS_TABLE_SCHEMA } from '../accounts/schema.js';
 import { ACCESS_REQUEST_DIGEST_ENV, UNVERIFIED_SWEEP_ENV } from '../accounts/jobs-env.js';
 import { ACCOUNT_CREATION_POLICY } from '../shared/policy.js';
+import { UNVERIFIED_SWEEP_MARK } from '../amplify/sweep-mark.js';
 import { type HelpAddressSetting, helpSettingProblems, isThemeFamily, readHelpSetting, senderProblems, type ThemeFamily } from '../themes/index.js';
 import { INVITE_EXPIRY_ENV } from './invite-expiry-env.js';
 import { ADMIN_POLICY } from './policy.js';
@@ -806,6 +807,8 @@ export interface UnverifiedAccountSweepProps {
  * the audit table, its own log group.
  */
 export class UnverifiedAccountSweep extends Construct {
+  /** The mark the preset looks for: a sign-up site's pool must have this sweep (register D3; synthesis fails otherwise). */
+  readonly [UNVERIFIED_SWEEP_MARK]: { readonly userPool: unknown };
   readonly function: lambda.Function;
   readonly role: iam.Role;
   readonly schedule: scheduler.CfnSchedule;
@@ -815,6 +818,7 @@ export class UnverifiedAccountSweep extends Construct {
 
   constructor(scope: Construct, id: string, props: UnverifiedAccountSweepProps) {
     super(scope, id);
+    this[UNVERIFIED_SWEEP_MARK] = { userPool: props.userPool };
     const expression = (props.schedule ?? INVITE_EXPIRY_DEFAULT_SCHEDULE).trim();
     const minutes = inviteExpiryScheduleMinutes(expression);
     if (minutes !== undefined && (minutes < 10 || minutes > 1440)) throw new Error(`auth-kit: schedule "${expression}" must run between every 10 minutes and once a day.`);

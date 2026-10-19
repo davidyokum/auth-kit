@@ -1,3 +1,4 @@
+import { UNVERIFIED_SWEEP_MARK, isUnverifiedSweep } from '../../src/amplify/sweep-mark.js';
 /**
  * Account creation's AWS resources (auth-kit/admin/cdk, ADR 0023/0024) by CDK synthesis: the three
  * tables and their grants, the unverified-account sweep and the access-request digest (schedule,
@@ -228,6 +229,12 @@ describe('UnverifiedAccountSweep', () => {
     });
     return { template, construct: built! };
   }
+
+  it('carries the mark the preset looks for, with the pool it sweeps (register D3)', () => {
+    const { construct } = sweep();
+    expect(isUnverifiedSweep(construct)).toBe(true);
+    expect((construct[UNVERIFIED_SWEEP_MARK].userPool as cognito.UserPool).node.defaultChild).toBeDefined();
+  });
 
   it('runs hourly in UTC by default, in a schedule group of its own, with no flexible window', () => {
     const { template, construct } = sweep();

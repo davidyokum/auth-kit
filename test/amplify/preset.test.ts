@@ -1,3 +1,5 @@
+import { Construct } from 'constructs';
+import { UNVERIFIED_SWEEP_MARK } from '../../src/amplify/sweep-mark.js';
 import { AmplifyAuth, type AuthProps } from '@aws-amplify/auth-construct';
 import { App, Fn, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
@@ -41,7 +43,8 @@ function synth(
     branch = 'main',
     beforeApply,
     customMessage = true,
-  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean } = {},
+    sweep = true,
+  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean; sweep?: boolean } = {},
 ) {
   const context: Record<string, string> = {};
   if (type !== 'none') context['amplify-backend-type'] = type;
@@ -51,6 +54,8 @@ function synth(
   const stack = new Stack(app, 'AuthStack');
   const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options) as unknown as AuthProps);
   if (customMessage) addCustomMessageTrigger(auth, stack);
+  // Stands in for UnverifiedAccountSweep (test/accounts/cdk.test.ts covers the real one's mark).
+  if (sweep) Object.assign(new Construct(stack, 'UnverifiedSweepMark'), { [UNVERIFIED_SWEEP_MARK]: { userPool: auth.resources.userPool } });
   beforeApply?.(auth, stack);
   const applied = applyAuthStandard(auth, options);
   return { app, stack, auth, applied, template: () => Template.fromStack(stack) };
@@ -417,7 +422,7 @@ describe('account creation (ADR 0023)', () => {
     ['domains', { mode: 'domains', domains: ['example.edu'] }],
     ['open', { mode: 'open' }],
   ] as const)("keeps Cognito's own SignUp off in mode %s", (mode, accountCreation) => {
-    const t = synth({ ...BASE, accountCreation, ...(mode === 'open' && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
+    const t = synth({ ...BASE, accountCreation, ...((mode === 'open' || mode === 'domains') && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
     t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
   });
 
@@ -461,6 +466,8 @@ describe('account creation (ADR 0023)', () => {
 
   it('open mode requires the site’s CLOUDFRONT web ACL with the challenge rules (M4)', () => {
     expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' } })).toThrow(/mode 'open' needs siteWebAclArn.*createSiteWebAcl/s);
+    // Register D3: every sign-up gets the silent check, domains mode included.
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } })).toThrow(/mode 'domains' needs siteWebAclArn/);
     expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
     expect(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).applied.siteWebAclArn).toBe(SITE_ACL);
     // A REGIONAL ACL (the user pool's kind) or another Region can't front CloudFront.
@@ -472,7 +479,7 @@ describe('account creation (ADR 0023)', () => {
   });
 
   it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {
-    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } });
+    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] }, siteWebAclArn: SITE_ACL });
     expect(() => template()).toThrow(/preSignUpForAccountCreation/);
   });
 
@@ -500,6 +507,16 @@ describe('account creation (ADR 0023)', () => {
   it("leaves the app client's write permissions at Cognito's default (every app client can write required attributes such as email anyway)", () => {
     const client = Object.values(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).template().findResources('AWS::Cognito::UserPoolClient'))[0] as { Properties: Record<string, unknown> };
     expect(client.Properties).not.toHaveProperty('WriteAttributes');
+  });
+
+  it('a sign-up site fails synthesis without the unverified-account sweep for its pool (register D3)', () => {
+    for (const accountCreation of [{ mode: 'domains', domains: ['example.org'] }, { mode: 'open' }] as const) {
+      const options = { ...BASE, accountCreation, siteWebAclArn: SITE_ACL };
+      const { template } = synth(options, { sweep: false, beforeApply: preSignUpTrigger });
+      expect(() => template()).toThrow(/UnverifiedAccountSweep/);
+    }
+    // An invite-only site has no sign-up accounts to sweep.
+    expect(() => synth(BASE, { sweep: false }).template()).not.toThrow();
   });
 
   it('sets the code lifetime once, as the sign-in session', () => {

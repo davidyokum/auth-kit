@@ -202,8 +202,8 @@ export interface AuthStandardOptions {
    * The CLOUDFRONT-scope web ACL in front of the site's sign-up route (`createSiteWebAcl`, with
    * `accountCreationWafRules`: a silent challenge and a per-IP limit), as a literal ARN
    * (`arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>`). **Required in `open` mode**
-   * (ADR 0023): anyone may create an account there, so the challenge is the bot check, and synthesis
-   * fails without it. Optional in `domains` mode. Associate it with the Amplify app (Hosting →
+   * (ADR 0023, register D3): every sign-up gets the silent check, so synthesis fails without it in
+   * `domains` and `open` modes. Associate it with the Amplify app (Hosting →
    * Firewall); the sign-up route also refuses requests that didn't pass the challenge.
    */
   siteWebAclArn?: string;
@@ -479,10 +479,10 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     if (!allowsSelfSignUp(accountCreation)) fail(`siteWebAclArn guards the sign-up route; accountCreation.mode '${accountCreation.mode}' has none.`);
     siteWebAclArn = o.siteWebAclArn.trim();
   }
-  if (accountCreation.mode === 'open' && siteWebAclArn === null) {
+  if (allowsSelfSignUp(accountCreation) && siteWebAclArn === null) {
     fail(
-      "accountCreation mode 'open' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route " +
-        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Anyone can create an account in open mode, so the challenge is required (ADR 0023).',
+      `accountCreation mode '${accountCreation.mode}' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route ` +
+        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Every sign-up gets the silent WAF check (register D3, ADR 0023).',
     );
   }
   let codeLifetime: number;

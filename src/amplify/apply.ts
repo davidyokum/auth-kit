@@ -8,6 +8,8 @@ import {
   PASSWORD_POLICY,
   SESSION_POLICY,
 } from '../shared/policy.js';
+import { allowsSelfSignUp } from '../shared/account-creation.js';
+import { UNVERIFIED_SWEEP_MARK, isUnverifiedSweep } from './sweep-mark.js';
 import { CUSTOM_MESSAGE_GATE_ENV } from './custom-message.js';
 import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions, webAclArnRegion } from './options.js';
 import { associateAuthWebAcl, createAuthWebAcl } from './waf.js';
@@ -93,6 +95,22 @@ function renderedPool(stack: Stack, pool: CfnUserPool): RenderedPool {
     AdminCreateUserConfig: { AllowAdminCreateUserOnly: config?.allowAdminCreateUserOnly ?? config?.AllowAdminCreateUserOnly },
     LambdaConfig: { PreSignUp: lambda?.preSignUp ?? lambda?.PreSignUp, CustomMessage: lambda?.customMessage ?? lambda?.CustomMessage },
   };
+}
+
+const NO_UNVERIFIED_SWEEP = (mode: string) =>
+  `auth-kit: accountCreation mode '${mode}' lets people create accounts, and one never verified must be deleted after 24 hours (register D3). ` +
+  'Add UnverifiedAccountSweep from auth-kit/admin/cdk for this pool (new UnverifiedAccountSweep(stack, "UnverifiedSweep", { userPool, auditLog })).';
+
+/** True when an UnverifiedAccountSweep in this app sweeps this pool (its L2, the L1 itself, or a pool it can't tell apart). */
+function hasUnverifiedSweep(pool: CfnUserPool): boolean {
+  return pool.node.root.node.findAll().some((c) => {
+    if (!isUnverifiedSweep(c)) return false;
+    const target = c[UNVERIFIED_SWEEP_MARK].userPool as { node?: { defaultChild?: unknown } } | null;
+    if (target === pool) return true;
+    if (target && typeof target === 'object' && target.node) return target.node.defaultChild === pool || target.node.defaultChild === undefined;
+    // An imported pool (`UserPool.fromUserPoolId`): no construct to compare, so count it.
+    return true;
+  });
 }
 
 const GATE_KEY = Object.keys(CUSTOM_MESSAGE_GATE_ENV)[0]!;
@@ -234,6 +252,13 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPool.node.addValidation({
     validate: () => (renderedPool(stack, cfnUserPool).LambdaConfig?.CustomMessage ? customMessageGateProblems(stack, cfnUserPool) : [NO_CUSTOM_MESSAGE_TRIGGER]),
   });
+  if (allowsSelfSignUp(o.accountCreation)) {
+    // Register D3: accounts made by sign-up and never verified are deleted after 24 hours. Cognito
+    // doesn't do it, so a sign-up site must deploy UnverifiedAccountSweep for this pool.
+    cfnUserPool.node.addValidation({
+      validate: () => (hasUnverifiedSweep(cfnUserPool) ? [] : [NO_UNVERIFIED_SWEEP(o.accountCreation.mode)]),
+    });
+  }
   if (o.accountCreation.mode === 'domains') {
     cfnUserPool.node.addValidation({
       validate: () => {
