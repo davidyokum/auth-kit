@@ -4,6 +4,6 @@
 - textbox "First name"
 - text: Last name
 - textbox "Last name"
-- button "Finish"
+- button "Continue"
 - status
 - paragraph: This site is managed by the NC Office of State Budget and Management
