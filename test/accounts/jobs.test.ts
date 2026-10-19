@@ -374,9 +374,9 @@ function seedAdmins(pool: ReturnType<typeof fakeUserPool>) {
   pool.add({ sub: 'acp-1', email: 'acp@example.org' }, 'admin-content-people');
   pool.add({ sub: 'acp-off', email: 'acp-off@example.org', enabled: false }, 'admin-content-people');
   pool.add({ sub: 'no-address', email: '' }, 'superadmin');
-  pool.add({ sub: 'content-1', email: 'content@example.org' }, 'reviewers');
+  pool.add({ sub: 'content-1', email: 'content@example.org' }, 'admin-content');
   pool.add({ sub: 'view-1', email: 'view@example.org' }, 'admin-view');
-  pool.add({ sub: 'content-admin-1', email: 'content-admin@example.org' }, 'reviewers');
+  pool.add({ sub: 'reviewer-1', email: 'reviewer@example.org' }, 'reviewers');
   pool.add({ sub: 'member-1', email: 'member@example.org' });
 }
 
@@ -527,7 +527,7 @@ describe('createAccessRequestDigest', () => {
     const { pool, store, sent, run } = digestSetup();
     pool.add({ sub: 'acp-off', email: 'acp-off@example.org', enabled: false }, 'admin-content-people');
     pool.add({ sub: 'no-address', email: '' }, OWNER_GROUP);
-    pool.add({ sub: 'content-1', email: 'content@example.org' }, 'reviewers');
+    pool.add({ sub: 'content-1', email: 'content@example.org' }, 'admin-content');
     await store.create({ email: 'nia@example.com', now: new Date(NOW - DAY) });
     await expect(run()).rejects.toThrow(/requests are waiting, but nobody who manages people has an email address/);
     expect(sent).toEqual([]);
@@ -556,7 +556,7 @@ describe('createAccessRequestDigest', () => {
     seedAdmins(pool);
     await store.create({ email: 'nia@example.com', now: new Date(NOW - DAY) });
     expect(await run()).toMatchObject({ sent: true, recipients: 1 });
-    expect(sent[0]!.to).toEqual(['content-admin@example.org']);
+    expect(sent[0]!.to).toEqual(['reviewer@example.org']);
     const base = { requests: createMemoryAccessRequestStore(), mailer: recordingMailer().mailer, site: { ...SITE, help: 'help@example.org' }, peopleUrl: PEOPLE_URL };
     expect(() => createAccessRequestDigest({ ...base, userPoolId: POOL_ID, recipientGroups: [] })).toThrow(/at least one recipient group/);
     expect(() => createAccessRequestDigest({ ...base, userPoolId: 'not-a-pool' })).toThrow(/isn't a Cognito user pool ID/);
