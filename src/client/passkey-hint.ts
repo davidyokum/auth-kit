@@ -44,7 +44,8 @@ function read(): HintState | null {
     const raw = s.getItem(KEY);
     if (raw) {
       const v = JSON.parse(raw) as Partial<HintState>;
-      if (typeof v.salt === 'string' && v.salt.length >= 16 && Array.isArray(v.hashes)) {
+      // The salt is what rememberPasskey writes: 16 random bytes as 32 hex characters (anything else: start over).
+      if (typeof v.salt === 'string' && /^[0-9a-f]{32}$/.test(v.salt) && Array.isArray(v.hashes)) {
         return { salt: v.salt, hashes: v.hashes.filter((h): h is string => typeof h === 'string').slice(-MAX_ADDRESSES), skips: v.skips && typeof v.skips === 'object' ? v.skips : {} };
       }
     }
