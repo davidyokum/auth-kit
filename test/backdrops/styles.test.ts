@@ -21,6 +21,9 @@ const BUDGET: Record<string, { calls: number; segments: number }> = {
   'stained-glass': { calls: 120, segments: 120 },
   constellation: { calls: 1500, segments: 1500 },
   ripples: { calls: 2600, segments: 2600 },
+  'yokum-magnetic': { calls: 6700, segments: 6400 },
+  'ai-survey-dots': { calls: 2400, segments: 2300 },
+  'pulse-dots': { calls: 2400, segments: 2300 },
   painted: { calls: 12, segments: 0 },
 };
 
@@ -52,7 +55,14 @@ describe.each(LATEST)('$style', ({ style, version, module }) => {
     const a = still.ctx.digest();
     const later = createScene({ style, version, seed: 'motion' });
     later.draw({ t: (t0 ?? later.stillTime) + 4, dt: 0, pointer: NONE });
-    if (version > 0 && module.versions[version - 1]!.fps > 0) expect(later.ctx.digest()).not.toBe(a);
+    if (settles !== undefined && settles < 4) {
+      // Holds still almost at once (a dot field at rest): only the pointer or a tap moves it.
+      const at = createScene({ style, version, seed: 'motion' });
+      at.draw({ t: settles, dt: 0, pointer: NONE });
+      const after = createScene({ style, version, seed: 'motion' });
+      after.draw({ t: settles + 4, dt: 0, pointer: NONE });
+      expect(after.ctx.digest()).toBe(at.ctx.digest());
+    } else if (version > 0 && module.versions[version - 1]!.fps > 0) expect(later.ctx.digest()).not.toBe(a);
     if (module.interactivity === 'pointer') {
       const away = createScene({ style, version, seed: 'pointer' });
       const near = createScene({ style, version, seed: 'pointer' });
@@ -124,7 +134,7 @@ describe('the registry', () => {
   it('lists unique IDs, versions in order, labels, and frame rates within 30', () => {
     const ids = STYLE_MODULES.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(['magnetic-dots', 'contours', 'flow-lines', 'watercolor', 'aurora', 'stained-glass', 'constellation', 'ripples', 'painted']);
+    expect(ids).toEqual(['magnetic-dots', 'contours', 'flow-lines', 'watercolor', 'aurora', 'stained-glass', 'constellation', 'ripples', 'yokum-magnetic', 'ai-survey-dots', 'pulse-dots', 'painted']);
     for (const m of STYLE_MODULES) {
       expect(m.label.length).toBeGreaterThan(2);
       m.versions.forEach((v, i) => {
