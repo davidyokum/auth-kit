@@ -58,7 +58,7 @@ function everyScheduledJob(): Record<string, Resource> {
     signInUrl: 'https://reports.example.org/sign-in',
     peopleUrl: 'https://reports.example.org/admin/people',
     helpEmail: 'help@example.org',
-    from: 'Example Reports <sign-in@mail.example.org>',
+    from: 'Example Reports <sign-in@yokum.app>',
   });
   return Template.fromStack(stack).toJSON().Resources as Record<string, Resource>;
 }

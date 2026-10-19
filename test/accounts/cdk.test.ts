@@ -369,11 +369,11 @@ type DigestProps = Omit<AccessRequestDigestProps, 'userPool' | 'requests' | 'set
 
 const DIGEST: DigestProps = {
   siteName: 'Example Reports',
-  family: 'personal',
+  family: 'unc',
   signInUrl: 'https://reports.example.org/sign-in',
   peopleUrl: 'https://reports.example.org/admin/people',
   helpEmail: 'help@example.org',
-  from: 'Example Reports <sign-in@mail.example.org>',
+  from: '"Example Reports (UNC)" <sign-in@mail.example.org>',
 };
 
 describe('AccessRequestDigest', () => {
@@ -413,21 +413,21 @@ describe('AccessRequestDigest', () => {
           AUTH_KIT_USER_POOL_ID: { Ref: Match.stringLikeRegexp('^Pool') },
           AUTH_KIT_REQUEST_TABLE: { Ref: Match.stringLikeRegexp('^RequestsTable') },
           AUTH_KIT_SITE_NAME: 'Example Reports',
-          AUTH_KIT_FAMILY: 'personal',
+          AUTH_KIT_FAMILY: 'unc',
           AUTH_KIT_SIGN_IN_URL: 'https://reports.example.org/sign-in',
           AUTH_KIT_PEOPLE_URL: 'https://reports.example.org/admin/people',
           AUTH_KIT_HELP_EMAIL: 'help@example.org',
-          AUTH_KIT_MAIL_FROM: 'Example Reports <sign-in@mail.example.org>',
+          AUTH_KIT_MAIL_FROM: '"Example Reports (UNC)" <sign-in@mail.example.org>',
         },
       },
     });
-    digest({ withSettings: true, configurationSet: 'auth', recipientGroups: ['owner', 'people-managers'], family: 'unc', from: '"Example Reports (UNC)" <sign-in@mail.example.org>' }).template.hasResourceProperties('AWS::Lambda::Function', {
+    digest({ withSettings: true, configurationSet: 'auth', recipientGroups: ['owner', 'people-managers'], family: 'personal', from: 'Example Reports <sign-in@yokum.app>' }).template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
         Variables: Match.objectLike({
           AUTH_KIT_SETTINGS_TABLE: { Ref: Match.stringLikeRegexp('^SettingsTable') },
           AUTH_KIT_MAIL_CONFIGURATION_SET: 'auth',
           AUTH_KIT_RECIPIENT_GROUPS: 'owner,people-managers',
-          AUTH_KIT_FAMILY: 'unc',
+          AUTH_KIT_FAMILY: 'personal',
         }),
       },
     });
@@ -495,6 +495,8 @@ describe('AccessRequestDigest', () => {
     expect(() => digest({ peopleUrl: '/admin/people' })).toThrow(/peopleUrl.*https/);
     expect(() => digest({ family: 'acme' as never })).toThrow(/family/);
     expect(() => digest({ from: 'Example Reports' })).toThrow(/from/);
+    // The personal family sends only from its own sign-in@yokum.app (register F11).
+    expect(() => digest({ family: 'personal', from: 'Example Reports <sign-in@mail.example.org>' })).toThrow(/Personal sites send from sign-in@yokum\.app/);
     for (const schedule of ['rate(30 minutes)', 'rate(10 minutes)', 'rate(2 days)']) expect(() => digest({ schedule }), schedule).toThrow(/between hourly and once a day/);
     expect(() => digest({ schedule: 'daily' })).toThrow(/schedule/);
     expect(() => digest({ schedule: 'rate(1 hour)' })).not.toThrow();

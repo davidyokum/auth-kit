@@ -22,7 +22,7 @@ const BASE: AuthStandardOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
+  email: { fromAddress: 'sign-in@yokum.app', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
   // The pool's own web ACL, deliberately (register F7: deployed pools otherwise reuse the shared one).
@@ -108,10 +108,11 @@ describe('Tier 2 pool on a branch', () => {
       AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
       EmailConfiguration: {
         EmailSendingAccount: 'DEVELOPER',
-        From: 'Example Reports <sign-in@example.org>',
+        // The personal family sends from sign-in@yokum.app (register F11).
+        From: 'Example Reports <sign-in@yokum.app>',
         ReplyToEmailAddress: 'help@example.org',
         SourceArn: {
-          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/example.org']],
+          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/yokum.app']],
         },
       },
     });
@@ -122,7 +123,7 @@ describe('Tier 2 pool on a branch', () => {
     expect(formatSender('Example Site (NC OSBM)', 'sign-in@example.org')).toBe('"Example Site (NC OSBM)" <sign-in@example.org>');
     expect(formatSender('Example Site (UNC)', 'sign-in@example.org')).toBe('"Example Site (UNC)" <sign-in@example.org>');
     expect(formatSender('Reports, Example', 'a@example.org')).toBe('"Reports, Example" <a@example.org>');
-    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)', family: 'unc' } }).template();
+    const quoted = synth({ ...BASE, email: { ...BASE.email, fromAddress: 'sign-in@example.org', fromName: 'Example Site (UNC)', family: 'unc' } }).template();
     quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <sign-in@example.org>' }) });
     expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
@@ -773,9 +774,9 @@ describe('option validation', () => {
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
     ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
-    ['from name with brackets', { email: { fromAddress: 'sign-in@example.org', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['from name with brackets', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
+    ['SES domain mismatch', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -793,11 +794,12 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['no help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
-    ['a placeholder help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
-    ['a personal help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['no help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
     ['a noreply@ sender (register A10)', { email: { fromAddress: 'noreply@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /never noreply@/],
     ['a sender other than sign-in@', { email: { fromAddress: 'auth@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /sign-in@example.org/],
+    ['a personal site sending from another domain (register F11)', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /isn't the Personal family's sender\. Personal sites send from sign-in@yokum\.app \(register F11\)/],
     ['an OSBM sender without the suffix (register E4a)', { email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'osbm', replyTo: 'help@example.org' } }, /\(NC OSBM\)/],
     ['a sender without a family', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', replyTo: 'help@example.org' } as never }, /email.family is required/],
     ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
@@ -833,9 +835,9 @@ describe('option validation', () => {
   });
 
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
-    expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
+    expect(normalizeOptions(BASE).email.sesIdentity).toBe('yokum.app');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X (UNC)', family: 'unc', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });
@@ -852,7 +854,7 @@ describe('standardAuthProps', () => {
       multifactor: { mode: 'OPTIONAL', totp: true },
       accountRecovery: 'EMAIL_ONLY',
       groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
-      senders: { email: { fromEmail: 'sign-in@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
+      senders: { email: { fromEmail: 'sign-in@yokum.app', fromName: 'Example Reports', replyTo: 'help@example.org' } },
     });
   });
 
