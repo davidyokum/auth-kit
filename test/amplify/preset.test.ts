@@ -25,6 +25,8 @@ const BASE: AuthStandardOptions = {
   email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
+  // The pool's own web ACL, deliberately (register F7: deployed pools otherwise reuse the shared one).
+  waf: { ownWebAcl: true },
 };
 
 /** `none` = plain CDK, no Amplify context. */
@@ -546,15 +548,23 @@ describe('WAF options', () => {
     ]);
   });
 
+  it('a deployed pool reuses the shared web ACL unless its own is deliberate (register F7); a sandbox needs neither', () => {
+    const { waf: _waf, ...noWaf } = BASE;
+    expect(() => synth(noWaf)).toThrow(/shared web ACL \(register F7.*ownWebAcl: true/s);
+    expect(() => synth(noWaf, { type: 'sandbox' })).not.toThrow();
+    expect(synth({ ...noWaf, waf: { webAclArn: `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:regional/webacl/shared/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` } }).applied.waf.mode).toBe('shared');
+    expect(() => normalizeOptions({ ...noWaf, waf: { ownWebAcl: true, webAclArn: 'x' } })).toThrow(/can't be combined/);
+  });
+
   it('sets each rule\'s mode on its own, with custom limits', () => {
-    const t = synth({ ...BASE, waf: { signInRule: 'block', overallRule: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
+    const t = synth({ ...BASE, waf: { ownWebAcl: true, signInRule: 'block', overallRule: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
     t.hasResourceProperties('AWS::WAFv2::WebACL', {
       Rules: [
         Match.objectLike({ Action: { Block: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 50, EvaluationWindowSec: 600 }) } }),
         Match.objectLike({ Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 500 }) } }),
       ],
     });
-    expect(actions(synth({ ...BASE, waf: { signInRule: 'block' } }).template())).toEqual([
+    expect(actions(synth({ ...BASE, waf: { ownWebAcl: true, signInRule: 'block' } }).template())).toEqual([
       ['auth-kit-sign-in-attempts-per-ip', { Block: {} }],
       ['auth-kit-requests-per-ip', { Block: {} }],
     ]);

@@ -96,6 +96,13 @@ export interface WafOptions {
   webAclArn?: string;
   /** Protect sandbox pools too (a created ACL is billed; a shared one isn't). Default `false`. */
   enabledInSandbox?: boolean;
+  /**
+   * Give this pool a web ACL of its own outside a sandbox. Register F7 is one shared web ACL per
+   * account (`webAclArn`, from `createSharedAuthWebAcl`), so without `webAclArn` a deployed branch fails
+   * synthesis unless this says the own ACL is deliberate (a site alone in its account, or the first one
+   * before the shared ACL exists). Sandboxes don't need it.
+   */
+  ownWebAcl?: true;
   /** Sign-in attempts (InitiateAuth + RespondToAuthChallenge) per IP per window. Default 100. */
   signInLimit?: number;
   /** All inspected requests per IP per window. Default 1000. */
@@ -124,7 +131,7 @@ export interface WafRuleSettings {
 }
 
 export type NormalizedWafOptions =
-  | ({ mode: 'create'; enabledInSandbox: boolean } & WafRuleSettings)
+  | ({ mode: 'create'; enabledInSandbox: boolean; ownWebAcl: boolean } & WafRuleSettings)
   | { mode: 'shared'; webAclArn: string; enabledInSandbox: boolean }
   | { mode: 'off' };
 
@@ -247,7 +254,7 @@ function fail(message: string): never {
 }
 
 const RULE_KEYS = ['signInLimit', 'overallLimit', 'evaluationWindowSec', 'signInRule', 'overallRule'] as const;
-const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', ...RULE_KEYS]);
+const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', 'ownWebAcl', ...RULE_KEYS]);
 // A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
 const WEB_ACL_ARN_RE =
   /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
@@ -286,7 +293,9 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
   if (w.enabledInSandbox !== undefined && typeof w.enabledInSandbox !== 'boolean') fail('waf.enabledInSandbox must be true or false.');
   const enabledInSandbox = w.enabledInSandbox === true;
 
+  if (w.ownWebAcl !== undefined && w.ownWebAcl !== true) fail('waf.ownWebAcl is true or left out.');
   if (w.webAclArn !== undefined) {
+    if (w.ownWebAcl === true) fail("waf.ownWebAcl can't be combined with waf.webAclArn: the shared web ACL is the pool's.");
     const extra = RULE_KEYS.filter((k) => w[k] !== undefined);
     if (extra.length > 0) {
       fail(`waf.${extra.join(', waf.')} can't be combined with waf.webAclArn: a shared web ACL's rules are set where it's created.`);
@@ -302,8 +311,8 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
     return { mode: 'shared', webAclArn: arn, enabledInSandbox };
   }
 
-  const { webAclArn: _webAclArn, enabledInSandbox: _enabledInSandbox, ...rules } = w;
-  return { mode: 'create', enabledInSandbox, ...wafRuleSettings(rules, 'waf') };
+  const { webAclArn: _webAclArn, enabledInSandbox: _enabledInSandbox, ownWebAcl: _ownWebAcl, ...rules } = w;
+  return { mode: 'create', enabledInSandbox, ownWebAcl: w.ownWebAcl === true, ...wafRuleSettings(rules, 'waf') };
 }
 
 /** The retired single `action` (it applied to both rules). */

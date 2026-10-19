@@ -390,9 +390,16 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   for (const [key, value] of Object.entries(tags)) Tags.of(stack).add(key, value);
 
   // ---- WAF --------------------------------------------------------------------------------------
-  // One web ACL per pool by default, or a shared one per account and Region (ADR 0013).
+  // One shared web ACL per account and Region (register F7, ADR 0013): a deployed branch reuses it
+  // (`waf: { webAclArn }`); a pool's own ACL is for sandboxes, or deliberate (`waf: { ownWebAcl: true }`).
   let waf: AppliedWaf = { mode: 'none', webAcl: null, webAclArn: null, association: null };
   const wafWanted = o.waf.mode !== 'off' && (!isSandbox || o.waf.enabledInSandbox);
+  if (o.waf.mode === 'create' && !isSandbox && !o.waf.ownWebAcl) {
+    throw new AuthStandardConfigError(
+      'a deployed pool reuses the account\'s shared web ACL (register F7, ADR 0013): waf: { webAclArn } from createSharedAuthWebAcl. ' +
+        'For a site alone in its account, or the first one before the shared ACL exists, say so with waf: { ownWebAcl: true }.',
+    );
+  }
   if (wafWanted && o.waf.mode === 'create') {
     const created = createAuthWebAcl(stack, 'AuthKitWebAcl', { userPoolArn: userPool.userPoolArn, project: o.project, waf: o.waf });
     waf = { mode: 'created', webAcl: created.webAcl, webAclArn: created.webAcl.attrArn, association: created.association };
