@@ -101,16 +101,50 @@ const NO_UNVERIFIED_SWEEP = (mode: string) =>
   `auth-kit: accountCreation mode '${mode}' lets people create accounts, and one never verified must be deleted after 24 hours (register D3). ` +
   'Add UnverifiedAccountSweep from auth-kit/admin/cdk for this pool (new UnverifiedAccountSweep(stack, "UnverifiedSweep", { userPool, auditLog })).';
 
-/** True when an UnverifiedAccountSweep in this app sweeps this pool (its L2, the L1 itself, or a pool it can't tell apart). */
-function hasUnverifiedSweep(pool: CfnUserPool): boolean {
-  return pool.node.root.node.findAll().some((c) => {
-    if (!isUnverifiedSweep(c)) return false;
-    const target = c[UNVERIFIED_SWEEP_MARK].userPool as { node?: { defaultChild?: unknown } } | null;
-    if (target === pool) return true;
-    if (target && typeof target === 'object' && target.node) return target.node.defaultChild === pool || target.node.defaultChild === undefined;
-    // An imported pool (`UserPool.fromUserPoolId`): no construct to compare, so count it.
-    return true;
-  });
+const AMBIGUOUS_SWEEP = (path: string, what: string) =>
+  `auth-kit: the UnverifiedAccountSweep at ${path} sweeps ${what}, so synthesis can't tell whether it sweeps this pool (register D3). ` +
+  'Pass the pool itself, as Amplify gives it: new UnverifiedAccountSweep(stack, "UnverifiedSweep", { userPool: backend.auth.resources.userPool, auditLog }).';
+
+/** Which pool one sweep sweeps, as far as synthesis can tell: this one, another, or it can't say (and why). */
+type SweepTarget = 'this' | 'other' | { ambiguous: string };
+
+const isRef = (value: unknown): value is { Ref: string } =>
+  typeof value === 'object' && value !== null && Object.keys(value).length === 1 && typeof (value as { Ref?: unknown }).Ref === 'string';
+
+/**
+ * The pool an UnverifiedAccountSweep was given, matched against this one (L6): the L1 itself, the L2
+ * whose resource it is, or an imported pool whose ID is this pool's own (`{ Ref }`) count. An L2 with
+ * another resource is another pool. Anything synthesis can't tie to a pool (an imported pool with a
+ * literal ID or one known only at deploy, a construct that isn't a pool) is ambiguous, never a match.
+ */
+function sweepTargetOf(pool: CfnUserPool, target: unknown): SweepTarget {
+  if (target === pool) return 'this';
+  if (typeof target !== 'object' || target === null || !('node' in target)) return { ambiguous: "something that isn't a CDK construct" };
+  const child = (target as { node: { defaultChild?: unknown } }).node.defaultChild;
+  if (child === pool) return 'this';
+  if (child !== undefined) return 'other';
+  // No resource of its own: an imported pool (`UserPool.fromUserPoolId` / `fromUserPoolArn`), or not a pool at all.
+  const id = (target as { userPoolId?: unknown }).userPoolId;
+  if (typeof id !== 'string') return { ambiguous: "a construct that isn't a user pool" };
+  const stack = Stack.of(pool);
+  const resolved: unknown = stack.resolve(id);
+  if (JSON.stringify(resolved) === JSON.stringify(stack.resolve(pool.ref))) return 'this';
+  if (isRef(resolved)) return 'other';
+  return {
+    ambiguous: typeof resolved === 'string' ? `an imported pool with a fixed ID (${resolved})` : 'an imported pool whose ID is known only at deploy',
+  };
+}
+
+/** Why this pool has no sweep synthesis can tie to it, or `[]` when one sweeps it. */
+function unverifiedSweepProblems(pool: CfnUserPool, mode: string): string[] {
+  const ambiguous: string[] = [];
+  for (const c of pool.node.root.node.findAll()) {
+    if (!isUnverifiedSweep(c)) continue;
+    const target = sweepTargetOf(pool, c[UNVERIFIED_SWEEP_MARK].userPool);
+    if (target === 'this') return [];
+    if (target !== 'other') ambiguous.push(AMBIGUOUS_SWEEP(c.node.path, target.ambiguous));
+  }
+  return ambiguous.length > 0 ? ambiguous : [NO_UNVERIFIED_SWEEP(mode)];
 }
 
 const GATE_KEY = Object.keys(CUSTOM_MESSAGE_GATE_ENV)[0]!;
@@ -256,7 +290,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     // Register D3: accounts made by sign-up and never verified are deleted after 24 hours. Cognito
     // doesn't do it, so a sign-up site must deploy UnverifiedAccountSweep for this pool.
     cfnUserPool.node.addValidation({
-      validate: () => (hasUnverifiedSweep(cfnUserPool) ? [] : [NO_UNVERIFIED_SWEEP(o.accountCreation.mode)]),
+      validate: () => unverifiedSweepProblems(cfnUserPool, o.accountCreation.mode),
     });
   }
   if (o.accountCreation.mode === 'domains') {

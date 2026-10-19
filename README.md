@@ -766,6 +766,7 @@ const rateLimits = new RateLimitTable(admin, 'RateLimits');           // sign-up
 const requests = new AccessRequestTable(admin, 'AccessRequests');    // where the site takes requests
 const settings = new SiteSettingsTable(admin, 'SiteSettings');       // the Super admin's help address (section 12)
 // Sign-up sites (domains, open): required, synthesis fails without it (register D3).
+// The pool itself: synthesis fails if the sweep's pool can't be tied to this one (an imported pool with a fixed ID, say).
 new UnverifiedAccountSweep(admin, 'UnverifiedSweep', { userPool: backend.auth.resources.userPool, auditLog });
 new AccessRequestDigest(admin, 'RequestDigest', {
   userPool: backend.auth.resources.userPool, requests, settings,

@@ -3,7 +3,7 @@ import { UNVERIFIED_SWEEP_MARK } from '../../src/amplify/sweep-mark.js';
 import { AmplifyAuth, type AuthProps } from '@aws-amplify/auth-construct';
 import { App, Fn, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
-import { UserPoolOperation, type UserPool } from 'aws-cdk-lib/aws-cognito';
+import { UserPool, UserPoolOperation } from 'aws-cdk-lib/aws-cognito';
 import { Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { describe, expect, it } from 'vitest';
 import {
@@ -519,6 +519,49 @@ describe('account creation (ADR 0023)', () => {
     }
     // An invite-only site has no sign-up accounts to sweep.
     expect(() => synth(BASE, { sweep: false }).template()).not.toThrow();
+  });
+
+  describe('the sweep must be for this pool, as far as synthesis can tell (L6)', () => {
+    const OPEN = { ...BASE, accountCreation: { mode: 'open' as const }, siteWebAclArn: SITE_ACL };
+    /** Synthesizes an open sign-up site whose only sweeps are given these pools. */
+    const withSweeps = (...targets: ((auth: AmplifyAuth, stack: Stack) => unknown)[]) =>
+      synth(OPEN, {
+        sweep: false,
+        beforeApply: (auth, stack) => {
+          preSignUpTrigger(auth, stack);
+          targets.forEach((target, i) => Object.assign(new Construct(stack, `Sweep${i}`), { [UNVERIFIED_SWEEP_MARK]: { userPool: target(auth, stack) } }));
+        },
+      }).template;
+
+    it('counts the pool itself: its L2, its L1, or an import of its own ID', () => {
+      expect(() => withSweeps((auth) => auth.resources.userPool)()).not.toThrow();
+      expect(() => withSweeps((auth) => auth.resources.cfnResources.cfnUserPool)()).not.toThrow();
+      expect(() => withSweeps((auth, stack) => UserPool.fromUserPoolId(stack, 'SamePool', auth.resources.userPool.userPoolId))()).not.toThrow();
+    });
+
+    it('a sweep of another pool is no sweep for this one', () => {
+      expect(withSweeps((_auth, stack) => new UserPool(stack, 'OtherPool'))).toThrow(/Add UnverifiedAccountSweep from auth-kit\/admin\/cdk for this pool/);
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'OtherImport', new UserPool(stack, 'OtherPool').userPoolId))).toThrow(/Add UnverifiedAccountSweep/);
+    });
+
+    it('refuses what it can’t tie to this pool, naming the sweep and what it was given', () => {
+      // A typo'd or copied pool ID used to satisfy the check and then sweep nothing.
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'Typo', 'us-east-1_TestPool1'))).toThrow(
+        /UnverifiedAccountSweep at AuthStack\/Sweep0 sweeps an imported pool with a fixed ID \(us-east-1_TestPool1\), so synthesis can't tell whether it sweeps this pool.*backend\.auth\.resources\.userPool/,
+      );
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'Exported', Fn.importValue('SomePoolId')))).toThrow(/an imported pool whose ID is known only at deploy/);
+      expect(withSweeps((_auth, stack) => new Construct(stack, 'NotAPool'))).toThrow(/a construct that isn't a user pool/);
+      expect(withSweeps(() => ({ userPoolId: 'us-east-1_TestPool1' }))).toThrow(/something that isn't a CDK construct/);
+    });
+
+    it('one exact sweep is enough, whatever else is in the app', () => {
+      expect(() =>
+        withSweeps(
+          (_auth, stack) => UserPool.fromUserPoolId(stack, 'Typo', 'us-east-1_TestPool1'),
+          (auth) => auth.resources.userPool,
+        )(),
+      ).not.toThrow();
+    });
   });
 
   it('sets the code lifetime once, as the sign-in session', () => {
