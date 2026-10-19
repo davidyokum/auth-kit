@@ -73,6 +73,21 @@ describe('invite email', () => {
     expect(() => createSesInviteMailer({ from: 'Example <noreply@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' } })).toThrow(/never noreply@/);
     expect(() => createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'osbm', help: 'help@example.org' } })).toThrow(/Example \(NC OSBM\)/);
   });
+
+  it('a site name outside ASCII: accepted plain or RFC 2047-encoded, and always sent encoded, as SES requires', async () => {
+    const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
+    const ses = mockClient(client);
+    ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
+    const site = { siteName: 'Caf\u00e9 Reports', theme: 'osbm' as const, help: 'help@example.org' };
+    const ENCODED = '=?UTF-8?B?Q2Fmw6kgUmVwb3J0cyAoTkMgT1NCTSk=?= <sign-in@reports.example.org>';
+    for (const from of ['"Caf\u00e9 Reports (NC OSBM)" <sign-in@reports.example.org>', ENCODED, '"Cafe\u0301 Reports (NC OSBM)" <sign-in@reports.example.org>']) {
+      const mailer = createSesInviteMailer({ from, site, client });
+      await mailer.sendEmail({ to: ['x@example.org'], email: { subject: 'S', text: 'T', html: 'H' } });
+      expect(ses.commandCalls(SendEmailCommand).at(-1)!.args[0].input.FromEmailAddress, from).toBe(ENCODED);
+    }
+    // The name is still checked against the site: a wrong one is refused, encoded or not.
+    expect(() => createSesInviteMailer({ from: '=?UTF-8?B?Q2Fmw6k=?= <sign-in@reports.example.org>', site, client })).toThrow(/The sender's name is "Caf\u00e9 Reports \(NC OSBM\)"/);
+  });
 });
 
 describe('Super admin grant alert email (the default notifier)', () => {

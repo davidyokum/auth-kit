@@ -1262,12 +1262,44 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     await heading('How do you want to sign in?');
     expect(root().getAttribute('data-auth-kit-view')).toBe('choose');
     expect(slotText('who')).toBe('for ada@example.org · Change email address');
-    expect(screen.getByRole('button', { name: /^Use a passkey \(recommended\)Your face, fingerprint, or device PIN\./ })).toBeTruthy();
+    // A space between the label and the description, so a screen reader doesn't run "(recommended)Your" together.
+    expect(screen.getByRole('button', { name: 'Use a passkey (recommended) Your face, fingerprint, or device PIN.' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use a password' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
     expect(browser.get).not.toHaveBeenCalled();
     expect(allAuthCalls()).toBe(0);
+  });
+
+  it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "(recommended)"), the description below, a chevron', async () => {
+    window.localStorage.clear();
+    const { user } = setup({ classNames: { ways: 'my-ways', way: 'my-way', wayText: 'my-text', wayLabel: 'my-label', wayDescription: 'my-desc' } });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    const list = card().querySelector<HTMLElement>('[data-auth-kit-slot="ways"]')!;
+    expect(list.tagName).toBe('UL');
+    expect(list.className).toBe('my-ways');
+    const rows = [...list.querySelectorAll<HTMLButtonElement>(':scope > li > button')];
+    expect(rows.map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['passkey', 'password', 'email-code']);
+    for (const row of rows) {
+      expect(row.getAttribute('data-auth-kit-slot')).toBe('way');
+      expect(row.className).toBe('my-way');
+      // Icon, the words, chevron: in that order, and nothing else.
+      const parts = [...row.children].map((c) => c.getAttribute('data-auth-kit-icon') ?? c.getAttribute('data-auth-kit-slot'));
+      expect(parts).toEqual([row.getAttribute('data-auth-kit-choice') === 'passkey' ? 'fingerprint' : row.getAttribute('data-auth-kit-choice') === 'password' ? 'password' : 'mail', 'wayText', 'chevron']);
+    }
+    const [passkey, password] = rows as [HTMLButtonElement, HTMLButtonElement];
+    // Only the passkey is the recommended (tinted) row.
+    expect(rows.map((b) => b.hasAttribute('data-auth-kit-recommended'))).toEqual([true, false, false]);
+    const text = passkey.querySelector('[data-auth-kit-slot="wayText"]')!;
+    expect([...text.children].map((c) => c.getAttribute('data-auth-kit-slot'))).toEqual(['wayLabel', 'wayDescription']);
+    expect(text.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a passkey (recommended)');
+    expect(text.querySelector('[data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]')!.textContent).toBe('(recommended)');
+    expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.textContent).toBe('Your face, fingerprint, or device PIN.');
+    expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.className).toBe('my-desc');
+    expect(password.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a password');
+    expect(password.querySelector('[data-auth-kit-slot="wayDescription"]')).toBeNull();
   });
 
   it('the hint for that address opens the prompt; a hint for another address doesn’t', async () => {
@@ -1353,7 +1385,9 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
 
   it('keeps hashes, never addresses; and choosing another way in twice from the hint’s prompt forgets it', async () => {
     const stored = window.localStorage.getItem('auth-kit:passkey-hint:v1') ?? '';
-    expect(stored).not.toContain('ada');
+    // Not the address: hex never holds '@' or 'example' (a check for 'ada' failed when the random salt held it).
+    expect(stored).not.toContain('@');
+    expect(stored).not.toContain('example');
     expect(JSON.parse(stored).hashes[0]).toMatch(/^[0-9a-f]{64}$/);
     for (let i = 0; i < 2; i++) {
       const { user } = setup();

@@ -646,29 +646,36 @@ export function SignIn(props: SignInProps) {
           {summary}
           {heading(SIGN_IN.chooseHeading)}
           <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
-          <ul {...slot(classNames, 'list')}>
+          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, tinted and "(recommended)". */}
+          <ul {...slot(classNames, 'ways')}>
             <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={() => startPasskey()} data-auth-kit-choice="passkey" {...slot(classNames, 'secondaryButton')}>
+              <button type="button" disabled={busy} onClick={() => startPasskey()} data-auth-kit-choice="passkey" data-auth-kit-recommended="" {...slot(classNames, 'way')}>
                 <Icon name="fingerprint" />
-                <span>
-                  {SIGN_IN.choosePasskey} <span data-auth-kit-recommended="">{SIGN_IN.chooseRecommended}</span>
-                  <small {...slot(classNames, 'small')}>{SIGN_IN.choosePasskeySub}</small>
+                <span {...slot(classNames, 'wayText')}>
+                  <span {...slot(classNames, 'wayLabel')}>
+                    {SIGN_IN.choosePasskey} <span data-auth-kit-recommended-label="">{SIGN_IN.chooseRecommended}</span>
+                  </span>{' '}
+                  <span {...slot(classNames, 'wayDescription')}>{SIGN_IN.choosePasskeySub}</span>
                 </span>
                 <Icon name="chevron" />
               </button>
             </li>
             <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={() => go({ name: 'password', challenge: false })} data-auth-kit-choice="password" {...slot(classNames, 'secondaryButton')}>
+              <button type="button" disabled={busy} onClick={() => go({ name: 'password', challenge: false })} data-auth-kit-choice="password" {...slot(classNames, 'way')}>
                 <Icon name="password" />
-                <span>{SIGN_IN.choosePassword}</span>
+                <span {...slot(classNames, 'wayText')}>
+                  <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.choosePassword}</span>
+                </span>
                 <Icon name="chevron" />
               </button>
             </li>
             {emailCodeEnabled ? (
               <li {...slot(classNames, 'listItem')}>
-                <button type="button" disabled={busy} onClick={sendEmailCode} data-auth-kit-choice="email-code" {...slot(classNames, 'secondaryButton')}>
+                <button type="button" disabled={busy} onClick={sendEmailCode} data-auth-kit-choice="email-code" {...slot(classNames, 'way')}>
                   <Icon name="mail" />
-                  <span>{SIGN_IN.chooseCode}</span>
+                  <span {...slot(classNames, 'wayText')}>
+                    <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.chooseCode}</span>
+                  </span>
                   <Icon name="chevron" />
                 </button>
               </li>
@@ -1042,7 +1049,7 @@ export function SignIn(props: SignInProps) {
           accountName={email.trim()}
           headingLevel={level}
           onDone={(how) => {
-            if (how === 'passkey') void rememberPasskey(email);
+            // ChooseFirstCredential has already set the passkey hint for accountName (register A5a).
             void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}

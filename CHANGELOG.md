@@ -2,6 +2,25 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.9-alpha.3] - 2026-10-19
+
+Three fixes the template and demo upgrade to v0.1.9 found, released right after v0.1.9-alpha.2 (which had already shipped). Pre-release. No breaking changes.
+
+### Fixed
+
+- **"How do you want to sign in?" is styled** (register A5a): each way in is a full-width row as Card Studio's `.c-ways` draws it: the icon, the label (and "(recommended)"), the description on a second line, and a chevron; the passkey row is tinted. It read "Use a passkey (recommended)Your face, fingerprint, or device PIN." on one centred line. New slots `ways`, `way`, `wayText`, `wayLabel`, `wayDescription` (`data-auth-kit-recommended` on the passkey row); `authKitStyles` carries the rules; `cardStyleVariables` adds `--ak-option-border` per card style. Screen readers now hear a space between the label and the description.
+- **A site name outside ASCII works with SES:** SES takes such a display name only as RFC 2047 encoded-words, so `siteSender`, `createSesInviteMailer` (and the scheduled jobs that use it), and the preset's Cognito From header write it encoded, and every sender check compares names decoded and NFC-normalized, so "Café Reports" passes whether a site writes it plainly or encoded. New in `auth-kit/themes`: `encodeSenderName`, `decodeSenderName`, `sesSender`.
+
+### Added
+
+- **The passkey hint helpers** in `auth-kit/client`: `rememberPasskey`, `hasPasskeyHint`, `forgetPasskey`, `passkeyHintSkipped`, `PASSKEY_HINT_SKIPS`, for sites building their own screens.
+- **`ChooseFirstCredential` sets the passkey hint itself** when given `accountName` (the account's email), before `onDone`, so a standalone chooser page (`/account/sign-in-method`) sets it with no extra code: pass `accountName={user.profile?.email}`.
+
+### Migration
+
+1. Sites with their own CSS for the choice screen's `list`, `secondaryButton`, or `small` slots: those rows now use `ways`, `way`, `wayText`, `wayLabel`, and `wayDescription`.
+2. A standalone chooser page passes `accountName` to `ChooseFirstCredential`.
+
 ## [0.1.9-alpha.2] - 2026-10-19
 
 The nine low findings and four info items from the security review of v0.1.9-alpha.1 (no critical, high, or medium findings). Pre-release. Breaking only for sites configured against the rules: see Migration.

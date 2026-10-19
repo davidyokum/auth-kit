@@ -1,7 +1,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { type EmailBlock, type EmailSite, type RenderedEmail, inviteEmail, renderEmail } from '../shared/emails.js';
 import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
-import { type AuthTheme, type ThemeFamily, helpAddressProblems, senderProblems } from '../themes/index.js';
+import { type AuthTheme, type ThemeFamily, helpAddressProblems, senderProblems, sesSender } from '../themes/index.js';
 
 export type { RenderedEmail } from '../shared/emails.js';
 
@@ -323,7 +323,8 @@ export interface SesInviteMailerOptions {
   /**
    * The sender, on a verified SES identity: the family's display name and the site's reply-able
    * `sign-in@` mailbox, e.g. `"Example Reports (NC OSBM)" <sign-in@reports.example.org>` (`siteSender`
-   * from `auth-kit/themes`). Never `noreply@` (register A10, E4a); anything else throws.
+   * from `auth-kit/themes`). Never `noreply@` (register A10, E4a); anything else throws. A name outside
+   * ASCII may be written plainly or RFC 2047-encoded; it's sent encoded, as SES requires.
    */
   from: string;
   /**
@@ -374,6 +375,8 @@ export function createSesInviteMailer(
     const helpProblems = helpAddressProblems(options.site.help, { personal: true });
     if (helpProblems.length > 0) throw new Error(`auth-kit: createSesInviteMailer site.help: ${helpProblems.join(' ')}`);
   }
+  // As SES takes it: a site name outside ASCII ("Café Reports") as RFC 2047 encoded-words, whichever form `from` used.
+  const fromHeader = sesSender(options.from);
   const siteHelp = options.site.help;
   const alertSite = async (): Promise<AlertSite> => ({
     theme: options.site.theme,
@@ -393,7 +396,7 @@ export function createSesInviteMailer(
     const reply = email.replyTo ?? replyTo ?? options.replyTo;
     await ses().send(
       new SendEmailCommand({
-        FromEmailAddress: options.from,
+        FromEmailAddress: fromHeader,
         Destination: { ToAddresses: [...to] },
         ...(reply !== undefined && reply.length > 0 && { ReplyToAddresses: [...reply] }),
         ...(options.configurationSet !== undefined && { ConfigurationSetName: options.configurationSet }),

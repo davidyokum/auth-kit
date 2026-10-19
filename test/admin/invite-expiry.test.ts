@@ -74,6 +74,10 @@ describe('the environment', () => {
       },
     });
     expect(inviteExpiryConfig(ENV)).not.toHaveProperty('ownerWarnings');
+    // A site name outside ASCII, in the environment plainly or RFC 2047-encoded (the mailer sends it encoded).
+    for (const from of ['"Caf\u00e9 Reports (NC OSBM)" <sign-in@reports.example.org>', '=?UTF-8?B?Q2Fmw6kgUmVwb3J0cyAoTkMgT1NCTSk=?= <sign-in@reports.example.org>']) {
+      expect(inviteExpiryConfig({ ...ENV, ...WARNING_ENV, [INVITE_EXPIRY_ENV.siteName]: 'Caf\u00e9 Reports', [INVITE_EXPIRY_ENV.family]: 'osbm', [INVITE_EXPIRY_ENV.mailFrom]: from }).ownerWarnings?.from).toBe(from);
+    }
   });
 
   it('refuses half-configured warnings rather than send something odd', () => {

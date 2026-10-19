@@ -15,7 +15,9 @@ it('writes a 32-hex-character salt and hashes, never the address, and matches ad
   const stored = JSON.parse(window.localStorage.getItem(KEY) ?? '{}') as { salt: string; hashes: string[] };
   expect(stored.salt).toMatch(/^[0-9a-f]{32}$/);
   expect(stored.hashes).toHaveLength(1);
-  expect(JSON.stringify(stored)).not.toContain('ada');
+  // Not the address: hex never holds '@' or 'example' (a random salt can hold 'ada').
+  expect(JSON.stringify(stored)).not.toContain('@');
+  expect(JSON.stringify(stored).toLowerCase()).not.toContain('example');
   expect(await hasPasskeyHint('ada@example.org')).toBe(true);
   await forgetPasskey('ADA@example.org');
   expect(await hasPasskeyHint('ada@example.org')).toBe(false);

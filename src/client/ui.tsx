@@ -59,7 +59,17 @@ export type AuthKitSlot =
   | 'showButton'
   | 'glyph'
   | 'inputWrap'
-  | 'monogram';
+  | 'monogram'
+  /** "How do you want to sign in?" (register A5a): the list of ways in, as Card Studio's `.c-ways`. */
+  | 'ways'
+  /** One way in: a full-width row (icon, the words, a chevron). The recommended one carries `data-auth-kit-recommended`. */
+  | 'way'
+  /** A way's words: its label, then its description on a second line. */
+  | 'wayText'
+  /** A way's label, with "(recommended)" after it on the passkey. */
+  | 'wayLabel'
+  /** A way's description ("Your face, fingerprint, or device PIN."). */
+  | 'wayDescription';
 
 export type AuthKitClassNames = Partial<Record<AuthKitSlot, string>>;
 

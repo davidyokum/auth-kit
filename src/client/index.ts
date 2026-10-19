@@ -108,5 +108,8 @@ export { Card as AuthCard, monogramOf, type CardBottom as AuthCardBottom } from 
 export { PasswordForm, breachedPasswordProblem, type PasswordFormProps, type PasswordCheckOptions } from './PasswordForm.js';
 export { authKitStyles } from './styles.js';
 export { sendAccountNotice, type AccountNotices } from './notices.js';
+// The passkey hint (register A5a): for sites building their own screens. ChooseFirstCredential, SignIn,
+// SignUp, and MyAccount already set and clear it.
+export { rememberPasskey, forgetPasskey, hasPasskeyHint, passkeyHintSkipped, PASSKEY_HINT_SKIPS } from './passkey-hint.js';
 export { ACCOUNT_NOTICE_PATH, ACCOUNT_NOTICE_EVENTS, type AccountNoticeEvent } from '../shared/notices.js';
 export type { AuthKitClassNames, AuthKitSlot, StyleProps, HeadingLevel } from './ui.js';
