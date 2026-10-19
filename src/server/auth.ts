@@ -1,4 +1,4 @@
-import { MATRIX_SERVER_MODE } from '../shared/matrix-protocol.js';
+import { MATRIX_ENV_FLAG, MATRIX_SERVER_MODE, matrixServerEnvironment } from '../shared/matrix-protocol.js';
 import { type ResourceNeed, type ResourceTypes, decideResourceAccess, isResourceId, isResourceTypes, neededActions } from '../resources/policy.js';
 import type { ResourceAccessStore, ResourceMembership } from '../resources/types.js';
 import { type ResourceRole, SESSION_POLICY } from '../shared/policy.js';
@@ -288,9 +288,15 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
   if (options.requireTotpForPasswordUsers !== undefined && typeof options.requireTotpForPasswordUsers !== 'boolean') {
     problems.push('requireTotpForPasswordUsers must be true or false');
   }
+  // The matrix server mode (L7): the module-private sign from matrixOverrides(), and the environment it
+  // runs in, checked here as well. Two locks, so naming the sign isn't enough on a production server.
+  const matrixMode = options.matrixServerMode === MATRIX_SERVER_MODE && matrixServerEnvironment();
   if (options.matrixServerMode !== undefined && options.matrixServerMode !== MATRIX_SERVER_MODE) problems.push('matrixServerMode comes only from matrixOverrides()');
+  else if (options.matrixServerMode !== undefined && !matrixMode) {
+    problems.push(`matrixServerMode is accepted only while the auth matrix runs (NODE_ENV isn't production and ${MATRIX_ENV_FLAG}=1)`);
+  }
   for (const key of ['requireFirstCredential', 'requireTotpForPasswordUsers'] as const) {
-    if (options[key] === false && options.matrixServerMode !== MATRIX_SERVER_MODE) {
+    if (options[key] === false && !matrixMode) {
       problems.push(`${key}: false breaks the standard (register ${key === 'requireFirstCredential' ? 'A1' : 'A2'}) and is accepted only in the auth matrix's server mode (matrixOverrides().serverAuth)`);
     }
   }
