@@ -111,8 +111,8 @@ describe('cardContrast', () => {
 });
 
 describe('the card’s place', () => {
-  it('defaults to centered, 440px, narrower on phones', () => {
-    expect(defaultCardRect(1440, 900)).toEqual({ x: 500, y: 170, width: 440, height: 560 });
+  it('defaults to centered, 380px (SignIn’s card, register E5), narrower on phones', () => {
+    expect(defaultCardRect(1440, 900)).toEqual({ x: 530, y: 170, width: 380, height: 560 });
     expect(defaultCardRect(390, 844).width).toBe(358);
   });
 });

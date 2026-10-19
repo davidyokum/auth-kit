@@ -111,7 +111,7 @@ export interface BackdropStillOptions extends BackdropArtOptions {
   height: number;
   /** Backing pixels per CSS pixel of `ctx`'s canvas. Default 1. */
   pixelRatio?: number;
-  /** Where the card sits. Default: centered, 440px wide. */
+  /** Where the card sits. Default: centered, 380px wide (register E5). */
   card?: BackdropRect;
   /** Animation time. Default: the style version's still time. */
   t?: number;

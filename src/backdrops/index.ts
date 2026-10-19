@@ -1,8 +1,8 @@
 /**
  * `auth-kit/backdrops`: the art behind the sign-in card (ADR 0021).
  *
- * The card is the same on every site; a site's identity shows in its family (palette, owner line)
- * and in a backdrop: a seeded, generative picture behind the card. It's for recognition and delight,
+ * The card is the same on every site; a site's identity shows in its family (palette, the footer's
+ * identity line) and in a backdrop: a seeded, generative picture behind the card. It's for recognition and delight,
  * not security (a picture you "should recognize" protects nobody; ADR 0021 says why). Framework-free:
  * `renderBackdrop(canvas, options)` draws and animates; `auth-kit/backdrops/react` wraps it.
  *
@@ -25,6 +25,6 @@ export { cardContrast, CARD_EDGE_MINIMUM, type CardContrastReport, type Contrast
 export { BACKDROP_FAMILIES, BACKDROP_FAMILY_IDS, backdropPalette, isBackdropFamily, type BackdropFamilyColors } from './families.js';
 export { BACKDROP_STYLES, backdropStyle, isBackdropStyleId, latestStyleVersion, offeredStyles, type BackdropStyleId } from './styles/registry.js';
 export type { BackdropInteractivity, BackdropStyleModule, StyleVersion } from './styles/define.js';
-export { defaultCardRect } from './card.js';
+export { CARD_WIDTH, defaultCardRect } from './card.js';
 export { backdropStyles } from './css.js';
 export type { BackdropCardTheme, BackdropFamily, BackdropImage, BackdropPalette, BackdropPointer, BackdropRect } from './types.js';

@@ -14,7 +14,7 @@
  *   invisible to assistive technology and never takes a click. Pointer effects come from passive
  *   window-level listeners (renderBackdrop).
  * - Mark the card with `data-backdrop-card`: styles keep their focal points visible around it, and
- *   taps on it never reach a style. Without one, a centered 440px card is assumed. The backdrop is
+ *   taps on it never reach a style. Without one, a centered 380px card is assumed (register E5). The backdrop is
  *   never faded around the card; give the card its own contrast (solid surface, border, shadow).
  * - A backdrop that can't draw (a bad option, no canvas) leaves the page color and says why in
  *   `data-backdrop-error`; it never breaks the page it decorates.
