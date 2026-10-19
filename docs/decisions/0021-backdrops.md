@@ -1,6 +1,6 @@
 # 0021. Backdrops: site identity behind a fixed card
 
-- **Status:** Accepted, 2026-10-18
+- **Status:** Accepted, 2026-10-18; amended 2026-10-19 ([below](#amendment-2026-10-19-play-slow-devices-sound-rotation-and-six-new-styles): play, slow devices, sound, subject rotation, lazy loading, and six new styles)
 - **Design:** the sign-in design report (passwords-flow `design/benchmark/REPORT.md`, kept privately): §1.3 "Brand the context, fix the mechanics", §7 "OSBM core, UNC and personal variants"
 
 ## Context
@@ -15,7 +15,7 @@ Security images ("SiteKey", "your personal picture") are the cautionary tale. Ba
 
 **A site's expression lives behind the card, as a backdrop, and it's for recognition and delight, not security.** No screen, email, or document will say "check the picture"; the card's heading names the site, and the domain is still the only thing that proves it.
 
-- **Seeded and generative.** `auth-kit/backdrops` draws a backdrop from `{ style, seed, family }`: eight styles (magnetic dots, contours, flow lines, watercolor, aurora, stained glass, constellation, ripples) painted in the family's palette, plus `painted`, a slot for a finished image. A seed is any string; the same seed draws the same picture. No dependencies: a small seeded generator and simplex noise written into the package.
+- **Seeded and generative.** `auth-kit/backdrops` draws a backdrop from `{ style, seed, family }`: eight styles at first (magnetic dots, contours, flow lines, watercolor, aurora, stained glass, constellation, ripples; fourteen since the 2026-10-19 amendment) painted in the family's palette, plus `painted`, a slot for a finished image. A seed is any string; the same seed draws the same picture. No dependencies: a small seeded generator and simplex noise written into the package.
 - **One module per style, one list.** A style is a folder (`styles/<id>/`) with its module (ID, label, interactivity, versions) and one file per version, each with its own palette mapping and renderer; `styles/registry.ts` lists them. Shared helpers (generator, noise, colors, frame loop, visibility and reduced-motion handling) live outside the styles, so a new style is one folder and one line. A style taken out of offer is marked `retired`, never deleted.
 - **Rules enforced in code, not left to each style** (`renderBackdrop`):
   - reduced motion (the OS setting) draws one still frame, with no animation and no pointer response;
@@ -31,8 +31,21 @@ Security images ("SiteKey", "your personal picture") are the cautionary tale. Ba
 ## Consequences
 
 - Sites of one family look related (same card, same palette) and distinct (their backdrops), without any of them touching the card.
-- Old style versions accumulate in the package. They're small (a few kilobytes each, tree-shaken where unused), and deleting one would redraw every site that locked it.
+- Old style versions accumulate in the package. Each loads only when a site draws it (a chunk of its own, since 2026-10-19), and deleting one would redraw every site that locked it.
 - A locked site needs an auth-kit that has its style version: a downgrade below the release that introduced it fails loudly (`resolveStyleVersion` throws) rather than drawing something else.
 - The art runs right up to the card's border. On a phone, where the card spans the width, the backdrop shows mainly above and below it.
 - Backdrops cost a little battery while visible. Measured in headless Chromium at 1440×900: the busiest styles take 27-35 ms of main-thread time per second (contours at 4.5 ms a frame, 6 frames a second; flow lines 1.7 ms at 20; magnetic dots 1 ms at 30), about 3% of one core; the rest stay under 13 ms a second. The README has the table. Nothing runs while the tab is hidden, the canvas is off-screen, or reduced motion is on.
 - The picker (`auth-kit/backdrops/picker`) carries a marker, and `check-prod-build` fails a production build that bundles it.
+
+## Amendment 2026-10-19: play, slow devices, sound, rotation, and six new styles
+
+Register E3, E6, and E7 (David's decisions of 2026-10-17 and 10-18).
+
+- **Play is optional and never part of signing in.** A style may play (Yokum magnetic's falling title and magnet, a plotter's crosshair, a tap that letters a river), but only in answer to the pointer or a tap; the card never waits for it and works the same with the art still, absent, or failed to load. Nothing that matters is drawn on the art.
+- **A still frame on slow devices**, as well as under reduced motion: `renderBackdrop` draws the still frame when the browser asks to save data (`navigator.connection.saveData`), the device reports 2 GB of memory or less (`navigator.deviceMemory`), or frames average more than a budget (`frameBudgetMs`, 12 ms by default) over the first 30. A drawing that finishes (`settlesAt`: a plotted sheet, a dot field at rest) stops its loop there and wakes only for the pointer or a tap.
+- **No sound unless switched on.** No style makes a sound; one that ever does must be off until the person switches it on, on that page.
+- **A style may rotate its subject each visit; the seed still locks the look.** County Survey tours North Carolina's 100 counties, River Basins the 17 basins, Star Chart 40 constellations (88 optional). A style declares its `subjects` (named sets of stable keys); the host picks this visit's subject (`subject: { rotation: 'tour' | 'random' | 'day' | 'fixed', key?, set? }`, a tour by default) and hands it to the style, which draws it in the site's locked look. The subject is per visit and per browser: a tour's order and position live in that browser's `localStorage` (the subject of the day where storage is blocked), never on the server and never in the lock, so `{ style, seed, styleVersion, locked }` stays the whole of a site's choice.
+- **Each style loads on first use.** A style module declares its versions with `lazyVersion(meta, () => import('./vN.js'))`: the metadata the renderer plans with is in the small module, the drawing code (and any data: County Survey's and River Basins' geometry, Star Chart's catalogue) in a chunk of its own, checked against the metadata when it loads. `drawBackdropStill` is async for this reason; `loadBackdropStyle` preloads.
+- **Six new styles** from the Backdrop Lab (E7): `yokum-magnetic` (David's Yokum Lab sign-in: iron filings, the site's name in letters that fall where the pointer touches them, and the rose magnet that brings every letter home; `siteName` reaches styles for it), `ai-survey-dots` and `pulse-dots` (the NC GenAI Survey's and OSBM Pulse's dot fields, faithful to their sources), and the blueprint family: `county-survey`, `river-basins`, and `star-chart`, three plotted sheets drawn with one frozen plotter core (`styles/plotter/v1.ts`, frozen like `kernel/v1`; its own hash battery in `frozen.json`). Their data and notices: Census and USGS (public domain), OpenStreetMap (ODbL 1.0), the Yale Bright Star Catalogue, and d3-celestial's figures (BSD-3-Clause), in `THIRD_PARTY_NOTICES.md`.
+- **The card is 380px wide** (register E5): the default card rectangle the backdrop keeps its focal points around matches `SignIn`'s card (`CARD_WIDTH`).
+

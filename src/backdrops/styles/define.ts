@@ -45,6 +45,16 @@ export interface StyleSetup {
   readonly loadImage?: (src: string) => Promise<CanvasImageSource & { readonly width: number; readonly height: number }>;
   /** Asks for a redraw (a static style whose image arrived), animating for `durationMs` if motion is allowed. */
   invalidate(durationMs?: number): void;
+  /**
+   * Styles with `subjects` only: the subject this visit shows (a key from the module's `subjects`). The
+   * host picks it each visit (a tour, random, or the subject of the day; never stored server-side). The
+   * seed still locks the look. Absent or unknown: the style picks one from its seed and `subjectSet`.
+   */
+  readonly subject?: string;
+  /** Styles with `subjects` only: which named set the subject comes from. Absent: `subjects.defaultSet`. */
+  readonly subjectSet?: string;
+  /** The site's name, for styles that letter it (e.g. a title that falls apart). Absent: the style leaves it out. */
+  readonly siteName?: string;
 }
 
 export interface FrameInput {
@@ -75,9 +85,32 @@ export interface StyleVersion {
   readonly maxPixelRatio: number;
   /** The animation time shown as the still frame (reduced motion, SVG targets, previews). */
   readonly stillTime: number;
-  /** The palette mapping: the colors this version paints with, derived from the family palette. */
+  /**
+   * For a drawing that finishes (a plotted sheet): the animation time after which it holds still unless
+   * the pointer or a tap moves it. The renderer stops its loop there to save power. Absent: it never settles.
+   */
+  readonly settlesAt?: number;
+  /**
+   * The drawing code is ready (`colors` and `create` work). Each registered style's code is loaded on
+   * first use (`load()`), so a site downloads only the style it shows; a version declared with
+   * `defineVersion` is ready at once.
+   */
+  readonly loaded: boolean;
+  /** Loads the drawing code (once; later calls return the same promise). */
+  load(): Promise<void>;
+  /** The palette mapping: the colors this version paints with, derived from the family palette. Throws until loaded. */
   colors(palette: BackdropPalette): unknown;
+  /** Throws until loaded. */
   create(setup: StyleSetup): StyleInstance;
+}
+
+/** What a version is before its code loads: what the renderer and the picker need to plan. */
+export interface StyleVersionMeta {
+  readonly version: number;
+  readonly fps: number;
+  readonly maxPixelRatio: number;
+  readonly stillTime: number;
+  readonly settlesAt?: number;
 }
 
 export interface StyleVersionSpec<C> {
@@ -85,6 +118,7 @@ export interface StyleVersionSpec<C> {
   readonly fps: number;
   readonly maxPixelRatio: number;
   readonly stillTime: number;
+  readonly settlesAt?: number;
   colors(palette: BackdropPalette): C;
   create(setup: StyleSetup, colors: C): StyleInstance;
 }
@@ -93,17 +127,81 @@ export interface StyleVersionSpec<C> {
 export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
   if (!Number.isInteger(spec.version) || spec.version < 1) throw new Error(`auth-kit/backdrops: style version ${spec.version} must be a positive integer.`);
   if (!(spec.fps >= 0 && spec.fps <= 30)) throw new Error(`auth-kit/backdrops: fps ${spec.fps} must be between 0 and 30.`);
+  if (spec.settlesAt !== undefined && !(spec.settlesAt > 0 && spec.settlesAt <= spec.stillTime)) throw new Error(`auth-kit/backdrops: settlesAt ${spec.settlesAt} must be after 0 and no later than stillTime.`);
   return Object.freeze({
     version: spec.version,
     fps: spec.fps,
     maxPixelRatio: spec.maxPixelRatio,
     stillTime: spec.stillTime,
+    ...(spec.settlesAt !== undefined && { settlesAt: spec.settlesAt }),
+    loaded: true,
+    load: () => Promise.resolve(),
     colors: (palette: BackdropPalette) => spec.colors(palette),
     create: (setup: StyleSetup) => spec.create(setup, spec.colors(setup.palette)),
   });
 }
 
+const META_KEYS = ['version', 'fps', 'maxPixelRatio', 'stillTime', 'settlesAt'] as const;
+
+/**
+ * Declares a version whose drawing code loads on first use: `meta` is what the renderer needs to plan
+ * (and must match the loaded version exactly; a mismatch fails the load), `load` imports the version
+ * file, e.g. `() => import('./v1.js').then((m) => m.countySurveyV1)`. Bundlers split each style into
+ * its own chunk, so the sign-in page carries only the style it draws.
+ */
+export function lazyVersion(meta: StyleVersionMeta, load: () => Promise<StyleVersion>): StyleVersion {
+  let impl: StyleVersion | null = null;
+  let pending: Promise<void> | null = null;
+  const notLoaded = () => new Error(`auth-kit/backdrops: style version ${meta.version} isn't loaded yet. Await loadBackdropStyle(style, version) first.`);
+  const version: StyleVersion = {
+    ...meta,
+    get loaded() {
+      return impl !== null;
+    },
+    load() {
+      pending ??= load().then(
+        (loaded) => {
+          for (const key of META_KEYS) {
+            if (loaded[key] !== meta[key]) throw new Error(`auth-kit/backdrops: style version ${meta.version}'s ${key} is ${String(loaded[key])} in its file but ${String(meta[key])} in its module.`);
+          }
+          impl = loaded;
+        },
+        (error: unknown) => {
+          pending = null;
+          throw error;
+        },
+      );
+      return pending;
+    },
+    colors(palette) {
+      if (!impl) throw notLoaded();
+      return impl.colors(palette);
+    },
+    create(setup) {
+      if (!impl) throw notLoaded();
+      return impl.create(setup);
+    },
+  };
+  return Object.freeze(version);
+}
+
 export type BackdropInteractivity = 'pointer' | 'tap' | 'none';
+
+/**
+ * A style that shows one subject at a time (a county, a river basin, a constellation). The seed locks
+ * the look; the subject may rotate each visit (ADR 0021). Keys are stable: never rename one a site may
+ * pin.
+ */
+export interface StyleSubjects {
+  /** For people, singular: "county". */
+  readonly noun: string;
+  /** Named sets of subject keys, each in its tour order (e.g. `{ curated: [...40], all: [...88] }`). */
+  readonly sets: Readonly<Record<string, readonly string[]>>;
+  /** The set used when none is chosen. */
+  readonly defaultSet: string;
+  /** For people: a key's name ("Dare"). Default: the key. */
+  readonly label?: (key: string) => string;
+}
 
 export interface BackdropStyleModule<Id extends string = string> {
   readonly id: Id;
@@ -119,6 +217,8 @@ export interface BackdropStyleModule<Id extends string = string> {
   readonly retired?: boolean;
   /** Every released version, oldest first. Never remove one. */
   readonly versions: readonly StyleVersion[];
+  /** Styles that show one subject at a time: what can rotate. */
+  readonly subjects?: StyleSubjects;
 }
 
 /** Declares a style module (checks its versions are 1, 2, 3, ... in order). */
@@ -128,5 +228,12 @@ export function defineStyle<const Id extends string>(module: BackdropStyleModule
   module.versions.forEach((v, i) => {
     if (v.version !== i + 1) throw new Error(`auth-kit/backdrops: style "${module.id}" lists version ${v.version} where ${i + 1} belongs.`);
   });
+  if (module.subjects) {
+    const { sets, defaultSet } = module.subjects;
+    if (!sets[defaultSet]?.length) throw new Error(`auth-kit/backdrops: style "${module.id}" has no subjects in its default set "${defaultSet}".`);
+    for (const [name, keys] of Object.entries(sets)) {
+      if (new Set(keys).size !== keys.length) throw new Error(`auth-kit/backdrops: style "${module.id}" repeats a subject in set "${name}".`);
+    }
+  }
   return Object.freeze({ ...module, versions: Object.freeze([...module.versions]) });
 }

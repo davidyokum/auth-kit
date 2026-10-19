@@ -3,6 +3,7 @@
  * nothing runs while hidden or off-screen; frames are capped; the pointer is passive and taps on the
  * card or a control never reach a style; resizing rebuilds once; SVG targets get a still image.
  */
+import './preload.js';
 import { describe, expect, it } from 'vitest';
 import type { BackdropHost, PointerHandlers, PointerLike } from '../../src/backdrops/host.js';
 import { createBackdropRenderer } from '../../src/backdrops/render.js';
@@ -350,5 +351,78 @@ describe('renderBackdrop', () => {
     const { host } = setup({ onReady: () => ready++ });
     host.advance(500);
     expect(ready).toBe(1);
+  });
+});
+
+describe('register E6: a still frame on slow devices, and rest when there is nothing to show', () => {
+  it('draws the still frame when the browser asks to save data or the device has little memory', () => {
+    for (const [flag, reason] of [
+      ['saveData', 'save-data'],
+      ['lowMemory', 'low-memory'],
+    ] as const) {
+      const host = new FakeHost();
+      Object.assign(host, { [flag]: () => true });
+      const { controller } = setup({}, host);
+      expect(controller.state).toBe('still');
+      expect(controller.stats().stillReason).toBe(reason);
+      host.advance(1000);
+      expect(controller.stats().frames).toBe(1);
+      expect(host.pendingFrames).toBe(0);
+    }
+    // A site may opt out.
+    const host = new FakeHost();
+    Object.assign(host, { saveData: () => true });
+    expect(setup({ stillOnSlowDevices: false }, host).controller.state).toBe('running');
+  });
+
+  it('goes still when frames keep costing more than the budget', () => {
+    const host = new FakeHost();
+    const realNow = host.now;
+    // A clock that moves 1 ms on every read: each frame "costs" at least that, over a 0.5 ms budget.
+    let reads = 0;
+    host.now = () => realNow() + ++reads;
+    const { controller } = setup({ frameBudgetMs: 0.5 }, host);
+    host.advance(3000);
+    expect(controller.stats().stillReason).toBe('slow-frames');
+    expect(controller.state).toBe('still');
+    const frames = controller.stats().frames;
+    host.advance(1000);
+    expect(controller.stats().frames).toBe(frames);
+  });
+
+  it('a style that settles stops its loop there, and wakes for the pointer and taps', () => {
+    const { controller, host } = setup({ style: 'pulse-dots', seed: 'settle' });
+    host.advance(2000);
+    expect(controller.state).toBe('still');
+    expect(host.pendingFrames).toBe(0);
+    const frames = controller.stats().frames;
+    host.pointer!.move(event(100, 100));
+    expect(host.pendingFrames).toBe(1);
+    host.advance(500);
+    expect(controller.stats().frames).toBeGreaterThan(frames);
+    // Once the pointer has gone and eased away, it rests again.
+    host.pointer!.leave();
+    host.advance(8000);
+    expect(host.pendingFrames).toBe(0);
+  });
+});
+
+describe('register E3: subjects rotate per visit; the seed locks the look; the site name reaches the style', () => {
+  it('picks this visit’s subject (fixed, or the day’s without storage) and hands it to the style', () => {
+    const fixed = setup({ style: 'county-survey', seed: 'sheet', subject: { rotation: 'fixed', key: 'Dare' } });
+    expect(fixed.controller.stats().subject).toMatchObject({ key: 'Dare', set: 'all', of: 100, rotation: 'fixed' });
+    const day = setup({ style: 'river-basins', seed: 'sheet', subject: { rotation: 'day' } });
+    expect(day.controller.stats().subject).toMatchObject({ set: 'all', of: 17, rotation: 'day' });
+    // A style without subjects has none, and refuses subject options.
+    expect(setup().controller.stats().subject).toBeNull();
+    expect(() => setup({ subject: { rotation: 'day' } })).toThrow(/no subjects/);
+    expect(() => setup({ style: 'star-chart', seed: 'x', subject: { set: 'zodiac' } })).toThrow(/no subject set "zodiac"/);
+  });
+
+  it('loads each style on first use: waiting until its code arrives, then drawing', async () => {
+    const { controller } = setup({ style: 'star-chart', seed: 'lazy', subject: { rotation: 'fixed', key: 'Cyg' } });
+    // Preloaded in tests, so it draws at once; the lazy path is in lazy.test.ts.
+    expect(controller.stats().frames).toBe(1);
+    await Promise.resolve();
   });
 });

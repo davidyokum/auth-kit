@@ -7,6 +7,7 @@
  * Adding a version: run `AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts` once.
  * It records hashes for versions that have none, and never rewrites an existing one.
  */
+import './preload.js';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,7 +16,9 @@ import { contrastRatio, mix, parseHex, rgba, saturate, toOklab } from '../../src
 import { createNoise } from '../../src/backdrops/kernel/v1/noise.js';
 import { createRng, hashParts, hashString, seedString } from '../../src/backdrops/kernel/v1/prng.js';
 import { cardDistance, smoothstep } from '../../src/backdrops/kernel/v1/shape.js';
-import { allStyleVersions, frozenHash } from './scenes.js';
+import { buildSetup, layerFactory, resolveArt } from '../../src/backdrops/frame.js';
+import { RecordingCanvas, recordingCanvasFactory, resetCanvasIds } from './recording-canvas.js';
+import { allStyleVersions, frozenHash, TEST_PALETTE } from './scenes.js';
 
 const FILE = join(import.meta.dirname, 'frozen.json');
 
@@ -41,8 +44,41 @@ function kernelV1Hash(): string {
   return createHash('sha256').update(out.join('|')).digest('hex');
 }
 
+/**
+ * The plotter core (styles/plotter/v1.ts) through the three styles that draw with it, at desktop size: the
+ * 360 × 240 scenes leave no room for a map, so this pins the map, labelling, and lettering paths too.
+ */
+function plotterV1Hash(): string {
+  const out: string[] = [];
+  const subjects: [string, string][] = [
+    ['county-survey', 'Dare'],
+    ['county-survey', 'Buncombe'],
+    ['river-basins', 'Cape Fear'],
+    ['star-chart', 'Cyg'],
+  ];
+  for (const [style, subject] of subjects) {
+    resetCanvasIds();
+    const art = resolveArt({ style: style as never, seed: 'frozen-seed', styleVersion: 1, palette: TEST_PALETTE });
+    const instance = art.version.create(
+      buildSetup({ art, width: 1280, height: 800, pixelRatio: 1, card: { x: 420, y: 140, width: 440, height: 520 }, motion: true, createLayer: layerFactory(recordingCanvasFactory(), 1), subject, siteName: 'Example Site' }),
+    );
+    const ctx = new RecordingCanvas(1280, 800).getContext('2d');
+    const draw = (t: number, x: number, y: number, strength: number) => instance.draw(ctx as unknown as CanvasRenderingContext2D, { t, dt: 1 / 30, pointer: { x, y, strength } });
+    const t0 = art.version.stillTime;
+    draw(t0, -1e6, -1e6, 0);
+    for (let i = 1; i <= 3; i++) draw(t0 + 1 + i / 30, 1060, 380, 1);
+    for (let i = 1; i <= 3; i++) draw(t0 + 1.2 + i / 30, 220, 420, 1);
+    instance.tap?.(1060, 380, t0 + 1.3);
+    instance.tap?.(220, 420, t0 + 1.3);
+    instance.tap?.(640, 740, t0 + 1.4);
+    draw(t0 + 3, 640, 740, 0.6);
+    out.push(ctx.digest());
+  }
+  return createHash('sha256').update(out.join('|')).digest('hex');
+}
+
 async function actualHashes(): Promise<Record<string, string>> {
-  const out: Record<string, string> = { 'kernel@1': kernelV1Hash() };
+  const out: Record<string, string> = { 'kernel@1': kernelV1Hash(), 'plotter@1': plotterV1Hash() };
   for (const { style, version } of allStyleVersions()) out[`${style}@${version}`] = await frozenHash(style, version);
   return out;
 }

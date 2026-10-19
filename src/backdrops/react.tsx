@@ -51,6 +51,8 @@ export function Backdrop(props: BackdropProps) {
   const { style, seed, styleVersion, family, interactive, reducedMotion, maxFps, maxPixelRatio, pixelRatio, paused } = props;
   const paletteKey = JSON.stringify(props.palette ?? null);
   const imageKey = JSON.stringify(props.image ?? null);
+  const subjectKey = JSON.stringify(props.subject ?? null);
+  const { siteName, stillOnSlowDevices, frameBudgetMs } = props;
   const latest = useRef(props);
   latest.current = props;
 
@@ -69,6 +71,10 @@ export function Backdrop(props: BackdropProps) {
         ...(p.family !== undefined && { family: p.family }),
         ...(p.palette !== undefined && { palette: p.palette }),
         ...(p.image !== undefined && { image: p.image }),
+        ...(p.subject !== undefined && { subject: p.subject }),
+        ...(p.siteName !== undefined && { siteName: p.siteName }),
+        ...(p.stillOnSlowDevices !== undefined && { stillOnSlowDevices: p.stillOnSlowDevices }),
+        ...(p.frameBudgetMs !== undefined && { frameBudgetMs: p.frameBudgetMs }),
         ...(p.interactive !== undefined && { interactive: p.interactive }),
         ...(p.reducedMotion !== undefined && { reducedMotion: p.reducedMotion }),
         ...(p.maxFps !== undefined && { maxFps: p.maxFps }),
@@ -100,6 +106,10 @@ export function Backdrop(props: BackdropProps) {
         family,
         palette: p.palette,
         image: p.image,
+        subject: p.subject,
+        siteName,
+        stillOnSlowDevices,
+        frameBudgetMs,
         interactive,
         reducedMotion,
         maxFps,
@@ -110,7 +120,7 @@ export function Backdrop(props: BackdropProps) {
     } catch (error) {
       rootRef.current?.setAttribute('data-backdrop-error', error instanceof Error ? error.message : String(error));
     }
-  }, [style, seed, styleVersion, family, paletteKey, imageKey, interactive, reducedMotion, maxFps, maxPixelRatio, pixelRatio]);
+  }, [style, seed, styleVersion, family, paletteKey, imageKey, subjectKey, siteName, stillOnSlowDevices, frameBudgetMs, interactive, reducedMotion, maxFps, maxPixelRatio, pixelRatio]);
 
   useEffect(() => {
     if (paused) controllerRef.current?.pause();

@@ -8,6 +8,7 @@ import { defaultCardRect } from './card.js';
 import type { Ctx2D, Layer, StyleInstance, StyleSetup, StyleVersion } from './styles/define.js';
 import { type BackdropStyleId, resolveStyleVersion } from './styles/registry.js';
 import type { BackdropStyleModule } from './styles/define.js';
+import type { BackdropSubjectOptions } from './subjects.js';
 import type { BackdropFamily, BackdropImage, BackdropPalette, BackdropPointer, BackdropRect } from './types.js';
 
 /** What to draw. */
@@ -23,6 +24,13 @@ export interface BackdropArtOptions {
   palette?: Partial<BackdropPalette>;
   /** `painted` only: the image. */
   image?: BackdropImage;
+  /**
+   * Styles with subjects (County Survey, River Basins, Star Chart): how the subject rotates each visit
+   * (register E3; default a tour, kept in this browser only). The seed still locks the look.
+   */
+  subject?: BackdropSubjectOptions;
+  /** The site's name, for styles that letter it (Yokum magnetic's falling title). */
+  siteName?: string;
 }
 
 export type CanvasFactory = (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas;
@@ -85,6 +93,9 @@ export interface SetupInput {
   createLayer: (width: number, height: number, scale?: number) => Layer;
   loadImage?: StyleSetup['loadImage'];
   invalidate?: (durationMs?: number) => void;
+  subject?: string;
+  subjectSet?: string;
+  siteName?: string;
 }
 
 export function buildSetup(input: SetupInput): StyleSetup {
@@ -100,6 +111,9 @@ export function buildSetup(input: SetupInput): StyleSetup {
     ...(input.image !== undefined && { image: input.image }),
     ...(input.loadImage !== undefined && { loadImage: input.loadImage }),
     invalidate: input.invalidate ?? (() => undefined),
+    ...(input.subject !== undefined && { subject: input.subject }),
+    ...(input.subjectSet !== undefined && { subjectSet: input.subjectSet }),
+    ...(input.siteName !== undefined && { siteName: input.siteName }),
   };
 }
 
@@ -121,10 +135,11 @@ export interface BackdropStillOptions extends BackdropArtOptions {
 
 /**
  * Draws one still frame into `ctx` (whose canvas is `width × pixelRatio` by `height × pixelRatio`):
- * the art at the style's still time.
+ * the art at the style's still time. Loads the style's code first (each style is its own chunk).
  */
-export function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): void {
+export async function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): Promise<void> {
   const art = resolveArt(options);
+  await art.version.load();
   const ratio = options.pixelRatio ?? 1;
   const card = options.card ?? defaultCardRect(options.width, options.height);
   const createLayer = layerFactory(options.createCanvas, Math.min(ratio, art.version.maxPixelRatio));

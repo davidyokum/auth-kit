@@ -8,7 +8,7 @@
 <!--
   The backdrop demo: every style × every family behind the same sign-in card. It loads the built
   package, so serve the repo first:  npm run demo:backdrops  (builds, then serves 127.0.0.1:4173).
-  One scene at full size: ?scene=1&style=aurora&family=unc&seed=k3f9x2ab  (add &phone=1, &hud=1).
+  One scene at full size: ?scene=1&style=aurora&family=unc&seed=k3f9x2ab  (add &phone=1, &hud=1, &still=1; &subject=Dare for a style with subjects).
 -->
 <style>
   :root {
@@ -91,7 +91,7 @@
   }
 
   /** A scene at a virtual size, scaled to `displayWidth` (or full-window). Returns its controller. */
-  function scene(host, { style, family, seed, width, height, displayWidth, reducedMotion }) {
+  function scene(host, { style, family, seed, width, height, displayWidth, reducedMotion, subject }) {
     const el = document.createElement('div');
     el.className = 'scene';
     el.style.width = `${width}px`;
@@ -103,6 +103,10 @@
     const canvas = el.querySelector('canvas');
     return renderBackdrop(canvas, {
       style, family, seed,
+      siteName: 'Example Site',
+      // Styles with subjects (County Survey, River Basins, Star Chart): the grid shows the subject of
+      // the day, so browsing never advances this browser's tour; a full scene tours, or ?subject=Dare.
+      ...(backdropStyle(style)?.subjects ? { subject: subject ?? { rotation: displayWidth ? 'day' : 'tour' } } : {}),
       card: el.querySelector('[data-backdrop-card]'),
       reducedMotion: reducedMotion ? true : 'auto',
       ...(displayWidth ? { pixelRatio: Math.min(2, (window.devicePixelRatio || 1)) * scale, maxFps: 20 } : {}),
@@ -116,7 +120,8 @@
     const family = params.get('family') ?? 'osbm';
     const seed = params.get('seed') ?? 'demo';
     document.title = `${backdropStyle(style)?.label ?? style} · ${BACKDROP_FAMILIES[family]?.label ?? family}`;
-    const controller = scene(document.body, { style, family, seed, width: innerWidth, height: innerHeight, reducedMotion: params.get('still') === '1' });
+    const subjectKey = params.get('subject');
+    const controller = scene(document.body, { style, family, seed, width: innerWidth, height: innerHeight, reducedMotion: params.get('still') === '1', ...(subjectKey ? { subject: { rotation: 'fixed', key: subjectKey } } : {}) });
     window.__backdrop = controller;
     if (params.get('hud') === '1') {
       const hud = document.createElement('div');

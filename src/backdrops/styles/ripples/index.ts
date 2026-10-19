@@ -1,5 +1,4 @@
-import { defineStyle } from '../define.js';
-import { ripplesV1 } from './v1.js';
+import { defineStyle, lazyVersion } from '../define.js';
 
 export const ripples = defineStyle({
   id: 'ripples',
@@ -7,5 +6,6 @@ export const ripples = defineStyle({
   description: 'Fine concentric rings spreading on still water; a tap starts a ripple.',
   interactivity: 'tap',
   generative: true,
-  versions: [ripplesV1],
+  // The drawing code loads on first use, in its own chunk.
+  versions: [lazyVersion({ version: 1, fps: 24, maxPixelRatio: 2, stillTime: 23 }, () => import('./v1.js').then((m) => m.ripplesV1))],
 });

@@ -1,5 +1,4 @@
-import { defineStyle } from '../define.js';
-import { constellationV1 } from './v1.js';
+import { defineStyle, lazyVersion } from '../define.js';
 
 export const constellation = defineStyle({
   id: 'constellation',
@@ -7,5 +6,6 @@ export const constellation = defineStyle({
   description: 'Drifting points joined by faint links that reach for the pointer.',
   interactivity: 'pointer',
   generative: true,
-  versions: [constellationV1],
+  // The drawing code loads on first use, in its own chunk.
+  versions: [lazyVersion({ version: 1, fps: 24, maxPixelRatio: 2, stillTime: 20 }, () => import('./v1.js').then((m) => m.constellationV1))],
 });

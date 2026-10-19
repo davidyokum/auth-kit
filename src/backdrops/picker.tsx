@@ -9,7 +9,7 @@
  * build that bundles it. Import it only from a dev-only page (site-auth-kit-template:
  * `app/dev/backdrops/page.dev.tsx`, a route only under `next dev`).
  */
-import { type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, type ReactNode, type RefObject, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { BACKDROP_PICKER_MARKER } from '../dev/marker.js';
 import { BACKDROP_FAMILIES, BACKDROP_FAMILY_IDS } from './families.js';
 import { describeChoice, lockStatus, PREVIEW_FRAMES, type PreviewFrame, sameChoice, type StoredBackdrop, upgradeOffer } from './picker-model.js';
@@ -73,6 +73,9 @@ function devicePixelRatio(): number {
   return typeof window === 'undefined' ? 1 : Math.min(2, window.devicePixelRatio || 1);
 }
 
+/** The site's name, for styles that letter it (Yokum magnetic), in every preview. */
+const SiteNameContext = createContext<string | undefined>(undefined);
+
 /** A scaled preview: the site's card at real size over a backdrop, in a virtual viewport. */
 function Scene(props: {
   choice: BackdropChoice;
@@ -84,6 +87,9 @@ function Scene(props: {
   maxFps?: number;
 }) {
   const view = PREVIEW_FRAMES[props.frame];
+  const siteName = useContext(SiteNameContext);
+  // Previews show the subject of the day: browsing variations never advances this browser's tour.
+  const hasSubjects = backdropStyle(props.choice.style)?.subjects !== undefined;
   const scale = props.displayWidth > 0 ? props.displayWidth / view.width : 0;
   if (!(scale > 0)) return <div className="akp-scene-placeholder" />;
   return (
@@ -94,6 +100,8 @@ function Scene(props: {
           seed={props.choice.seed}
           styleVersion={props.choice.styleVersion}
           family={props.family}
+          {...(siteName !== undefined && { siteName })}
+          {...(hasSubjects && { subject: { rotation: 'day' as const } })}
           pixelRatio={devicePixelRatio() * scale}
           {...(props.maxFps !== undefined && { maxFps: props.maxFps })}
           {...(props.paused !== undefined && { paused: props.paused })}
@@ -247,6 +255,7 @@ export function BackdropPicker(props: BackdropPickerProps) {
   const stageDisplay = Math.max(0, Math.min(stageWidth, Math.round((stageHeight * view.width) / view.height)));
 
   return (
+    <SiteNameContext.Provider value={siteName}>
     <div className="akp" data-auth-kit-backdrop-picker={BACKDROP_PICKER_MARKER}>
       <style>{PICKER_CSS}</style>
       <header className="akp-header">
@@ -397,6 +406,7 @@ export function BackdropPicker(props: BackdropPickerProps) {
         ) : null}
       </dialog>
     </div>
+    </SiteNameContext.Provider>
   );
 }
 

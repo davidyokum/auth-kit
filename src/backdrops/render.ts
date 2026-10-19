@@ -4,6 +4,15 @@
  * The rules, enforced here rather than left to each style:
  * - **Reduced motion** (the OS setting, or `reducedMotion: true`): one still frame, no animation,
  *   no pointer response. It redraws only when the size changes.
+ * - **A still frame on slow devices** (register E6): when the browser asks to save data, the device
+ *   reports 2 GB of memory or less, or frames keep costing more than the budget (`frameBudgetMs`,
+ *   averaged over the first 30 frames), it draws the still frame instead of animating.
+ * - **A finished drawing rests**: a style that settles (a plotted sheet) stops the loop there, and
+ *   wakes for the pointer or a tap.
+ * - **Each style loads on first use**: its code is a chunk of its own; the canvas waits for it (the
+ *   page's own background shows meanwhile) and the card works throughout.
+ * - **Play is optional and never part of signing in** (register E6): a style's play responds to the
+ *   pointer or a tap and nothing else; the card never waits for it, and no style makes a sound.
  * - **Nothing runs when nobody can see it**: the loop stops while the tab is hidden or the canvas is
  *   entirely off-screen (IntersectionObserver), and stops for good on `destroy()`.
  * - **Capped**: at most 30 frames per second (each style sets its own, often less), backing pixels
@@ -17,6 +26,7 @@
  */
 import { buildSetup, type BackdropArtOptions, layerFactory, NO_POINTER, type ResolvedArt, resolveArt } from './frame.js';
 import { type BackdropHost, browserHost, type PointerLike } from './host.js';
+import { type PickedSubject, pickSubject } from './subjects.js';
 import { defaultCardRect } from './card.js';
 import type { Ctx2D, StyleInstance } from './styles/define.js';
 import type { BackdropRect } from './types.js';
@@ -36,7 +46,17 @@ export interface BackdropOptions extends BackdropArtOptions {
   pixelRatio?: number;
   /** Called once, after the first frame is drawn. */
   onReady?: () => void;
+  /**
+   * Draw the still frame on a slow device (register E6): Save-Data, 2 GB of memory or less, or frames
+   * over `frameBudgetMs`. Default true.
+   */
+  stillOnSlowDevices?: boolean;
+  /** The average frame time (ms, over the first 30 frames) above which a backdrop goes still. Default 12. */
+  frameBudgetMs?: number;
 }
+
+/** Why the backdrop shows a still frame instead of animating. */
+export type BackdropStillReason = 'reduced-motion' | 'save-data' | 'low-memory' | 'slow-frames' | 'svg';
 
 export type BackdropState = 'running' | 'still' | 'paused' | 'hidden' | 'offscreen' | 'waiting' | 'unsupported' | 'destroyed';
 
@@ -53,6 +73,10 @@ export interface BackdropStats {
   width: number;
   height: number;
   pixelRatio: number;
+  /** Why it's still, when it is (not counting a style that has settled or is static). */
+  stillReason: BackdropStillReason | null;
+  /** The subject this visit shows, for a style with subjects (register E3). */
+  subject: PickedSubject | null;
 }
 
 export interface BackdropController {
@@ -82,7 +106,12 @@ function isElement(value: unknown): value is Element {
   return typeof value === 'object' && value !== null && typeof (value as Element).getBoundingClientRect === 'function';
 }
 
-const ART_KEYS = ['style', 'seed', 'styleVersion', 'family', 'palette', 'image'] as const;
+const ART_KEYS = ['style', 'seed', 'styleVersion', 'family', 'palette', 'image', 'subject', 'siteName'] as const;
+/** Frames measured before the frame-time budget is judged. */
+const BUDGET_FRAMES = 30;
+const DEFAULT_FRAME_BUDGET_MS = 12;
+/** After a tap, a settled style animates this long (a note, a cloud, a ripple). */
+const TAP_WAKE_MS = 2500;
 
 /** Draws a backdrop into a canvas (animated) or an SVG element (a still frame as an image). */
 export function renderBackdrop(target: HTMLCanvasElement | SVGElement, options: BackdropOptions): BackdropController {
@@ -93,6 +122,7 @@ export function renderBackdrop(target: HTMLCanvasElement | SVGElement, options: 
 export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, initial: BackdropOptions, host: BackdropHost): BackdropController {
   let options: BackdropOptions = { ...initial };
   let art: ResolvedArt = resolveArt(options);
+  let subject: PickedSubject | null = pick();
   const svg = !isCanvas(target);
   const canvas = isCanvas(target) ? target : null;
   let svgImage: SVGImageElement | null = null;
@@ -111,6 +141,9 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let hidden = host.documentHidden();
   let offscreen = false;
   let reduced = resolveReduced();
+  /** A slow device's still frame (register E6): fixed at start (Save-Data, memory) or after the budget is blown. */
+  let slow: 'save-data' | 'low-memory' | 'slow-frames' | null = initialSlow();
+  let loadFailed = false;
   let animTime = art.version.stillTime;
   let lastTick: number | null = null;
   let lastDraw: number | null = null;
@@ -127,6 +160,23 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let stopPointer: () => void = () => undefined;
   let stopCard: () => void = () => undefined;
   const stops: (() => void)[] = [];
+
+  function pick(): PickedSubject | null {
+    if (!art.module.subjects && options.subject === undefined) return null;
+    return pickSubject(art.module, art.seed, options.subject ?? {}, host.subjectEnvironment?.() ?? { storage: null, random: Math.random, now: Date.now }) ?? null;
+  }
+
+  function initialSlow(): typeof slow {
+    if (options.stillOnSlowDevices === false) return null;
+    if (host.saveData?.()) return 'save-data';
+    if (host.lowMemory?.()) return 'low-memory';
+    return null;
+  }
+
+  /** No animation: reduced motion, a slow device, or an SVG target. */
+  function still(): boolean {
+    return reduced || slow !== null || svg;
+  }
 
   function resolveReduced(): boolean {
     const setting = options.reducedMotion ?? 'auto';
@@ -167,13 +217,27 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
 
   function invalidate(durationMs = 0): void {
     if (destroyed) return;
-    if (durationMs > 0 && !reduced && !svg) invalidUntil = Math.max(invalidUntil, host.now() + durationMs);
+    if (durationMs > 0 && !still()) invalidUntil = Math.max(invalidUntil, host.now() + durationMs);
     if (animating()) schedule();
     else draw(0);
   }
 
-  /** (Re)creates the style instance and sizes the canvas. False until the target has a size. */
+  /** (Re)creates the style instance and sizes the canvas. False until the target has a size and the style's code has loaded. */
   function build(): boolean {
+    if (!art.version.loaded) {
+      if (loadFailed) return false;
+      const loading = art;
+      art.version.load().then(
+        () => {
+          if (!destroyed && art === loading) rebuildAndDraw();
+        },
+        () => {
+          // The card never depends on the art: no backdrop, the page's own background.
+          if (art === loading) loadFailed = true;
+        },
+      );
+      return false;
+    }
     const size = measure();
     if (!(size.w >= 1 && size.h >= 1)) return false;
     width = size.w;
@@ -191,8 +255,10 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
         height,
         pixelRatio: ratio,
         card,
-        motion: !reduced && !svg,
+        motion: !still(),
         createLayer,
+        ...(subject && { subject: subject.key, subjectSet: subject.set }),
+        ...(options.siteName !== undefined && { siteName: options.siteName }),
         ...(options.image !== undefined && { image: options.image }),
         loadImage: host.loadImage,
         invalidate,
@@ -210,7 +276,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     if (!instance || !ctx || destroyed) return;
     const start = host.now();
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const motion = !reduced && !svg;
+    const motion = !still();
     instance.draw(ctx, { t: motion ? animTime : art.version.stillTime, dt, pointer: motion ? pointer : NO_POINTER });
     const end = host.now();
     const cost = end - start;
@@ -224,6 +290,11 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
       stats.windowStart = end;
     }
     stats.windowFrames++;
+    // Register E6: frames that keep costing more than the budget mean a slow device: go still.
+    if (motion && slow === null && options.stillOnSlowDevices !== false && stats.frames >= BUDGET_FRAMES && stats.frames <= BUDGET_FRAMES + 1 && stats.average > (options.frameBudgetMs ?? DEFAULT_FRAME_BUDGET_MS)) {
+      slow = 'slow-frames';
+      host.setTimer(() => rebuildAndDraw(), 0);
+    }
     if (svg) publishSvg();
     if (!ready) {
       ready = true;
@@ -249,8 +320,18 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   }
 
   function animating(): boolean {
-    if (destroyed || unsupported || userPaused || hidden || offscreen || reduced || svg || !instance) return false;
-    return art.version.fps > 0 || host.now() < invalidUntil;
+    if (destroyed || unsupported || userPaused || hidden || offscreen || still() || !instance) return false;
+    const now = host.now();
+    if (now < invalidUntil) return true;
+    if (!(art.version.fps > 0)) return false;
+    // A finished drawing rests until the pointer moves over it (register E6: nothing runs for nothing).
+    const settles = art.version.settlesAt;
+    if (settles !== undefined && animTime >= settles) return pointerActive(now);
+    return true;
+  }
+
+  function pointerActive(now: number): boolean {
+    return (raw.inside && now - raw.lastMove < IDLE_MS) || pointer.strength > 0;
   }
 
   function fpsCap(): number {
@@ -330,16 +411,19 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     raw.y = p.y;
     raw.inside = p.inside;
     raw.lastMove = host.now();
+    // A settled drawing wakes for the pointer.
+    if (frameHandle === null && p.inside) refresh();
   }
 
   function onDown(event: PointerLike): void {
     onMove(event);
-    if (!instance?.tap || reduced || svg || destroyed || !raw.inside) return;
+    if (!instance?.tap || still() || destroyed || !raw.inside) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const element = event.target as Element | null;
     if (element && typeof element.closest === 'function' && element.closest(CONTROLS)) return;
     if (raw.x >= card.x && raw.x <= card.x + card.width && raw.y >= card.y && raw.y <= card.y + card.height) return;
     instance.tap(raw.x, raw.y, animTime);
+    invalidUntil = Math.max(invalidUntil, host.now() + TAP_WAKE_MS);
     refresh();
   }
 
@@ -418,8 +502,10 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     get state(): BackdropState {
       if (destroyed) return 'destroyed';
       if (unsupported) return 'unsupported';
-      if (!instance) return 'waiting';
-      if (reduced || svg || (art.version.fps === 0 && !animating())) return 'still';
+      if (!instance) return loadFailed ? 'unsupported' : 'waiting';
+      if (still() || (art.version.fps === 0 && !animating())) return 'still';
+      // A finished drawing at rest (it wakes for the pointer or a tap).
+      if (art.version.settlesAt !== undefined && animTime >= art.version.settlesAt && !animating() && !userPaused && !hidden && !offscreen) return 'still';
       if (userPaused) return 'paused';
       if (hidden) return 'hidden';
       if (offscreen) return 'offscreen';
@@ -441,12 +527,15 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
       const artChanged = ART_KEYS.some(changed);
       if (artChanged) {
         art = resolveArt(options);
+        loadFailed = false;
+        if (changed('style') || changed('styleVersion') || changed('seed') || changed('subject')) subject = pick();
         if (changed('style') || changed('styleVersion')) animTime = art.version.stillTime;
       }
       if (changed('reducedMotion')) reduced = resolveReduced();
+      if (changed('stillOnSlowDevices')) slow = options.stillOnSlowDevices === false ? null : (initialSlow() ?? (slow === 'slow-frames' ? slow : null));
       if (previous.card !== options.card) bindCard();
       if (artChanged || changed('interactive')) bindPointer();
-      if (artChanged || changed('reducedMotion') || changed('pixelRatio') || changed('maxPixelRatio') || previous.card !== options.card) rebuildAndDraw();
+      if (artChanged || changed('reducedMotion') || changed('stillOnSlowDevices') || changed('pixelRatio') || changed('maxPixelRatio') || previous.card !== options.card) rebuildAndDraw();
       else refresh();
     },
     stats() {
@@ -461,6 +550,8 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
         width,
         height,
         pixelRatio: ratio,
+        stillReason: reduced ? 'reduced-motion' : svg ? 'svg' : slow,
+        subject,
       };
     },
     destroy() {
