@@ -28,3 +28,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0022](0022-resource-roles.md) | Resource roles: Manager, Contributor, Reader, combined with site roles |
 | [0023](0023-account-creation.md) | Account creation: four modes, sign-up as a self-invite, requests in DynamoDB |
 | [0024](0024-sign-in-copy-and-family-themes.md) | Sign-in copy, families as themes, the card edge, the help route, and emails that match the card |
+| [0025](0025-preview-mode.md) | Preview mode: the real card held at any screen and state, inert, through a driver; a standalone release file; screenshot tests |

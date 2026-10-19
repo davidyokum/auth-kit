@@ -2,6 +2,43 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.10-alpha] - 2026-10-19
+
+Preview mode (register E9, [ADR 0025](docs/decisions/0025-preview-mode.md)): the real sign-in card, held at any screen and state with sample data, inert, for the Sign-in Studio, the primer's walkthrough, and screenshot tests. Pre-release. No breaking changes; `auth-kit/client`'s API and behaviour are unchanged.
+
+### Added
+
+- **`auth-kit/preview`**: `<AuthKitPreview spec={{ screen, state, family, theme, cardStyle, cardEdge, accountCreation, inviteLine, remembered, site, help, sampleUser, device, … }} />`. It draws 27 screens and 52 states, using the Sign-in Studio's `{ screen, state }` IDs plus the card's other views, with the live `SignIn`, `SignUp`, `RequestAccess`, and `SignedOutEverywhere` and their words. Errors come from `ERRORS` and `describeAuthError`.
+  - Every click or submit calls `onAction(name, info)` and nothing else happens. `info.next` says where the live card would go, and a test checks it against the live card.
+  - There are no Amplify or Cognito calls, no network, no storage writes, no credentials, no clipboard, and no navigation.
+  - `previewBackdrop(host, { style, seed, family, theme })` draws from the backdrops registry, without a subject tour, so it stores nothing.
+  - The subpath also exports `PREVIEW_SCREENS`, `PREVIEW_ACTIONS`, `resolvePreviewSpec`, and `nextAfter`.
+- **The standalone file, attached to each GitHub Release** beside the tarball and attested with it (ADR 0012), for pages with no build step:
+  - `auth-kit-preview.js` (about 390 KB, 120 KB gzipped, with React and ReactDOM inside) sets `window.AuthKitPreview = { version, screens, actions, families, cardStyles, widths, backdrops, render(host, spec) → { el, card, spec, ground, heading, rect(), update(spec), actions(), focus(), destroy() }, renderBackdrop(host, options), backdropsUrl, stylesheet }` and adds the card's CSS to the page.
+  - `auth-kit-preview-backdrops.js` (the backdrop styles' code) loads only when a backdrop is drawn.
+  - Neither contains Amplify or Cognito code. The build also replaces `fetch`, storage, `navigator.credentials`, `navigator.clipboard`, and `location.assign` in the bundled code with refusing stand-ins.
+  - `npm run build:preview` builds both into `release/`, which is never in the npm tarball. [`docs/preview/index.html`](docs/preview/index.html) is an example page (`npm run demo:preview`).
+- **The screens' driver** (`src/client/driver.ts`, not exported from `auth-kit/client`): every effect the screens have goes through one React context whose default is the live behaviour. The driver can hold a component at a state and name its controls. Preview mode is built on it.
+- **`PREVIEW_MARKER`** (`auth-kit/dev`, `auth-kit/preview`): `auth-kit check-prod-build` now fails a production build that bundled preview mode, as it does the dev sign-in route and the backdrop picker.
+- **Screenshot tests** (`test/screenshots`, Playwright, a new CI job in the Playwright container; the release job waits for it). They run against the standalone file:
+  - Every screen and state × family × card style × light/dark page × desktop/phone (3,120 cards) is checked for unstyled controls, small targets, overflow, the device's width, and a heading. Each family has a computed-style baseline.
+  - Every control on every screen is clicked in a real browser and must only report.
+  - Every screen has an accessibility snapshot and a baseline image, and there are images of the choice screen in every family and style, on a phone, and on a dark page.
+
+### Fixed
+
+- **The Plain card style's choice rows keep their 10px corners.** `--ak-card-radius` is `0px`, not a bare `0`, which `calc()` refused, so the rows fell back to square. Found by the new matrix.
+- **The phone layout can be forced:** `authKitStyles` applies it (the card's phone padding, Plain's column) wherever an ancestor carries `data-auth-kit-device="phone"`, as well as under 480px. The same declarations cover both cases.
+
+### Development
+
+- The type-declaration build gets an explicit 8 GB heap (`npm run build`): main already peaked at 4.6 GB, and the new entry crossed Node's default.
+- New dev dependencies: `@playwright/test` 1.63.0 (pinned exactly; the screenshot job's container tag must match, which a test checks) and `esbuild` (already present through tsup, now explicit).
+
+### Migration
+
+None for sites. A site that bundled `auth-kit/preview` into a production build (none should) now fails `auth-kit check-prod-build`.
+
 ## [0.1.9-alpha.3] - 2026-10-19
 
 Three fixes the template and demo upgrade to v0.1.9 found, released right after v0.1.9-alpha.2 (which had already shipped). Pre-release. No breaking changes.
