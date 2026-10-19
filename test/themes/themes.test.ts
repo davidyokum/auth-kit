@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BACKDROP_FAMILIES } from '../../src/backdrops/index.js';
 import {
   CARD_EDGE_CONTRAST,
+  CARD_STYLES,
   FAMILY_THEMES,
   authTheme,
   cardEdgeColor,
@@ -166,5 +167,12 @@ describe('the card styles (register E5; Card Studio tokens())', () => {
     expect(themeCssVariables(plain)['--ak-edge']).toBe('transparent');
     expect(checkCardEdge(plain)).toMatchObject({ required: false, pass: true });
     expect(themeCssVariables(authTheme('unc', { cardStyle: 'monogram' }))['--ak-mono']).toBe('#4b9cd3');
+  });
+
+  it('every radius is a length, never a bare 0 (calc() refuses it: Plain’s choice rows lost their 10px corners)', () => {
+    for (const cardStyle of CARD_STYLES) {
+      const v = themeCssVariables(authTheme('osbm', { cardStyle }));
+      for (const key of ['--ak-card-radius', '--ak-control-radius'] as const) expect(v[key], `${cardStyle} ${key}`).toMatch(/^\d+(\.\d+)?px$/);
+    }
   });
 });
