@@ -488,7 +488,7 @@ describe('trouble signing in', () => {
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.getByText('We’ll email you a code so you can choose a new one.')).toBeTruthy();
-    // Said only where the site sends the notice (on by default, register A10; this site turned it off).
+    // Said only where the site mounted the notice route (L5; this site turned notices off).
     expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Send a reset code' }));
     expect(summary().textContent).toBe('Enter your email address');
@@ -503,9 +503,33 @@ describe('trouble signing in', () => {
     expect(auth.resetPassword).toHaveBeenCalledWith({ username: 'ada@example.org' });
   });
 
+  it('promises a note ahead of time only where the site says it mounted the notice route (L5)', async () => {
+    // Notices on by default, but the route not declared: nothing promised (the after-the-fact line still
+    // depends on the route's answer).
+    let t = setup();
+    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
+    await heading('Forgot your password?');
+    expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
+    cleanup();
+    // A route config that doesn't say it's mounted promises nothing either.
+    t = setup({ notices: { url: '/api/auth-kit/account-notice' } });
+    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
+    await heading('Forgot your password?');
+    expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
+    cleanup();
+    t = setup({ notices: { mounted: true } });
+    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
+    expect(await screen.findByText('We’ll email you a note when your password changes.')).toBeTruthy();
+    cleanup();
+    expect(() => setup({ notices: { mounted: 'yes' as never } })).toThrow(/notices\.mounted must be true or false/);
+  });
+
   it('the help screens’ buttons: an emailed code (only where the pool has them) and a new code', async () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
-    const { user } = setup({ codeLifetimeMinutes: 10 });
+    const { user } = setup({ codeLifetimeMinutes: 10, notices: { mounted: true } });
     await enterEmail(user);
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));

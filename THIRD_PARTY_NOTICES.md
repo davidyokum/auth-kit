@@ -3,6 +3,18 @@
 auth-kit has no runtime dependencies beyond those in `package.json`. It includes the following
 third-party material in its source and build.
 
+## Licences in this package
+
+auth-kit's code is under the MIT License (`LICENSE`). Not everything in the package is auth-kit's code:
+
+- **OpenStreetMap map data, under the ODbL 1.0, not MIT.** The lakes, rivers, and creeks in
+  `src/backdrops/styles/county-survey/data.ts` and `src/backdrops/styles/river-basins/data.ts`, and in
+  the `dist/` chunks built from them (the County Survey and River Basins styles' code, each of which
+  carries this notice in a comment), are © OpenStreetMap contributors and are made available under the
+  Open Database License 1.0. The MIT License doesn't cover that data. See [OpenStreetMap](#openstreetmap)
+  below.
+- The other material below keeps its own licence (ISC, BSD 3-Clause), or is in the public domain.
+
 ## Lucide icons
 
 `src/client/icons.tsx` draws icons from [Lucide](https://lucide.dev), as published in lucide-react
@@ -77,8 +89,15 @@ Center and the CDS (catalogue V/50).
 ### OpenStreetMap
 
 The lakes, rivers, and creeks in `src/backdrops/styles/county-survey/data.ts` and
-`src/backdrops/styles/river-basins/data.ts` are © OpenStreetMap contributors, available under the Open
-Database License 1.0 (ODbL): https://www.openstreetmap.org/copyright.
+`src/backdrops/styles/river-basins/data.ts` (and the `dist/` chunks built from them) are © OpenStreetMap
+contributors: https://www.openstreetmap.org/copyright. They're extracted from OpenStreetMap,
+pre-projected, simplified, and re-encoded, so together they're a database derived from it, and that
+database is made available under the Open Database License 1.0 (ODbL),
+https://opendatacommons.org/licenses/odbl/1-0/, separately from auth-kit's MIT-licensed code. Anyone who
+publicly uses an adapted version of this data offers it under the ODbL too (ODbL §4.4).
+
+The pictures the County Survey and River Basins backdrops draw from it are produced works, which need
+attribution: each sheet carries "WATER FEATURES © OPENSTREETMAP CONTRIBUTORS" in its notes.
 
 ### U.S. Census Bureau and USGS (public domain)
 

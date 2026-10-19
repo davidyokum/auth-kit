@@ -1,5 +1,5 @@
 import { AdminCreateUserCommand, type AdminCreateUserCommandInput } from '@aws-sdk/client-cognito-identity-provider';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   type AccountCreationBody,
   type AccountCreationRoutesConfig,
@@ -650,6 +650,30 @@ describe('open sign-up needs the WAF challenge (M4)', () => {
     expect((await domains.routes.signUp(post('sign-up', { email: 'a@example.org' }))).status).toBe(200);
     const local = setupRoutes({ requireWafToken: false });
     expect((await local.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
+  });
+
+  describe('requireWafToken: false is for local development only (L4)', () => {
+    afterEach(() => void vi.unstubAllEnvs());
+
+    it('throws on a production server, in both sign-up modes, whatever the sign-in URL', () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      expect(() => setupRoutes({ requireWafToken: false })).toThrow(/requireWafToken: false is for local development only.*NODE_ENV=production/);
+      expect(() => setupRoutes({ requireWafToken: false, accountCreation: { mode: 'domains', domains: ['example.org'] } })).toThrow(/local development only/);
+      // The default (on) and an explicit true are fine; so is a request-only site, which has no sign-up to check.
+      expect(() => setupRoutes()).not.toThrow();
+      expect(() => setupRoutes({ requireWafToken: true })).not.toThrow();
+      expect(() => setupRoutes({ requireWafToken: false, accountCreation: { mode: 'request' } })).not.toThrow();
+    });
+
+    it('outside production it works, and says once, when the routes are made, that the check is off', async () => {
+      vi.stubEnv('NODE_ENV', 'development');
+      const local = setupRoutes({ requireWafToken: false });
+      expect(local.errors.map((e) => e.context)).toEqual(['sign-up: WAF token check off']);
+      expect((await local.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
+      expect((await local.routes.signUp(post('sign-up', { email: 'b@example.org' }, { cookie: null }))).status).toBe(200);
+      expect(local.errors.map((e) => e.context)).toEqual(['sign-up: WAF token check off']);
+      expect(setupRoutes().errors).toEqual([]);
+    });
   });
 });
 

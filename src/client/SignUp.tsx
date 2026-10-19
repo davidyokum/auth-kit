@@ -7,6 +7,7 @@ import { handOffEmail, postAccountForm } from './account-creation-client.js';
 import { confirmCode, fetchAuthFactors, requestEmailCode, saveName } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import { rememberPasskey } from './passkey-hint.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
 import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP, STATUS } from './copy.js';
 import { checkedHref, hrefOr } from './href.js';
@@ -437,6 +438,8 @@ export function SignUp(props: SignUpProps) {
           accountName={email.trim()}
           headingLevel={level}
           onDone={(how) => {
+            // This browser now opens the passkey prompt first for the address (register A5a; L9).
+            if (how === 'passkey') void rememberPasskey(email);
             void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}

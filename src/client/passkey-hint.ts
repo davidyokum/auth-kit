@@ -9,8 +9,10 @@
  *   the screens and the server traffic are the same for every address up to the person's choice
  *   (ADR 0018). It isn't a secret either: it only decides which screen shows first.
  * - Set after a passkey sign-in and after creating a passkey here. Removed when My account removes
- *   the account's last passkey, and when someone sent to the prompt by the hint chooses another way in
- *   twice in a row (that passkey isn't on this device any more).
+ *   the account's last passkey or deletes the account, and when someone sent to the prompt by the hint
+ *   chooses another way in twice in a row (that passkey isn't on this device any more). It outlasts
+ *   signing out, so on a shared computer it tells anyone who types an address (or a script on the site)
+ *   that someone signed in here with a passkey for it; nothing more (ADR 0024).
  * - Every read and write is guarded: blocked storage, no `crypto.subtle`, or anything odd reads as "no
  *   hint", which only means the choice screen.
  */
@@ -42,7 +44,8 @@ function read(): HintState | null {
     const raw = s.getItem(KEY);
     if (raw) {
       const v = JSON.parse(raw) as Partial<HintState>;
-      if (typeof v.salt === 'string' && v.salt.length >= 16 && Array.isArray(v.hashes)) {
+      // The salt is what rememberPasskey writes: 16 random bytes as 32 hex characters (anything else: start over).
+      if (typeof v.salt === 'string' && /^[0-9a-f]{32}$/.test(v.salt) && Array.isArray(v.hashes)) {
         return { salt: v.salt, hashes: v.hashes.filter((h): h is string => typeof h === 'string').slice(-MAX_ADDRESSES), skips: v.skips && typeof v.skips === 'object' ? v.skips : {} };
       }
     }

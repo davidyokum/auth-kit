@@ -28,5 +28,23 @@ export const MATRIX_FIXTURE_ENV = 'AUTH_KIT_MATRIX_FIXTURE';
  * The matrix server mode's sign on `createServerAuth` (`matrixOverrides().serverAuth` carries it): the
  * only place the standard's server rules (`requireFirstCredential`, `requireTotpForPasswordUsers`) may
  * be switched off, so a test can reach a persona the standard otherwise refuses (register A1, A2).
+ *
+ * Module-private (`Symbol()`, not `Symbol.for()`, L7): no registry name reaches it, `./shared` isn't a
+ * public subpath, and the build's code splitting keeps one instance for `auth-kit/server` and
+ * `auth-kit/testing/matrix-server`, so the only way to it is `matrixServerOverrides()`, which hands it
+ * out only under `next dev` with `AUTH_KIT_MATRIX=1`. `createServerAuth` also checks the environment
+ * itself (`matrixServerEnvironment`). Defence in depth against deliberate misuse: accidental misuse is
+ * already prevented (the overrides are null in every build, and `check-prod-build` refuses a bundle
+ * that carries the matrix marker).
  */
-export const MATRIX_SERVER_MODE: unique symbol = Symbol.for('auth-kit.matrix-server-mode') as never;
+export const MATRIX_SERVER_MODE: unique symbol = Symbol('auth-kit.matrix-server-mode') as never;
+
+/**
+ * True only where the matrix server mode can run: `NODE_ENV` isn't `production` (written literally, so
+ * a production build fixes it) and `AUTH_KIT_MATRIX=1`. The same first two conditions as the proxy's
+ * handler pass above.
+ */
+export function matrixServerEnvironment(): boolean {
+  if (typeof process === 'undefined' || process.env.NODE_ENV === 'production') return false;
+  return process.env[MATRIX_ENV_FLAG] === '1';
+}

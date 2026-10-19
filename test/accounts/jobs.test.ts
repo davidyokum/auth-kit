@@ -604,7 +604,8 @@ describe('the access-request digest handler', () => {
       accessRequestDigestConfig({
         ...ENV,
         AUTH_KIT_FAMILY: undefined,
-        AUTH_KIT_MAIL_FROM: 'Example Reports <sign-in@example.org>',
+        // No family is the personal family, which sends from sign-in@yokum.app (register F11).
+        AUTH_KIT_MAIL_FROM: 'Example Reports <sign-in@yokum.app>',
         AUTH_KIT_SETTINGS_TABLE: 'site-data-SiteSettingsTable-EXAMPLE',
         AUTH_KIT_MAIL_CONFIGURATION_SET: 'auth',
         AUTH_KIT_RECIPIENT_GROUPS: ' owner, people-managers ,, ',

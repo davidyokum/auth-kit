@@ -1,3 +1,7 @@
+/*! auth-kit river-basins data: the rivers, creeks, and lakes in this file are © OpenStreetMap
+ *  contributors, made available under the Open Database License 1.0
+ *  (https://opendatacommons.org/licenses/odbl/1-0/), not under auth-kit's MIT License. See
+ *  THIRD_PARTY_NOTICES.md and https://www.openstreetmap.org/copyright. */
 /**
  * river-basins data: North Carolina's 17 major river basins, their rivers and creeks (with tributary
  * order), lakes and reservoirs, inset shapes, and the state outline. Imported only by v1.ts. Frozen with

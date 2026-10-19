@@ -4,15 +4,10 @@
  */
 import { NextRequest } from 'next/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createPeopleActions } from '../../src/admin/index.js';
-import {
-  MfaEnrollmentRequiredError,
-  UnauthenticatedError,
-  createServerAuth,
-  toRequestContext,
-  type RequestContext,
-} from '../../src/server/index.js';
+import { UnauthenticatedError, createServerAuth, toRequestContext, type RequestContext } from '../../src/server/index.js';
 import { MATRIX_FIXTURE_ENV, createTestIssuer, matrixFixture, parseMatrixFixture, type MatrixFixture } from '../../src/testing/index.js';
+import type * as AdminNamespace from '../../src/admin/index.js';
+import type * as ServerNamespace from '../../src/server/index.js';
 import type * as MatrixServerNamespace from '../../src/testing/matrix-server.js';
 import { CLIENT_ID, POOL_ID, capabilities } from '../helpers.js';
 
@@ -20,10 +15,18 @@ type MatrixServerModule = typeof MatrixServerNamespace;
 
 const SHARED = Symbol.for('auth-kit.matrix-server.shared.v1');
 
-/** A fresh copy of the module, as each Next bundle gets (its own auth-kit, its own error classes). */
-async function freshBundle(): Promise<MatrixServerModule> {
+/**
+ * A fresh copy of auth-kit, as each Next bundle gets (its own modules, its own error classes): the matrix
+ * server mode, and the server and admin entries the app's lib/auth.ts and lib/admin.ts import beside it
+ * in the same bundle. The matrix server mode's sign is module-private (L7), so the app's
+ * createServerAuth must come from the same bundle as its matrixOverrides(), as it does in Next.
+ */
+async function freshBundle(): Promise<MatrixServerModule & { server: typeof ServerNamespace; admin: typeof AdminNamespace }> {
   vi.resetModules();
-  return import('../../src/testing/matrix-server.js');
+  const matrix = await import('../../src/testing/matrix-server.js');
+  const server = await import('../../src/server/index.js');
+  const admin = await import('../../src/admin/index.js');
+  return { ...matrix, server, admin };
 }
 
 const PERSONAS = {
@@ -130,13 +133,14 @@ describe('while the matrix runs, the app’s own auth answers from the fixture',
   async function appAuth() {
     const s = setup();
     matrixEnv(s.fixture);
-    const overrides = (await freshBundle()).matrixServerOverrides()!;
+    const bundle = await freshBundle();
+    const overrides = bundle.matrixServerOverrides()!;
     let context: RequestContext = toRequestContext(new Request('http://127.0.0.1:3210/'));
-    const auth = createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, context: () => Promise.resolve(context) });
+    const auth = bundle.server.createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, context: () => Promise.resolve(context) });
     const as = (name: keyof typeof PERSONAS) => {
       context = toRequestContext(new NextRequest('http://127.0.0.1:3210/app', { headers: s.personas[name].cookie.headers as HeadersInit }));
     };
-    return { ...s, overrides, auth, as };
+    return { ...s, overrides, auth, as, bundle };
   }
 
   it('verifies the test issuer’s tokens (cookies as a browser sends them) and refuses any other key', async () => {
@@ -150,10 +154,11 @@ describe('while the matrix runs, the app’s own auth answers from the fixture',
   it('refuses a token signed by any other key as 401, without fetching the real pool’s keys', async () => {
     const s = setup();
     matrixEnv(s.fixture);
-    const overrides = (await freshBundle()).matrixServerOverrides()!;
+    const bundle = await freshBundle();
+    const overrides = bundle.matrixServerOverrides()!;
     const fetched: string[] = [];
     const jwksFetcher = (uri: string) => (fetched.push(uri), overrides.serverAuth.jwksFetcher(uri));
-    const auth = createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, jwksFetcher, context: () => Promise.reject(new Error('pass a request')) });
+    const auth = bundle.server.createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, jwksFetcher, context: () => Promise.reject(new Error('pass a request')) });
     const stranger = createTestIssuer({ userPoolId: POOL_ID, clientId: CLIENT_ID }).mintAccessToken({ sub: s.personas.member.sub, username: s.personas.member.username });
     const request = new Request('http://127.0.0.1/', { headers: { authorization: `Bearer ${stranger}` } });
     await expect(auth.requireUser({ request })).rejects.toMatchObject({ code: 'invalid_token', status: 401 });
@@ -163,9 +168,9 @@ describe('while the matrix runs, the app’s own auth answers from the fixture',
   });
 
   it('answers the authenticator rule, disabled accounts, revoked sessions, and live demotions as Cognito does', async () => {
-    const { auth, as } = await appAuth();
+    const { auth, as, bundle } = await appAuth();
     as('noAuthenticator');
-    await expect(auth.requireUser()).rejects.toBeInstanceOf(MfaEnrollmentRequiredError);
+    await expect(auth.requireUser()).rejects.toBeInstanceOf(bundle.server.MfaEnrollmentRequiredError);
     await expect(auth.requireUser({ allowMfaEnrollment: true })).resolves.toBeTruthy();
     as('disabledAdmin');
     await expect(auth.requireUser()).rejects.toMatchObject({ code: 'account_disabled', status: 401 });
@@ -186,6 +191,14 @@ describe('while the matrix runs, the app’s own auth answers from the fixture',
     expect(error).not.toBeInstanceOf(UnauthenticatedError);
   });
 
+  it('its sign is module-private: a createServerAuth from another module copy refuses it (L7)', async () => {
+    const s = setup();
+    matrixEnv(s.fixture);
+    const overrides = (await freshBundle()).matrixServerOverrides()!;
+    // This file's own createServerAuth is another copy of auth-kit than the bundle that made the sign.
+    expect(() => createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, requireFirstCredential: false })).toThrow(/matrixServerMode comes only from matrixOverrides/);
+  });
+
   it('fails loudly for a person the fixture doesn’t know', async () => {
     const { overrides } = await appAuth();
     await expect(overrides.serverAuth.cognito.getUserAuthFactors({ accessToken: 'x', username: 'stranger' })).rejects.toThrow(/no person "stranger"/);
@@ -197,10 +210,11 @@ describe('the People page and audit log while the matrix runs', () => {
   async function adminArea() {
     const s = setup();
     matrixEnv(s.fixture);
-    const overrides = (await freshBundle()).matrixServerOverrides()!;
+    const bundle = await freshBundle();
+    const overrides = bundle.matrixServerOverrides()!;
     const context = toRequestContext(new NextRequest('http://127.0.0.1:3210/admin/people', { headers: s.personas.owner.cookie.headers as HeadersInit }));
-    const auth = createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, context: () => Promise.resolve(context) });
-    const people = createPeopleActions({
+    const auth = bundle.server.createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...overrides.serverAuth, context: () => Promise.resolve(context) });
+    const people = bundle.admin.createPeopleActions({
       auth,
       auditLog: overrides.auditLog,
       mailer: overrides.mailer,
@@ -271,11 +285,12 @@ describe('resource roles while the matrix runs', () => {
   it('one membership store per process, shared by every bundle, whose conflicts any bundle recognizes', async () => {
     const s = setup();
     matrixEnv(s.fixture);
-    const first = (await freshBundle()).matrixServerOverrides()!;
+    const firstBundle = await freshBundle();
+    const first = firstBundle.matrixServerOverrides()!;
     const { defineResourceTypes } = await import('../../src/resources/index.js');
     const types = defineResourceTypes({ project: { noun: 'project' } });
     const context = toRequestContext(new NextRequest('http://127.0.0.1:3210/app', { headers: s.personas.member.cookie.headers as HeadersInit }));
-    const auth = createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...first.serverAuth, resources: { types, store: first.resources }, context: () => Promise.resolve(context) });
+    const auth = firstBundle.server.createServerAuth({ userPoolId: POOL_ID, clientId: CLIENT_ID, capabilities, ...first.serverAuth, resources: { types, store: first.resources }, context: () => Promise.resolve(context) });
     const ref = { type: 'project', id: 'p-1' };
     const meta = { ...ref, version: 1, managers: 1, createdAt: 'x', createdBy: 'x', updatedAt: 'x', updatedBy: 'x' };
     await first.resources.commit(ref, { expectedVersion: null, meta, put: [{ ...ref, sub: s.personas.member.sub, role: 'manager', addedBy: 'x', addedAt: 'x' }] });

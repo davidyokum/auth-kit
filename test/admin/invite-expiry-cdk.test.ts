@@ -159,14 +159,16 @@ describe('InviteExpirySweep', () => {
   });
 
   it('ownerWarnings: an explicit SES identity, and settings that would send something odd are refused', () => {
-    const { template } = synth({ ownerWarnings: { siteName: 'Example Reports', family: 'personal', helpEmail: 'help@example.org', from: 'Example Reports <sign-in@mail.example.org>', sesIdentity: 'example.org' } });
+    const { template } = synth({ ownerWarnings: { siteName: 'Example Reports', family: 'unc', helpEmail: 'help@example.org', from: '"Example Reports (UNC)" <sign-in@mail.example.org>', sesIdentity: 'example.org' } });
     const sesStatement = policyStatements(template, 'InviteExpiryFunctionRole').find((s) => actionsOf([s]).includes('ses:SendEmail'))!;
     expect(JSON.stringify(sesStatement.Resource)).toContain(':identity/example.org"');
-    const base = { siteName: 'Example Reports', family: 'personal' as const, helpEmail: 'help@example.org', from: 'Example Reports <sign-in@example.org>' };
+    const base = { siteName: 'Example Reports', family: 'personal' as const, helpEmail: 'help@example.org', from: 'Example Reports <sign-in@yokum.app>' };
     expect(() => synth({ ownerWarnings: { ...base, siteName: ' ' } })).toThrow(/siteName/);
     // Register A10 and E4a: a reply-able sign-in@ sender with the family's suffix, and a usable help address.
     expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports <noreply@example.org>' } })).toThrow(/never noreply@/);
     expect(() => synth({ ownerWarnings: { ...base, family: 'osbm' } })).toThrow(/Example Reports \(NC OSBM\)/);
+    // Register F11: the personal family's sender is its own sign-in@yokum.app.
+    expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports <sign-in@example.org>' } })).toThrow(/Personal sites send from sign-in@yokum\.app/);
     expect(() => synth({ ownerWarnings: { ...base, helpEmail: 'jordan.lee@example.org' } })).toThrow(/personal: true/);
     expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports' } })).toThrow(/from/);
     expect(() => synth({ ownerWarnings: { ...base, signInUrl: 'http://reports.example.org/sign-in' } })).toThrow(/https/);

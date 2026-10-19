@@ -1156,7 +1156,8 @@ export function SignInHelpSettings(props: SignInHelpSettingsProps): ReactNode {
       {view.override ? (
         <p className="ak-muted">
           Changed {formatDate(view.override.updatedAt)} by {view.override.updatedBy.email ?? 'a Super admin'}
-          {view.override.reason ? `: “${view.override.reason}”` : ''}. The configured address is {view.configured}.
+          {view.override.reason ? `: “${view.override.reason}”` : ''}.{view.override.personal === true ? ' Set as a personal address: a person’s own mailbox, on purpose.' : ''} The configured
+          address is {view.configured}.
         </p>
       ) : null}
       <p className="ak-note">

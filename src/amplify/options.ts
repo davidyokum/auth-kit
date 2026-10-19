@@ -27,7 +27,7 @@ export class AuthStandardConfigError extends Error {
 export interface AuthEmailOptions {
   /**
    * Address auth email comes from: the site's reply-able `sign-in@` mailbox, e.g. `sign-in@reports.example.org`
-   * (personal sites: `sign-in@yokum.app`). Never `noreply@` (register A10; synthesis fails). Its domain
+   * (personal sites: `sign-in@yokum.app`, register F11; synthesis fails on any other). Never `noreply@` (register A10; synthesis fails). Its domain
    * must be verified in SES.
    */
   fromAddress: string;
@@ -395,11 +395,12 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!email) fail('email settings are required: auth email must go through SES from a verified domain.');
   const fromAddress = (email.fromAddress ?? '').trim();
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
-  const senderProblems = senderAddressProblems(fromAddress);
-  if (senderProblems.length > 0) fail(`email.fromAddress: ${senderProblems.join(' ')}`);
   const fromName = (email.fromName ?? '').trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
   if (!isThemeFamily(email.family)) fail("email.family is required: 'osbm', 'unc', or 'personal' (the sender's name carries the family's suffix, register E4a).");
+  // With the family: the personal family's sender is its own sign-in@yokum.app (register F11).
+  const senderProblems = senderAddressProblems(fromAddress, email.family);
+  if (senderProblems.length > 0) fail(`email.fromAddress: ${senderProblems.join(' ')}`);
   const nameProblems = senderNameProblems(fromName, email.family);
   if (nameProblems.length > 0) fail(`email.fromName: ${nameProblems.join(' ')}`);
   const helpProblems = helpSettingProblems(email.replyTo);

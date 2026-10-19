@@ -432,7 +432,10 @@ export function MyAccount(props: MyAccountProps) {
           classNames={classNames}
           {...(props.itemsNote !== undefined && { itemsNote: props.itemsNote })}
           {...(stepUpHref !== undefined && { stepUpHref })}
-          onDeleted={() => (props.navigate ?? ((path: string) => window.location.assign(path)))(deletedPath)}
+          onDeleted={() => {
+            // No passkey signs in to a deleted account: forget this browser's hint first (register A5a), then leave.
+            void (emailValue !== undefined ? forgetPasskey(emailValue) : Promise.resolve()).then(() => (props.navigate ?? ((path: string) => window.location.assign(path)))(deletedPath));
+          }}
         />
       ) : null}
     </div>

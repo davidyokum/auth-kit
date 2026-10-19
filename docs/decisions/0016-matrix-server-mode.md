@@ -30,3 +30,10 @@ The proxy's own gate (ADR 0014) is unchanged; the server mode doesn't add a requ
 - A site's matrix wiring is two small alias files, a spread in `lib/auth.ts`, and the admin options; the scripted behavior and its fidelity to Cognito live, and get fixed, in one place.
 - auth-kit's own CI runs the whole matrix on a real Next 16 fixture app (`test/e2e`): `next build` (no matrix code in the output), `next dev` through `startMatrixServer` with and without the proxy, and `next start` (the proxy never steps aside).
 - The scripted Cognito is only as faithful as its fixture. Real Cognito round trips are still checked on a sandbox deploy.
+
+## Amendment 2026-10-19: the opt-outs' lock (v0.1.9 review, L7)
+
+v0.1.9 made `requireFirstCredential: false` and `requireTotpForPasswordUsers: false` throw unless `serverAuth` carries the matrix server mode's sign. That sign was `Symbol.for(...)`, so a site could name it in one line without importing anything. It's now two locks, as defence in depth (accidental misuse was already prevented: the overrides are `null` in every build, and `check-prod-build` refuses a bundle with the marker):
+
+- **A module-private sign.** `MATRIX_SERVER_MODE` is `Symbol()`, defined once in the build's shared chunk (`./shared` isn't a public subpath), so the only way to it is `matrixServerOverrides()`. The app's `createServerAuth` and its `matrixOverrides()` come from the same bundle, as `lib/auth.ts` imports both.
+- **The environment, checked again.** `createServerAuth` accepts the sign (and with it the opt-outs) only where `NODE_ENV` isn't `production` (written literally, so a production build fixes it) and `AUTH_KIT_MATRIX=1`, the proxy's handler-pass conditions. On a production server, even the real sign is refused.

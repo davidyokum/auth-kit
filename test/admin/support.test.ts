@@ -12,6 +12,7 @@ import {
   renderInviteEmail,
   renderOwnerInviteWarningEmail,
   renderOwnershipTransferEmail,
+  renderSignInHelpChangedEmail,
   renderSuperadminGrantEmail,
   ownerCountWarning,
   RESOURCE_ACCESS_NOTE,
@@ -51,11 +52,11 @@ describe('invite email', () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client, configurationSet: 'auth', replyTo: ['help@example.org'] });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client, configurationSet: 'auth', replyTo: ['help@example.org'] });
     await mailer.sendInvite(invite);
     const input = ses.commandCalls(SendEmailCommand)[0]!.args[0].input;
     expect(input).toMatchObject({
-      FromEmailAddress: 'Example <sign-in@example.org>',
+      FromEmailAddress: 'Example <sign-in@yokum.app>',
       Destination: { ToAddresses: ['alice@example.org'] },
       ConfigurationSetName: 'auth',
       ReplyToAddresses: ['help@example.org'],
@@ -70,7 +71,7 @@ describe('invite email', () => {
     expect(() => createSesInviteMailer({ from: '', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' } })).toThrow(/from/);
     // Register A10 and E4a: never noreply@, and the family's sender name.
     expect(() => createSesInviteMailer({ from: 'Example <noreply@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' } })).toThrow(/never noreply@/);
-    expect(() => createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'osbm', help: 'help@example.org' } })).toThrow(/Example \(NC OSBM\)/);
+    expect(() => createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'osbm', help: 'help@example.org' } })).toThrow(/Example \(NC OSBM\)/);
   });
 });
 
@@ -112,12 +113,12 @@ describe('Super admin grant alert email (the default notifier)', () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.superadminGranted(alert);
     const calls = ses.commandCalls(SendEmailCommand);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args[0].input).toMatchObject({
-      FromEmailAddress: 'Example <sign-in@example.org>',
+      FromEmailAddress: 'Example <sign-in@yokum.app>',
       Destination: { ToAddresses: ['olivia@example.org'] },
     });
     await expect(mailer.superadminGranted({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
@@ -148,7 +149,7 @@ describe('ownership transfer alert email (the default notifier)', () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.ownershipTransferred(alert);
     expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input.Destination).toEqual({ ToAddresses: ['olivia@example.org', 'grace@example.org'] });
     await expect(mailer.ownershipTransferred({ ...alert, newOwner: { sub: 'g', email: '' } })).rejects.toThrow(/both/);
@@ -193,7 +194,7 @@ describe('last-owner warning email (the sweep leaves the only owner’s unused i
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.ownerInviteUnused(warning);
     await mailer.ownerInviteUnused({ ...warning, to: { email: 'ops@example.org', kind: 'fallback' } });
     expect(ses.commandCalls(SendEmailCommand).map((c) => c.args[0].input.Destination)).toEqual([
@@ -318,9 +319,24 @@ describe('sign-in help changed alert (M8: the owner and every Super admin)', () 
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.signInHelpChanged(alert);
     expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['olivia@example.org', 'sam@example.org'] } });
     await expect(mailer.signInHelpChanged({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
+  });
+
+  it('says plainly when the new address was set as a personal address (register E4c, L1)', () => {
+    const plain = renderSignInHelpChangedEmail(alert, { helpEmail: 'help@example.org' });
+    expect(plain.subject).toBe('Example Reports: the sign-in help address changed');
+    expect(plain.text).not.toContain('personal address');
+    const personal = renderSignInHelpChangedEmail({ ...alert, to: 'jordan.lee@example.org', personal: true }, { helpEmail: 'help@example.org' });
+    expect(personal.subject).toBe('Example Reports: the sign-in help address changed to a personal address');
+    expect(personal.text).toContain('rogue@example.org changed the sign-in help address for Example Reports from help@example.org to jordan.lee@example.org.');
+    expect(personal.text).toContain("It's set to a personal address: rogue@example.org confirmed that jordan.lee@example.org is one person's own mailbox, not a role mailbox, on purpose.");
+    expect(personal.html).toContain('set to a personal address');
+    // Going back to the configured address claims nothing about it.
+    const back = renderSignInHelpChangedEmail({ ...alert, reverted: true, personal: true }, { helpEmail: 'help@example.org' });
+    expect(back.subject).toBe('Example Reports: the sign-in help address changed');
+    expect(back.text).not.toContain('personal address');
   });
 });

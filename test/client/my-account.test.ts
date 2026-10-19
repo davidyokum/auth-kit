@@ -1,4 +1,4 @@
-import { hasPasskeyHint } from '../../src/client/passkey-hint.js';
+import { hasPasskeyHint, rememberPasskey } from '../../src/client/passkey-hint.js';
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -75,13 +75,17 @@ describe('MyAccount', () => {
 
   it('removes a passkey after confirming', async () => {
     auth.listWebAuthnCredentials.mockResolvedValueOnce({ credentials: [MACBOOK, YUBIKEY] }).mockResolvedValueOnce({ credentials: [YUBIKEY] });
+    await rememberPasskey('ada@example.org');
     const { user } = setup({ configured: ['WEB_AUTHN'], mfa: [] });
+    await screen.findByText('ada@example.org');
     await user.click(await screen.findByRole('button', { name: 'Remove MacBook' }));
     expect(screen.getByText(/You won’t be able to sign in with it/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Remove passkey' }));
     expect(auth.deleteWebAuthnCredential).toHaveBeenCalledWith({ credentialId: 'pk-1' });
     await waitFor(() => expect(screen.queryByText('MacBook')).toBeNull());
     expect(screen.getByRole('status').textContent).toBe('Passkey removed.');
+    // One of several: auth-kit can't tell which device it lived on, so the passkey hint stays (register A5a).
+    expect(await hasPasskeyHint('ada@example.org')).toBe(true);
   });
 
   it('"Keep it" cancels a removal', async () => {
@@ -103,13 +107,17 @@ describe('MyAccount', () => {
     expect(auth.deleteWebAuthnCredential).not.toHaveBeenCalled();
   });
 
-  it('allows removing the last passkey when a password remains', async () => {
+  it('allows removing the last passkey when a password remains, and then forgets the passkey hint', async () => {
     auth.listWebAuthnCredentials.mockResolvedValue({ credentials: [MACBOOK] });
+    await rememberPasskey('ada@example.org');
     const { user } = setup({ configured: ['WEB_AUTHN', 'PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] });
     await waitFor(() => expect(screen.getByText('You have a password.')).toBeTruthy());
+    await screen.findByText('ada@example.org');
     await user.click(await screen.findByRole('button', { name: 'Remove MacBook' }));
     await user.click(screen.getByRole('button', { name: 'Remove passkey' }));
     expect(auth.deleteWebAuthnCredential).toHaveBeenCalled();
+    // The account's last passkey is gone, so Continue goes to the choice screen next time (register A5a).
+    await waitFor(async () => expect(await hasPasskeyHint('ada@example.org')).toBe(false));
   });
 
   it('fails closed on the last passkey when factors couldn’t load, and says so instead of showing "no password"', async () => {
@@ -298,8 +306,9 @@ describe('MyAccount self-service (sign-up sites)', () => {
     await waitFor(() => expect(within(email).getByRole('alert').textContent).toBe('We couldn’t reach the site just now. Try again in a moment.'));
   });
 
-  it('deletes the account after the address is typed out, then leaves', async () => {
+  it('deletes the account after the address is typed out, forgets the passkey hint, then leaves', async () => {
     const actions = selfService();
+    await rememberPasskey('ada@example.org');
     const { user, navigate } = setup(FACTORS, { selfService: actions, siteName: 'Example Reports', itemsNote: 'Your reports stay with the team.', deletedPath: '/goodbye' });
     await screen.findByText('ada@example.org');
     expect(screen.getByRole('heading', { name: 'Delete your account' })).toBeTruthy();
@@ -318,6 +327,8 @@ describe('MyAccount self-service (sign-up sites)', () => {
     await user.click(submit);
     expect(actions.deleteMyAccount).toHaveBeenCalledWith({ confirmEmail: 'ada@example.org' });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/goodbye'));
+    // Forgotten before leaving: no passkey signs in to a deleted account (register A5a).
+    expect(await hasPasskeyHint('ada@example.org')).toBe(false);
   });
 
   it('a refused delete stays, with the reason and the step-up link; "Keep my account" closes it', async () => {

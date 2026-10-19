@@ -3,7 +3,7 @@ import { UNVERIFIED_SWEEP_MARK } from '../../src/amplify/sweep-mark.js';
 import { AmplifyAuth, type AuthProps } from '@aws-amplify/auth-construct';
 import { App, Fn, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
-import { UserPoolOperation, type UserPool } from 'aws-cdk-lib/aws-cognito';
+import { UserPool, UserPoolOperation } from 'aws-cdk-lib/aws-cognito';
 import { Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { describe, expect, it } from 'vitest';
 import {
@@ -22,7 +22,7 @@ const BASE: AuthStandardOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
+  email: { fromAddress: 'sign-in@yokum.app', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
   // The pool's own web ACL, deliberately (register F7: deployed pools otherwise reuse the shared one).
@@ -108,10 +108,11 @@ describe('Tier 2 pool on a branch', () => {
       AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
       EmailConfiguration: {
         EmailSendingAccount: 'DEVELOPER',
-        From: 'Example Reports <sign-in@example.org>',
+        // The personal family sends from sign-in@yokum.app (register F11).
+        From: 'Example Reports <sign-in@yokum.app>',
         ReplyToEmailAddress: 'help@example.org',
         SourceArn: {
-          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/example.org']],
+          'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/yokum.app']],
         },
       },
     });
@@ -122,7 +123,7 @@ describe('Tier 2 pool on a branch', () => {
     expect(formatSender('Example Site (NC OSBM)', 'sign-in@example.org')).toBe('"Example Site (NC OSBM)" <sign-in@example.org>');
     expect(formatSender('Example Site (UNC)', 'sign-in@example.org')).toBe('"Example Site (UNC)" <sign-in@example.org>');
     expect(formatSender('Reports, Example', 'a@example.org')).toBe('"Reports, Example" <a@example.org>');
-    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)', family: 'unc' } }).template();
+    const quoted = synth({ ...BASE, email: { ...BASE.email, fromAddress: 'sign-in@example.org', fromName: 'Example Site (UNC)', family: 'unc' } }).template();
     quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <sign-in@example.org>' }) });
     expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
@@ -521,6 +522,49 @@ describe('account creation (ADR 0023)', () => {
     expect(() => synth(BASE, { sweep: false }).template()).not.toThrow();
   });
 
+  describe('the sweep must be for this pool, as far as synthesis can tell (L6)', () => {
+    const OPEN = { ...BASE, accountCreation: { mode: 'open' as const }, siteWebAclArn: SITE_ACL };
+    /** Synthesizes an open sign-up site whose only sweeps are given these pools. */
+    const withSweeps = (...targets: ((auth: AmplifyAuth, stack: Stack) => unknown)[]) =>
+      synth(OPEN, {
+        sweep: false,
+        beforeApply: (auth, stack) => {
+          preSignUpTrigger(auth, stack);
+          targets.forEach((target, i) => Object.assign(new Construct(stack, `Sweep${i}`), { [UNVERIFIED_SWEEP_MARK]: { userPool: target(auth, stack) } }));
+        },
+      }).template;
+
+    it('counts the pool itself: its L2, its L1, or an import of its own ID', () => {
+      expect(() => withSweeps((auth) => auth.resources.userPool)()).not.toThrow();
+      expect(() => withSweeps((auth) => auth.resources.cfnResources.cfnUserPool)()).not.toThrow();
+      expect(() => withSweeps((auth, stack) => UserPool.fromUserPoolId(stack, 'SamePool', auth.resources.userPool.userPoolId))()).not.toThrow();
+    });
+
+    it('a sweep of another pool is no sweep for this one', () => {
+      expect(withSweeps((_auth, stack) => new UserPool(stack, 'OtherPool'))).toThrow(/Add UnverifiedAccountSweep from auth-kit\/admin\/cdk for this pool/);
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'OtherImport', new UserPool(stack, 'OtherPool').userPoolId))).toThrow(/Add UnverifiedAccountSweep/);
+    });
+
+    it('refuses what it can’t tie to this pool, naming the sweep and what it was given', () => {
+      // A typo'd or copied pool ID used to satisfy the check and then sweep nothing.
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'Typo', 'us-east-1_TestPool1'))).toThrow(
+        /UnverifiedAccountSweep at AuthStack\/Sweep0 sweeps an imported pool with a fixed ID \(us-east-1_TestPool1\), so synthesis can't tell whether it sweeps this pool.*backend\.auth\.resources\.userPool/,
+      );
+      expect(withSweeps((_auth, stack) => UserPool.fromUserPoolId(stack, 'Exported', Fn.importValue('SomePoolId')))).toThrow(/an imported pool whose ID is known only at deploy/);
+      expect(withSweeps((_auth, stack) => new Construct(stack, 'NotAPool'))).toThrow(/a construct that isn't a user pool/);
+      expect(withSweeps(() => ({ userPoolId: 'us-east-1_TestPool1' }))).toThrow(/something that isn't a CDK construct/);
+    });
+
+    it('one exact sweep is enough, whatever else is in the app', () => {
+      expect(() =>
+        withSweeps(
+          (_auth, stack) => UserPool.fromUserPoolId(stack, 'Typo', 'us-east-1_TestPool1'),
+          (auth) => auth.resources.userPool,
+        )(),
+      ).not.toThrow();
+    });
+  });
+
   it('sets the code lifetime once, as the sign-in session', () => {
     const t = synth({ ...BASE, codeLifetimeMinutes: 5 }).template();
     t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 5 });
@@ -730,9 +774,9 @@ describe('option validation', () => {
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
     ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
-    ['from name with brackets', { email: { fromAddress: 'sign-in@example.org', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['from name with brackets', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
+    ['SES domain mismatch', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -750,11 +794,12 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['no help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
-    ['a placeholder help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
-    ['a personal help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['no help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'sign-in@yokum.app', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
     ['a noreply@ sender (register A10)', { email: { fromAddress: 'noreply@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /never noreply@/],
     ['a sender other than sign-in@', { email: { fromAddress: 'auth@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /sign-in@example.org/],
+    ['a personal site sending from another domain (register F11)', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /isn't the Personal family's sender\. Personal sites send from sign-in@yokum\.app \(register F11\)/],
     ['an OSBM sender without the suffix (register E4a)', { email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'osbm', replyTo: 'help@example.org' } }, /\(NC OSBM\)/],
     ['a sender without a family', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', replyTo: 'help@example.org' } as never }, /email.family is required/],
     ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
@@ -790,9 +835,9 @@ describe('option validation', () => {
   });
 
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
-    expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
+    expect(normalizeOptions(BASE).email.sesIdentity).toBe('yokum.app');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X (UNC)', family: 'unc', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });
@@ -809,7 +854,7 @@ describe('standardAuthProps', () => {
       multifactor: { mode: 'OPTIONAL', totp: true },
       accountRecovery: 'EMAIL_ONLY',
       groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
-      senders: { email: { fromEmail: 'sign-in@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
+      senders: { email: { fromEmail: 'sign-in@yokum.app', fromName: 'Example Reports', replyTo: 'help@example.org' } },
     });
   });
 

@@ -249,7 +249,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
       "DeletionProtection": "ACTIVE",
       "EmailConfiguration": {
         "EmailSendingAccount": "DEVELOPER",
-        "From": "Example Reports <sign-in@example.org>",
+        "From": "Example Reports <sign-in@yokum.app>",
         "ReplyToEmailAddress": "help@example.org",
         "SourceArn": {
           "Fn::Join": [
@@ -267,7 +267,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
               {
                 "Ref": "AWS::AccountId",
               },
-              ":identity/example.org",
+              ":identity/yokum.app",
             ],
           ],
         },

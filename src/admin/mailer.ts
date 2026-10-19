@@ -110,6 +110,11 @@ export interface SignInHelpChangedAlert {
   to: string;
   /** True when the override was removed (back to the configured address). */
   reverted: boolean;
+  /**
+   * True when the Super admin set a person's own address and ticked "This is a person's own address,
+   * on purpose" (register E4c): the alert says it was set to a personal address, not a role mailbox.
+   */
+  personal?: boolean;
   reason: string;
   at: Date;
   context?: { ip?: string; userAgent?: string; requestId?: string };
@@ -126,13 +131,18 @@ export interface AlertSite {
   signInUrl?: string;
 }
 
-/** The owner's alert: who changed where help requests go, from what to what, and why. */
+/**
+ * The owner's alert: who changed where help requests go, from what to what, and why. A person's own
+ * address (register E4c) is said plainly, in the subject too: it's the one fact a reader needs to judge it.
+ */
 export function renderSignInHelpChangedEmail(alert: SignInHelpChangedAlert, site?: AlertSite): RenderedEmail {
   const who = alert.changedBy.email ?? alert.changedBy.sub;
-  return rendered(alert.siteName, site, `${alert.siteName}: the sign-in help address changed`, [
+  const personal = alert.personal === true && !alert.reverted;
+  return rendered(alert.siteName, site, `${alert.siteName}: the sign-in help address changed${personal ? ' to a personal address' : ''}`, [
     alert.reverted
       ? `${who} set the sign-in help address for ${alert.siteName} back to the site's configured address, ${alert.to} (it was ${alert.from}).`
       : `${who} changed the sign-in help address for ${alert.siteName} from ${alert.from} to ${alert.to}.`,
+    ...(personal ? [`It's set to a personal address: ${who} confirmed that ${alert.to} is one person's own mailbox, not a role mailbox, on purpose.`] : []),
     '',
     `When: ${when(alert.at)}`,
     `Reason given: ${alert.reason}`,

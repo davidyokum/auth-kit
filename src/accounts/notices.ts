@@ -12,15 +12,22 @@
  * - answers only same-origin POSTs with a JSON body (`{ "event": "passkey-added" | "password-changed" }`);
  * - needs a signed-in account, and emails only that account's own address (read from Cognito, never
  *   from the request);
- * - checks a passkey notice against the account's passkeys (one created in the last 15 minutes, read
- *   with the person's own token); a check it can't make still sends the notice, since telling the
- *   owner is the safe direction;
+ * - checks a passkey notice against the account's passkeys (one created in the last 15 minutes), and a
+ *   password notice against the account's sign-in factors (it has a password), both read with the
+ *   person's own token; a check it can't make still sends the notice, since telling the owner is the
+ *   safe direction;
  * - is rate-limited per account (`ACCOUNT_CREATION_POLICY.rateLimits.noticePerAccount`).
  *
- * A notice is a courtesy to the account's owner, not a detection control: someone holding the session
- * can skip the request. Server-side changes (an admin's reset, an email change) send their own.
+ * A notice is a courtesy to the account's owner, in both directions. It isn't a detection control:
+ * someone holding the session can skip the request. And it isn't proof of a change: someone holding
+ * the session (a script on the page, an unlocked laptop) can request "Your password was changed"
+ * without changing it, up to the rate limit. Cognito keeps no time of a password change, so the route
+ * can check only that the account has a password; the passkey notice is tied to a new passkey. Either
+ * way the notice goes only to the account's own inbox, from the site's sender, in the site's words, so
+ * nobody else can be targeted and the words can't be chosen. Server-side changes (an admin's reset, an
+ * email change) send their own.
  */
-import { CognitoIdentityProviderClient, ListWebAuthnCredentialsCommand } from '@aws-sdk/client-cognito-identity-provider';
+import { CognitoIdentityProviderClient, GetUserAuthFactorsCommand, ListWebAuthnCredentialsCommand } from '@aws-sdk/client-cognito-identity-provider';
 import { CognitoAdmin } from '../admin/cognito-admin.js';
 import type { EmailSender } from '../admin/mailer.js';
 import { type QuotaLimiterOptions, createQuotaLimiter } from '../admin/quota.js';
@@ -52,7 +59,10 @@ export interface AccountNoticeRouteConfig<G extends string = string, C extends s
   mailer: EmailSender;
   /** Limits notices per account (`RateLimitTable`). */
   rateLimits: RateLimitStore;
-  /** Origins allowed to POST. Default: the sign-in URL's origin. */
+  /**
+   * Origins allowed to POST. Default: the sign-in URL's origin only, so a site served on both its apex
+   * and `www` lists both (or the screens' POST is refused on one of them).
+   */
   allowedOrigins?: readonly string[];
   cognito?: CognitoIdentityProviderClient;
   quota?: QuotaLimiterOptions;
@@ -108,12 +118,29 @@ export function createAccountNoticeRoute<G extends string, C extends string>(con
     }
   }
 
+  /**
+   * False only when the factors read says the account has no password; true when it has one or couldn't
+   * be read. Not evidence of a change (Cognito keeps no time for one), only that one could have happened.
+   */
+  async function hasPassword(accessToken: string | undefined): Promise<boolean> {
+    if (!accessToken) return true;
+    try {
+      const out = await cognitoClient().send(new GetUserAuthFactorsCommand({ AccessToken: accessToken }));
+      return (out.ConfiguredUserAuthFactors ?? []).includes('PASSWORD');
+    } catch (error) {
+      report(error, 'account notice: factors read');
+      return true;
+    }
+  }
+
   return {
     async POST(request) {
       if (request.method !== 'POST') return answer(405, { ok: false, code: 'invalid', error: 'Use POST.' });
       const origin = request.headers.get('origin');
       if (!origin || !allowedOrigins.has(origin)) return answer(403, { ok: false, code: 'origin', error: 'This only works on the site itself.' });
       if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return answer(415, { ok: false, code: 'invalid', error: 'Send JSON.' });
+      // A declared size over the limit is refused before the body is read (the read below still checks the bytes).
+      if (Number(request.headers.get('content-length') ?? '0') > MAX_BODY_BYTES) return answer(413, { ok: false, code: 'invalid', error: 'That request is too large.' });
       let event: AccountNoticeEvent;
       try {
         const text = await request.text();
@@ -127,8 +154,10 @@ export function createAccountNoticeRoute<G extends string, C extends string>(con
       let sub: string;
       let accessToken: string | undefined;
       try {
-        // The first-credential chooser posts right after the account's first passkey or password.
-        const user = await config.auth.requireUser({ allowFirstCredentialEnrollment: true });
+        // The first-credential chooser posts right after the account's first passkey or password, and My
+        // account posts right after a first password, before its authenticator is set up (L3): neither
+        // enrollment rule applies here, since the route only lets the person email their own address.
+        const user = await config.auth.requireUser({ allowFirstCredentialEnrollment: true, allowMfaEnrollment: true });
         sub = user.sub;
         accessToken = accessTokenOf(user);
       } catch (error) {
@@ -140,6 +169,7 @@ export function createAccountNoticeRoute<G extends string, C extends string>(con
         const limit = await config.rateLimits.hit(rateLimitKey(`notice:${event}`, sub), ACCOUNT_CREATION_POLICY.rateLimits.noticePerAccount, new Date(now()));
         if (!limit.allowed) return answer(429, { ok: false, code: 'rate_limited', error: 'Too many notices just now.', retryAfterSeconds: limit.retryAfterSeconds });
         if (event === 'passkey-added' && !(await passkeyIsNew(accessToken))) return answer(409, { ok: false, code: 'nothing_changed', error: 'No new passkey on this account.' });
+        if (event === 'password-changed' && !(await hasPassword(accessToken))) return answer(409, { ok: false, code: 'nothing_changed', error: 'This account has no password.' });
         const person = await cognito().findBySub(sub);
         if (!person?.email) return answer(404, { ok: false, code: 'not_found', error: 'This account has no email address.' });
         const site: EmailSite = { siteName: config.siteName, theme, signInUrl: config.signInUrl, helpEmail: await helpAddressOf(config.help) };

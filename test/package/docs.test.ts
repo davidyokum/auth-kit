@@ -43,3 +43,32 @@ describe('documented examples match the code', () => {
     expect(readme).toContain('https://github.com/davidyokum/site-auth-kit-template');
   });
 });
+
+describe('the OpenStreetMap data’s licence is stated (v0.1.9 review, L8)', () => {
+  const DATA = ['src/backdrops/styles/county-survey/data.ts', 'src/backdrops/styles/river-basins/data.ts'];
+
+  it('each OSM-derived data file opens with a legal comment the build keeps (/*! … */), naming the ODbL and the MIT carve-out', () => {
+    for (const file of DATA) {
+      const head = read(file).slice(0, 600);
+      expect(head.startsWith('/*!'), file).toBe(true);
+      expect(head, file).toMatch(/© OpenStreetMap\s+(?:\*\s+)?contributors/);
+      expect(head, file).toContain('Open Database License 1.0');
+      expect(head, file).toContain('not under auth-kit');
+      expect(head, file).toContain('THIRD_PARTY_NOTICES.md');
+    }
+  });
+
+  it('THIRD_PARTY_NOTICES.md says the data is under the ODbL 1.0, not MIT, file by file; LICENSE stays MIT; the README points there', () => {
+    const notices = read('THIRD_PARTY_NOTICES.md');
+    expect(notices).toContain('## Licences in this package');
+    expect(notices).toMatch(/OpenStreetMap map data, under the ODbL 1\.0, not MIT/);
+    for (const file of DATA) expect(notices).toContain(file);
+    expect(notices).toContain('https://opendatacommons.org/licenses/odbl/1-0/');
+    expect(read('LICENSE').startsWith('MIT License')).toBe(true);
+    expect(read('LICENSE')).not.toMatch(/ODbL|OpenStreetMap/);
+    expect(read('README.md')).toMatch(/## License\n\n\[MIT\]\(LICENSE\)\. The OpenStreetMap-derived map data .* Open Database License 1\.0, not MIT/);
+    // The sheets keep their own attribution (a produced work's notice), in the frozen v1 files.
+    expect(read('src/backdrops/styles/county-survey/v1.ts')).toContain('WATER FEATURES © OPENSTREETMAP CONTRIBUTORS');
+    expect(read('src/backdrops/styles/river-basins/v1.ts')).toContain('WATER FEATURES © OPENSTREETMAP CONTRIBUTORS');
+  });
+});

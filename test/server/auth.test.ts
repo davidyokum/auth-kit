@@ -1,5 +1,5 @@
 import { MATRIX_SERVER_MODE } from '../../src/shared/matrix-protocol.js';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AuthUnavailableError,
   ForbiddenError,
@@ -25,6 +25,9 @@ function cookieRequest(input: Parameters<typeof amplifyCookiePersona>[0]): Reque
   const persona = amplifyCookiePersona(input);
   return new Request('https://app.example.org/', { headers: persona.headers as Record<string, string> });
 }
+
+// The matrix server mode's tests stub its environment (AUTH_KIT_MATRIX, NODE_ENV); nothing leaks between tests.
+afterEach(() => void vi.unstubAllEnvs());
 
 describe('getUser', () => {
   it('returns null with no token', async () => {
@@ -168,6 +171,8 @@ describe('requireUser and the authenticator rule', () => {
   });
 
   it('can be switched off, each rule on its own, only in the matrix server mode (register A1, A2)', async () => {
+    // What the matrix server's environment looks like (startMatrixServer runs next dev with the flag).
+    vi.stubEnv('AUTH_KIT_MATRIX', '1');
     expect(() => harness({ requireFirstCredential: false })).toThrow(/breaks the standard.*matrix's server mode/);
     expect(() => harness({ requireTotpForPasswordUsers: false })).toThrow(/breaks the standard/);
     expect(() => harness({ requireFirstCredential: false, matrixServerMode: Symbol('fake') as never })).toThrow(/matrixServerMode comes only from matrixOverrides/);
@@ -183,6 +188,26 @@ describe('requireUser and the authenticator rule', () => {
     totpOff.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
     await expect(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
     expect(await rejection(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'code-only' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
+  });
+
+  describe('the matrix server mode’s lock (L7: defence in depth)', () => {
+    it('a registry symbol of the same name isn’t the sign: it’s module-private', () => {
+      vi.stubEnv('AUTH_KIT_MATRIX', '1');
+      expect(() => harness({ requireFirstCredential: false, matrixServerMode: Symbol.for('auth-kit.matrix-server-mode') as never })).toThrow(/matrixServerMode comes only from matrixOverrides/);
+      expect(() => harness({ matrixServerMode: Symbol.for('auth-kit.matrix-server-mode') as never })).toThrow(/matrixServerMode comes only from matrixOverrides/);
+    });
+
+    it('even the real sign is refused outside the matrix’s environment: a production server, or no AUTH_KIT_MATRIX=1', () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('AUTH_KIT_MATRIX', '1');
+      expect(() => harness({ requireFirstCredential: false, matrixServerMode: MATRIX_SERVER_MODE })).toThrow(/matrixServerMode is accepted only while the auth matrix runs.*breaks the standard/s);
+      expect(() => harness({ matrixServerMode: MATRIX_SERVER_MODE })).toThrow(/accepted only while the auth matrix runs \(NODE_ENV isn't production and AUTH_KIT_MATRIX=1\)/);
+      vi.stubEnv('NODE_ENV', 'development');
+      vi.stubEnv('AUTH_KIT_MATRIX', '');
+      expect(() => harness({ requireTotpForPasswordUsers: false, matrixServerMode: MATRIX_SERVER_MODE })).toThrow(/accepted only while the auth matrix runs/);
+      vi.stubEnv('AUTH_KIT_MATRIX', '1');
+      expect(() => harness({ requireTotpForPasswordUsers: false, matrixServerMode: MATRIX_SERVER_MODE })).not.toThrow();
+    });
   });
 
   it('caches a passing check per token and re-checks a failing one after 30 seconds', async () => {
@@ -264,6 +289,7 @@ describe('getUser and the authenticator rule (L6)', () => {
   });
 
   it('skips the Cognito call when both rules are switched off', async () => {
+    vi.stubEnv('AUTH_KIT_MATRIX', '1');
     const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false, matrixServerMode: MATRIX_SERVER_MODE });
     cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
     expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) })).not.toBeNull();

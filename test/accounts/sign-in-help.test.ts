@@ -398,6 +398,36 @@ describe('the override stays on allowed domains (M8)', () => {
     expect(await t.actions.set({ address: 'sam.carter@example.org', reason: REASON, version: 0 })).toMatchObject({ ok: false, code: 'invalid' });
   });
 
+  it('records the acknowledgement: the stored value, the audit row, the alert, and the answer all say "personal" (L1)', async () => {
+    const t = setupActions();
+    // The form's box arrives as "on".
+    const result = await t.actions.set({ address: 'sam.carter@example.org', reason: REASON, version: 0, personal: 'on' });
+    expect(result).toMatchObject({ ok: true, message: 'People who need help signing in are now sent to sam.carter@example.org, a personal address. The owner and every Super admin have been told.' });
+    expect(await t.store.get(SITE_SETTING.signInHelp)).toMatchObject({ value: { address: 'sam.carter@example.org', personal: true, reason: REASON } });
+    expect(t.auditLog.rows[0]).toMatchObject({
+      phase: 'intent',
+      before: { address: CONFIGURED, source: 'config' },
+      after: { address: 'sam.carter@example.org', source: 'override', personal: true },
+    });
+    expect((t.auditLog.rows[0]!.before as Record<string, unknown>).personal).toBeUndefined();
+    expect(t.alerts.at(-1)).toMatchObject({ to: 'sam.carter@example.org', reverted: false, personal: true });
+
+    // Going back records what was there (a personal address) and claims nothing personal about the configured one.
+    expect(await t.actions.clear({ reason: 'The reports team mailbox is open again', version: 1 })).toMatchObject({ ok: true });
+    expect(t.auditLog.rows.at(-2)).toMatchObject({
+      phase: 'intent',
+      before: { address: 'sam.carter@example.org', source: 'override', personal: true },
+      after: { address: CONFIGURED, source: 'config' },
+    });
+    expect((t.auditLog.rows.at(-2)!.after as Record<string, unknown>).personal).toBeUndefined();
+    expect(t.alerts.at(-1)!.personal).toBeUndefined();
+
+    // A role mailbox carries no flag.
+    expect(await t.actions.set({ address: NEW_HELP, reason: REASON, version: 0 })).toMatchObject({ ok: true });
+    expect(t.alerts.at(-1)!.personal).toBeUndefined();
+    expect((t.auditLog.rows.at(-2)!.after as Record<string, unknown>).personal).toBeUndefined();
+  });
+
   it('a stored override off the list (written straight into the table, or a list narrowed since) falls back to the configured address', async () => {
     const store = createMemorySiteSettingsStore();
     await store.put(SITE_SETTING.signInHelp, { value: { address: 'help@not-our-desk.net', reason: 'x' }, expectedVersion: 0, by: { sub: 'x' }, now: new Date(NOW) });

@@ -5,6 +5,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as CognitoModule from '../../src/client/cognito.js';
 import { type ClientAuthFactors, SignUp, type SignUpProps } from '../../src/client/index.js';
+import { hasPasskeyHint } from '../../src/client/passkey-hint.js';
 import { auth, awsError, next, resetAmplifyMocks, SIGNED_IN } from './amplify-mock.js';
 
 vi.mock('aws-amplify', async () => (await import('./amplify-mock.js')).amplifyModule);
@@ -275,9 +276,14 @@ describe('SignUp: the code and after', () => {
 
     await heading('Choose how you’ll sign in next time');
     expect(screen.queryByRole('button', { name: /Not now|Skip/ })).toBeNull();
+    window.localStorage.clear();
+    expect(await hasPasskeyHint('ada@example.org')).toBe(false);
     await user.click(screen.getByRole('button', { name: 'Create a passkey' }));
     await heading('You’re set up');
     expect(auth.associateWebAuthnCredential).toHaveBeenCalled();
+    // The passkey hint (register A5a, L9): next time, Continue opens the passkey prompt for this address.
+    await waitFor(async () => expect(await hasPasskeyHint('ada@example.org')).toBe(true));
+    expect(await hasPasskeyHint('grace@example.org')).toBe(false);
     expect(screen.getByText('Your account starts as a member of Example Reports. The Example Reports team can give you more access if you need it.')).toBeTruthy();
     expect(screen.queryByText('We’ve emailed you a note about how you’ll sign in next time.')).toBeNull();
     expect(navigate).not.toHaveBeenCalled();
@@ -296,6 +302,7 @@ describe('SignUp: the code and after', () => {
     await user.click(screen.getByRole('button', { name: 'Finish' }));
     // Passkeys off: straight to the password.
     await heading('Create a password');
+    window.localStorage.clear();
     await user.type(screen.getByLabelText('New password'), 'a brand new long password{Enter}');
     await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('a brand new long password'));
     await heading('Add an authenticator app');
@@ -304,6 +311,8 @@ describe('SignUp: the code and after', () => {
     expect(screen.getByText('Your account starts as a member of Example Reports. Jordan Lee can give you more access if you need it.')).toBeTruthy();
     expect(screen.getByText('We’ve emailed you a note about how you’ll sign in next time.')).toBeTruthy();
     expect(root().querySelector('[data-auth-kit-slot="footer"]')!.textContent).toBe('This site is managed by the NC Office of State Budget and Management');
+    // A password isn't a passkey: no hint.
+    expect(await hasPasskeyHint('ada@osbm.example.org')).toBe(false);
   });
 
   it('an address that already had an account just signs in', async () => {

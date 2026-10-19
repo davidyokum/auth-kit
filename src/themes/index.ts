@@ -346,13 +346,23 @@ export const SENDER_LOCAL_PART = 'sign-in';
 
 const NO_REPLY = /^(no-?reply|do-?not-?reply|donotreply|no_reply|bounce|mailer-daemon)$/i;
 
-/** Why an address can't send auth-kit's email, or `[]`: it must be `sign-in@{the site's domain}`. */
-export function senderAddressProblems(address: string | null | undefined): string[] {
+/**
+ * Why an address can't send auth-kit's email, or `[]`: it must be `sign-in@{the site's domain}`, and,
+ * given the site's family, the family's own sender where it has one (`theme.senderAddress`: the personal
+ * family sends from `sign-in@yokum.app`, register F11).
+ */
+export function senderAddressProblems(address: string | null | undefined, theme?: AuthTheme | ThemeFamily): string[] {
   const value = (address ?? '').trim();
   if (!/^[^\s@<>"]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return [`"${address ?? ''}" isn't a sender address like sign-in@example.org.`];
   const local = value.slice(0, value.lastIndexOf('@'));
   if (NO_REPLY.test(local)) return [`"${value}" can't be replied to. Send from a reply-able ${SENDER_LOCAL_PART}@ mailbox (register A10), never noreply@.`];
   if (local.toLowerCase() !== SENDER_LOCAL_PART) return [`"${value}" isn't the site's ${SENDER_LOCAL_PART}@ mailbox. Auth email comes from ${SENDER_LOCAL_PART}@${value.slice(value.lastIndexOf('@') + 1)} (register A10).`];
+  if (theme !== undefined) {
+    const t = resolveTheme(theme);
+    if (t.senderAddress !== null && value.toLowerCase() !== t.senderAddress.toLowerCase()) {
+      return [`"${value}" isn't the ${t.label} family's sender. ${t.label} sites send from ${t.senderAddress} (register F11).`];
+    }
+  }
   return [];
 }
 
@@ -390,12 +400,12 @@ export function parseSender(from: string): { name: string; address: string } {
 export function senderProblems(from: string, site: { siteName: string; theme: AuthTheme | ThemeFamily }): string[] {
   if (/[\r\n]/.test(from)) return ['A sender has no line breaks.'];
   const { name, address } = parseSender(from);
-  return [...senderAddressProblems(address), ...senderNameProblems(name, site.theme, site.siteName)];
+  return [...senderAddressProblems(address, site.theme), ...senderNameProblems(name, site.theme, site.siteName)];
 }
 
-/** The site's sender: `"{Site} (NC OSBM)" <sign-in@…>` (checked; throws on a bad address). */
+/** The site's sender: `"{Site} (NC OSBM)" <sign-in@…>` (checked; throws on a bad address, or one that isn't the family's own). */
 export function siteSender(siteName: string, theme: AuthTheme | ThemeFamily, address: string): string {
-  const problems = senderAddressProblems(address);
+  const problems = senderAddressProblems(address, theme);
   if (problems.length > 0) throw new Error(`auth-kit: ${problems.join(' ')}`);
   return formatSenderAddress(senderDisplayName(siteName, theme), address.trim());
 }

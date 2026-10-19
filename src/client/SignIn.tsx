@@ -106,6 +106,8 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
    * password reset, `SignIn` asks the site's notice route (`createAccountNoticeRoute`, mounted at
    * `/api/auth-kit/account-notice` unless `url` says otherwise) to email the account, and says "We've
    * emailed you a note about this." only when it did. `false` for a site that doesn't send them.
+   * `{ mounted: true }` once the site has mounted the route: only then does "Forgot your password?"
+   * promise "We'll email you a note when your password changes." ahead of time.
    */
   notices?: AccountNotices;
   /** The `next` search parameter. Goes through `safeRedirect` (same-site paths only). */
@@ -1125,7 +1127,8 @@ export function SignIn(props: SignInProps) {
       break;
     case 'help': {
       bottom.back = { label: SIGN_IN.back, onClick: () => go({ name: 'trouble' }) };
-      const screen = helpScreen(view.topic, c, { securityNotices: notices !== null });
+      // The promise ahead of time only where the site says it mounted the notice route (L5; ADR 0024).
+      const screen = helpScreen(view.topic, c, { securityNotices: notices?.mounted === true });
       const contact = contactLines(c, { teams: screen.teams === true });
       const action = screen.button;
       const runAction = () => {

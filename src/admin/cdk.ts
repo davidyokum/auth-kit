@@ -459,7 +459,14 @@ function senderAddress(from: string): string | undefined {
   return EMAIL_RE.test(address) ? address : undefined;
 }
 
-/** Checks a sender's settings; returns the SES identity to grant. Tokens are taken as given. `label` names them in errors. */
+/**
+ * Checks a sender's settings; returns the SES identity to grant. `label` names them in errors.
+ *
+ * Tokens (an SSM parameter, a cross-stack value) are taken as given here, since synthesis can't read
+ * them: the Lambda handlers check the same rules again at runtime on every run (`inviteExpiryConfig`,
+ * `accessRequestDigestConfig`: the sender, the family's suffix and own address, the help address), so
+ * a tokenised `noreply@` or a placeholder help address fails loudly on the first run instead of at synth.
+ */
 function checkOwnerWarnings(w: Omit<InviteExpiryOwnerWarnings, 'helpEmail'> & { helpEmail?: HelpAddressSetting }, label = 'ownerWarnings'): string {
   const literal = (v: string | undefined) => v !== undefined && !Token.isUnresolved(v);
   if (literal(w.siteName) && !w.siteName.trim()) throw new Error(`auth-kit: ${label}.siteName is required.`);
@@ -914,6 +921,7 @@ export class AccessRequestDigest extends Construct {
     const expression = (props.schedule ?? ACCESS_REQUEST_DIGEST_DEFAULT_SCHEDULE).trim();
     const minutes = inviteExpiryScheduleMinutes(expression);
     if (minutes !== undefined && (minutes < 60 || minutes > 1440)) throw new Error(`auth-kit: the digest's schedule "${expression}" must run between hourly and once a day.`);
+    // Literal values are checked here; tokens at runtime by accessRequestDigestConfig (see checkOwnerWarnings).
     const literal = (v: string) => !Token.isUnresolved(v);
     if (literal(props.siteName) && !props.siteName.trim()) throw new Error('auth-kit: AccessRequestDigest needs a siteName.');
     if (!isThemeFamily(props.family)) throw new Error('auth-kit: AccessRequestDigest family must be osbm, unc, or personal.');
