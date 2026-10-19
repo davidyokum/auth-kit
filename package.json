@@ -118,6 +118,10 @@
       "types": "./dist/backdrops/picker.d.ts",
       "import": "./dist/backdrops/picker.js"
     },
+    "./preview": {
+      "types": "./dist/preview/index.d.ts",
+      "import": "./dist/preview/index.js"
+    },
     "./themes": {
       "types": "./dist/themes/index.d.ts",
       "import": "./dist/themes/index.js",
@@ -129,14 +133,17 @@
     "auth-kit": "./dist/bin/auth-kit.js"
   },
   "scripts": {
-    "build": "tsup && tsup --config tsup.lambda.config.ts",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 tsup && tsup --config tsup.lambda.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run lint && npm run test && npm run build",
     "test:e2e": "AUTH_KIT_E2E=1 vitest run test/e2e",
-    "demo:backdrops": "npm run build && node scripts/serve-docs.mjs"
+    "demo:backdrops": "npm run build && node scripts/serve-docs.mjs",
+    "build:preview": "node scripts/build-preview.mjs",
+    "demo:preview": "node scripts/build-preview.mjs && node scripts/serve-docs.mjs",
+    "test:screenshots": "playwright test"
   },
   "dependencies": {
     "@aws-sdk/client-cognito-identity-provider": "^3.1152.0",
@@ -146,11 +153,11 @@
   },
   "peerDependencies": {
     "@aws-amplify/backend": "^1.25.0",
+    "aws-amplify": "^6.22.0",
     "aws-cdk-lib": "^2.257.0",
     "constructs": "^10.6.0",
     "next": "^16.0.0",
-    "react": "^19.0.0",
-    "aws-amplify": "^6.22.0"
+    "react": "^19.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-amplify/backend": {
@@ -178,6 +185,7 @@
     "@aws-amplify/backend": "^1.25.1",
     "@aws-amplify/backend-auth": "^1.10.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.63.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
@@ -188,6 +196,7 @@
     "aws-cdk-lib": "^2.273.0",
     "aws-sdk-client-mock": "^4.1.0",
     "constructs": "^10.8.1",
+    "esbuild": "^0.27.7",
     "eslint": "^10.13.0",
     "jsdom": "^29.1.1",
     "next": "^16.4.2",

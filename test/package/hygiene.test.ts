@@ -125,6 +125,38 @@ describe('module boundaries', () => {
     for (const file of ['src/backdrops/react.tsx', 'src/backdrops/picker.tsx']) expect(readFileSync(join(ROOT, file), 'utf8').startsWith("'use client';"), file).toBe(true);
   });
 
+  it('auth-kit/preview draws the real screens and imports only them, the pure modules, and React (ADR 0025)', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${dir}/${e.name}`] : []));
+    const files = walk('src/preview');
+    const standalone = files.filter((f) => f.startsWith('src/preview/standalone/'));
+    expect(files.length - standalone.length).toBeGreaterThan(5);
+    // The client's components and words (never forked), the themes, the backdrops, the pure shared rules, the marker.
+    const allowed = /^(\.\/|\.\.\/client\/|\.\.\/themes\/index\.js$|\.\.\/backdrops\/|\.\.\/shared\/|\.\.\/dev\/marker\.js$|react$)/;
+    for (const file of files.filter((f) => !standalone.includes(f))) for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(allowed);
+    // The standalone file adds ReactDOM; its stubs import types only.
+    for (const file of standalone) for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\/|\.\.\/(?!standalone)|\.\.\/\.\.\/(client|themes|backdrops)\/|react-dom(\/client)?$)/);
+    expect(readFileSync(join(ROOT, 'src/preview/index.ts'), 'utf8').startsWith("'use client';")).toBe(true);
+  });
+
+  it('nothing outside src/preview imports it, so it never reaches a site through another subpath', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : /\.tsx?$/.test(e.name) ? [`${dir}/${e.name}`] : []));
+    for (const file of walk('src').filter((f) => !f.startsWith('src/preview/'))) {
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).not.toMatch(/preview\//);
+    }
+  });
+
+  it('the standalone preview stubs cover every name the client imports from Amplify and from api.ts', () => {
+    const names = (file: string, from: RegExp) =>
+      [...readFileSync(join(ROOT, file), 'utf8').matchAll(/^import\s+(?!type\b)\{([^}]*)\}\s+from\s+'([^']+)'/gm)].filter((m) => from.test(m[2]!)).flatMap((m) => m[1]!.split(',').map((n) => n.trim()).filter((n) => n && !n.startsWith('type ')));
+    const exported = (file: string) => new Set([...readFileSync(join(ROOT, file), 'utf8').matchAll(/^export (?:const|class|function) (\w+)/gm)].map((m) => m[1]!));
+    const amplify = exported('src/preview/standalone/amplify-stub.ts');
+    for (const file of ['src/client/api.ts', 'src/client/cognito.ts']) for (const name of names(file, /^aws-amplify/)) expect(amplify, `${file}: ${name}`).toContain(name);
+    const api = exported('src/preview/standalone/api-stub.ts');
+    for (const name of names('src/client/driver.ts', /^\.\/api\.js$/)) expect(api, `driver.ts: ${name}`).toContain(name);
+  });
+
   it('shared policy has no imports', () => {
     expect(importsOf('src/shared/policy.ts')).toEqual([]);
   });

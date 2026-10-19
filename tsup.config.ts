@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 
 // Entries that are React client modules. Rollup's tree-shaking pass drops module-level directives,
 // so `'use client'` is put back after the build.
-const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui'];
+const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui', 'preview/index'];
 
 async function restoreUseClient(): Promise<void> {
   for (const entry of CLIENT_ENTRIES) {
@@ -40,6 +40,9 @@ export default defineConfig({
     // Dev only: carries the backdrop picker marker that check-prod-build looks for.
     'backdrops/picker': 'src/backdrops/picker.tsx',
     'themes/index': 'src/themes/index.ts',
+    // Preview mode (ADR 0025): the card with sample data, for design tools and screenshots. Carries the
+    // preview marker that check-prod-build looks for. Its standalone file is built by build-preview.mjs.
+    'preview/index': 'src/preview/index.ts',
     // The `auth-kit` command (not a subpath).
     'bin/auth-kit': 'src/dev/bin.ts',
   },

@@ -29,5 +29,12 @@ export const MATRIX_SERVER_MARKER = 'auth-kit-matrix-server-4b8d1e6a';
  */
 export const BACKDROP_PICKER_MARKER = 'auth-kit-backdrop-picker-2c5e8f91';
 
+/**
+ * Preview mode (`auth-kit/preview`, ADR 0025: the real card with sample data, for design tools and
+ * screenshots) carries this marker, so `checkProductionBuild` fails a site's build that bundled it.
+ * Don't change it.
+ */
+export const PREVIEW_MARKER = 'auth-kit-preview-9d4a7c13';
+
 /** The response header the route sets to the marker, so an HTTP check can spot a shipped route. */
 export const DEV_SIGNIN_MARKER_HEADER = 'x-auth-kit-dev';

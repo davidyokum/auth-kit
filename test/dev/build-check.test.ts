@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertProductionBuild, BACKDROP_PICKER_MARKER, checkProductionBuild, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER } from '../../src/dev/index.js';
+import { assertProductionBuild, BACKDROP_PICKER_MARKER, checkProductionBuild, DEV_SIGNIN_MARKER, MATRIX_SERVER_MARKER, PREVIEW_MARKER } from '../../src/dev/index.js';
 
 let root: string;
 let build: string;
@@ -109,6 +109,15 @@ describe('checkProductionBuild', () => {
     expect(result.ok).toBe(false);
     expect(result.findings).toEqual([
       { kind: 'marker', file: join('static', 'chunks', 'app', 'dev', 'backdrops', 'page-9a1b.js'), detail: expect.stringMatching(/backdrop picker marker.*page\.dev\.tsx/) },
+    ]);
+  });
+
+  it('fails when preview mode was bundled (ADR 0025)', async () => {
+    await fixture({ 'static/chunks/app/sign-in/page-4c2d.js': `jsx("div",{"data-auth-kit-preview":"${PREVIEW_MARKER}"})` });
+    const result = await checkProductionBuild({ buildDir: build });
+    expect(result.ok).toBe(false);
+    expect(result.findings).toEqual([
+      { kind: 'marker', file: join('static', 'chunks', 'app', 'sign-in', 'page-4c2d.js'), detail: expect.stringMatching(/preview mode's marker \(auth-kit\/preview was bundled/) },
     ]);
   });
 

@@ -513,12 +513,16 @@ export function SignIn(props: SignInProps) {
     </Heading>
   );
 
-  /** A form's submit, named for the driver (ADR 0025): the props for the `<form>`. */
-  function onSubmit(name: string, handler: () => void) {
-    const submit = driver.act(name, (event: FormEvent) => {
+  /**
+   * A form's submit, named for the driver (ADR 0025): the props for the `<form>`. A form with nothing to
+   * submit (a help screen without a button) gets no name.
+   */
+  function onSubmit(name: string | null, handler: () => void) {
+    const run = (event: FormEvent) => {
       event.preventDefault();
       if (!busy) handler();
-    });
+    };
+    const submit = name === null ? run : driver.act(name, run);
     return { onSubmit: submit, ...tagged(submit) };
   }
   /** A control's handler, named for the driver: itself when live, a report in preview. */
@@ -1159,7 +1163,7 @@ export function SignIn(props: SignInProps) {
       // opens, not from what's typed now, or the field would vanish as soon as the text looked like an address.
       const needsEmail = action !== undefined && view.askEmail === true && (action.action !== 'email-code' || emailCodeEnabled);
       body = (
-        <form noValidate {...onSubmit(action ? HELP_ACTION[action.action] : 'submit', runAction)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...onSubmit(action ? HELP_ACTION[action.action] : null, runAction)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(screen.heading)}
           {screen.intro ? <Text classNames={classNames}>{screen.intro}</Text> : null}
