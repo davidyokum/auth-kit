@@ -24,8 +24,9 @@ import { over, relativeLuminance, rgba, toHex } from '../../kernel/v1/color.js';
 import { createNoise } from '../../kernel/v1/noise.js';
 import type { Rng } from '../../kernel/v1/prng.js';
 import { clamp, lerp, TAU } from '../../kernel/v1/shape.js';
-import type { BackdropPalette } from '../../types.js';
 import type { Ctx2D, FrameInput, Layer, StyleInstance, StyleSetup } from '../define.js';
+
+type BackdropPalette = StyleSetup['palette'];
 
 export { clamp, lerp, TAU };
 
@@ -856,12 +857,14 @@ interface InkSlot {
   t0: number;
   fadeAt: number;
   used: boolean;
+  /** A finished note, drawn into the ink layer (so it costs nothing per frame). */
+  baked: boolean;
 }
 
 const NEVER = 1e12;
 
 function makeSlot(points: number, strokes: number): InkSlot {
-  return { pts: new Float64Array(points * 2), cum: new Float64Array(points), starts: new Int32Array(strokes), base: new Float64Array(strokes), n: 0, s: 0, total: 0, t0: 0, fadeAt: NEVER, used: false };
+  return { pts: new Float64Array(points * 2), cum: new Float64Array(points), starts: new Int32Array(strokes), base: new Float64Array(strokes), n: 0, s: 0, total: 0, t0: 0, fadeAt: NEVER, used: false, baked: false };
 }
 
 function slotReset(sl: InkSlot, t0: number): void {
@@ -871,6 +874,7 @@ function slotReset(sl: InkSlot, t0: number): void {
   sl.t0 = t0;
   sl.fadeAt = NEVER;
   sl.used = true;
+  sl.baked = false;
 }
 
 /** Closes the stroke in progress: the next one starts after it (each stroke counts at least 0.3 px). */
@@ -1661,6 +1665,7 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
     inkx.clearRect(0, 0, W, H);
     V = 0;
     kIdx = 0;
+    for (let i = 0; i < notes.length; i++) (notes[i] as InkSlot).baked = false;
   }
 
   /* ---------- notes and revision clouds ---------- */
@@ -1845,22 +1850,37 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
     }
   }
 
-  function drawNotes(x: Ctx2D, t: number): void {
-    let any = false;
-    for (let i = 0; i < NOTE_SLOTS; i++) if ((notes[i] as InkSlot).used) any = true;
-    if (!any) return;
-    x.save();
-    clipCard(x);
-    x.lineCap = 'round';
-    x.lineJoin = 'round';
-    x.strokeStyle = penC[PEN_R] as string;
+  /** Draws finished notes into the ink layer once, so they cost nothing afterwards. */
+  function bakeNotes(t: number): void {
     const w = penW[PEN_R] as number;
     for (let i = 0; i < NOTE_SLOTS; i++) {
       const sl = notes[i] as InkSlot;
-      if (!sl.used || t < sl.t0) continue;
-      drawSlot(x, sl, motion ? (t - sl.t0) * 260 * u : sl.total, w, w);
+      if (!sl.used || sl.baked || t < sl.t0) continue;
+      if (motion && (t - sl.t0) * 260 * u < sl.total) continue;
+      inkx.strokeStyle = penC[PEN_R] as string;
+      drawSlot(inkx, sl, sl.total, w, w);
+      sl.baked = true;
     }
-    x.restore();
+  }
+
+  /** Notes still being lettered (kept off the card). */
+  function drawNotes(x: Ctx2D, t: number): void {
+    const w = penW[PEN_R] as number;
+    let open = false;
+    for (let i = 0; i < NOTE_SLOTS; i++) {
+      const sl = notes[i] as InkSlot;
+      if (!sl.used || sl.baked || t < sl.t0) continue;
+      if (!open) {
+        x.save();
+        clipCard(x);
+        x.lineCap = 'round';
+        x.lineJoin = 'round';
+        x.strokeStyle = penC[PEN_R] as string;
+        open = true;
+      }
+      drawSlot(x, sl, (t - sl.t0) * 260 * u, w, w);
+    }
+    if (open) x.restore();
   }
 
   function drawClouds(x: Ctx2D, t: number): void {
@@ -2088,6 +2108,7 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
       if (target > V || (target === 0 && V === 0)) advance(target);
       ctx.save();
       ctx.globalAlpha = 1;
+      bakeNotes(t);
       ctx.drawImage(bg.canvas, 0, 0, W, H);
       ctx.drawImage(ink.canvas, 0, 0, W, H);
       drawNotes(ctx, t);
@@ -2115,6 +2136,7 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
       pathPart,
       setPen,
       resetInk,
+      bakeNotes,
       drawNotes,
       drawClouds,
       drawSlot,
