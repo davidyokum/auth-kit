@@ -1,5 +1,4 @@
-import { defineStyle } from '../define.js';
-import { watercolorV1 } from './v1.js';
+import { defineStyle, lazyVersion } from '../define.js';
 
 export const watercolor = defineStyle({
   id: 'watercolor',
@@ -7,5 +6,6 @@ export const watercolor = defineStyle({
   description: 'Translucent washes on grained paper, painted in code, that bleed very slowly.',
   interactivity: 'none',
   generative: true,
-  versions: [watercolorV1],
+  // The drawing code loads on first use, in its own chunk.
+  versions: [lazyVersion({ version: 1, fps: 6, maxPixelRatio: 1.25, stillTime: 30 }, () => import('./v1.js').then((m) => m.watercolorV1))],
 });

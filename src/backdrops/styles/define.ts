@@ -90,9 +90,27 @@ export interface StyleVersion {
    * the pointer or a tap moves it. The renderer stops its loop there to save power. Absent: it never settles.
    */
   readonly settlesAt?: number;
-  /** The palette mapping: the colors this version paints with, derived from the family palette. */
+  /**
+   * The drawing code is ready (`colors` and `create` work). Each registered style's code is loaded on
+   * first use (`load()`), so a site downloads only the style it shows; a version declared with
+   * `defineVersion` is ready at once.
+   */
+  readonly loaded: boolean;
+  /** Loads the drawing code (once; later calls return the same promise). */
+  load(): Promise<void>;
+  /** The palette mapping: the colors this version paints with, derived from the family palette. Throws until loaded. */
   colors(palette: BackdropPalette): unknown;
+  /** Throws until loaded. */
   create(setup: StyleSetup): StyleInstance;
+}
+
+/** What a version is before its code loads: what the renderer and the picker need to plan. */
+export interface StyleVersionMeta {
+  readonly version: number;
+  readonly fps: number;
+  readonly maxPixelRatio: number;
+  readonly stillTime: number;
+  readonly settlesAt?: number;
 }
 
 export interface StyleVersionSpec<C> {
@@ -116,9 +134,55 @@ export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
     maxPixelRatio: spec.maxPixelRatio,
     stillTime: spec.stillTime,
     ...(spec.settlesAt !== undefined && { settlesAt: spec.settlesAt }),
+    loaded: true,
+    load: () => Promise.resolve(),
     colors: (palette: BackdropPalette) => spec.colors(palette),
     create: (setup: StyleSetup) => spec.create(setup, spec.colors(setup.palette)),
   });
+}
+
+const META_KEYS = ['version', 'fps', 'maxPixelRatio', 'stillTime', 'settlesAt'] as const;
+
+/**
+ * Declares a version whose drawing code loads on first use: `meta` is what the renderer needs to plan
+ * (and must match the loaded version exactly; a mismatch fails the load), `load` imports the version
+ * file, e.g. `() => import('./v1.js').then((m) => m.countySurveyV1)`. Bundlers split each style into
+ * its own chunk, so the sign-in page carries only the style it draws.
+ */
+export function lazyVersion(meta: StyleVersionMeta, load: () => Promise<StyleVersion>): StyleVersion {
+  let impl: StyleVersion | null = null;
+  let pending: Promise<void> | null = null;
+  const notLoaded = () => new Error(`auth-kit/backdrops: style version ${meta.version} isn't loaded yet. Await loadBackdropStyle(style, version) first.`);
+  const version: StyleVersion = {
+    ...meta,
+    get loaded() {
+      return impl !== null;
+    },
+    load() {
+      pending ??= load().then(
+        (loaded) => {
+          for (const key of META_KEYS) {
+            if (loaded[key] !== meta[key]) throw new Error(`auth-kit/backdrops: style version ${meta.version}'s ${key} is ${String(loaded[key])} in its file but ${String(meta[key])} in its module.`);
+          }
+          impl = loaded;
+        },
+        (error: unknown) => {
+          pending = null;
+          throw error;
+        },
+      );
+      return pending;
+    },
+    colors(palette) {
+      if (!impl) throw notLoaded();
+      return impl.colors(palette);
+    },
+    create(setup) {
+      if (!impl) throw notLoaded();
+      return impl.create(setup);
+    },
+  };
+  return Object.freeze(version);
 }
 
 export type BackdropInteractivity = 'pointer' | 'tap' | 'none';

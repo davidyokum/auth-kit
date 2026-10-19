@@ -87,3 +87,13 @@ export function resolveStyleVersion(id: string, version?: number): { module: Bac
   }
   return { module, version: found };
 }
+
+/**
+ * Loads a style version's drawing code (each style is its own chunk, fetched on first use). Without a
+ * version: the newest. Resolves once `create` works; rejects if the code can't load.
+ */
+export async function loadBackdropStyle(id: string, version?: number): Promise<{ module: BackdropStyleModule; version: StyleVersion }> {
+  const resolved = resolveStyleVersion(id, version);
+  await resolved.version.load();
+  return resolved;
+}

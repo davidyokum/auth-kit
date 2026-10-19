@@ -127,10 +127,11 @@ export interface BackdropStillOptions extends BackdropArtOptions {
 
 /**
  * Draws one still frame into `ctx` (whose canvas is `width × pixelRatio` by `height × pixelRatio`):
- * the art at the style's still time.
+ * the art at the style's still time. Loads the style's code first (each style is its own chunk).
  */
-export function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): void {
+export async function drawBackdropStill(ctx: Ctx2D, options: BackdropStillOptions): Promise<void> {
   const art = resolveArt(options);
+  await art.version.load();
   const ratio = options.pixelRatio ?? 1;
   const card = options.card ?? defaultCardRect(options.width, options.height);
   const createLayer = layerFactory(options.createCanvas, Math.min(ratio, art.version.maxPixelRatio));

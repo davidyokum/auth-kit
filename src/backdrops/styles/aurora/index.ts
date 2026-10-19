@@ -1,5 +1,4 @@
-import { defineStyle } from '../define.js';
-import { auroraV1 } from './v1.js';
+import { defineStyle, lazyVersion } from '../define.js';
 
 export const aurora = defineStyle({
   id: 'aurora',
@@ -7,5 +6,6 @@ export const aurora = defineStyle({
   description: 'Soft curtains of light in the brand tints that drift and shimmer gently.',
   interactivity: 'none',
   generative: true,
-  versions: [auroraV1],
+  // The drawing code loads on first use, in its own chunk.
+  versions: [lazyVersion({ version: 1, fps: 15, maxPixelRatio: 1, stillTime: 25 }, () => import('./v1.js').then((m) => m.auroraV1))],
 });
