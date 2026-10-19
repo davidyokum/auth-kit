@@ -31,8 +31,8 @@ describe('environment ribbon model', () => {
   });
 
   it('names the pool and persona locally', () => {
-    expect(environmentRibbonModel({ environment: 'local', poolId: POOL_ID, poolIsSandbox: true, persona: 'Editor' }).label).toBe(
-      `LOCAL · sandbox pool ${POOL_ID} · signed in as Editor (test)`,
+    expect(environmentRibbonModel({ environment: 'local', poolId: POOL_ID, poolIsSandbox: true, persona: 'Admin – content only' }).label).toBe(
+      `LOCAL · sandbox pool ${POOL_ID} · signed in as Admin – content only (test)`,
     );
     expect(environmentRibbonModel({ environment: 'local', poolId: POOL_ID, poolIsSandbox: true }).label).toBe(`LOCAL · sandbox pool ${POOL_ID} · signed out`);
     expect(environmentRibbonModel({ environment: 'local', poolId: POOL_ID, poolIsSandbox: true, signedInAs: 'me@example.org (not a persona)' }).label).toMatch(
@@ -75,18 +75,18 @@ describe('tab title and favicon', () => {
   });
 
   it('marks View as in the tab', () => {
-    expect(viewAsMetadata('Editor', 'Orchard').title).toEqual({ template: 'Viewing as Editor · %s', default: 'Viewing as Editor · Orchard' });
+    expect(viewAsMetadata('Admin – content only', 'Orchard').title).toEqual({ template: 'Viewing as Admin – content only · %s', default: 'Viewing as Admin – content only · Orchard' });
   });
 });
 
 describe('components (server-rendered)', () => {
   it('EnvironmentRibbon renders a labeled region per tone, and nothing on the live site', () => {
-    const html = renderToStaticMarkup(createElement(EnvironmentRibbon, { environment: 'local', poolId: POOL_ID, poolIsSandbox: true, persona: 'Editor' }));
+    const html = renderToStaticMarkup(createElement(EnvironmentRibbon, { environment: 'local', poolId: POOL_ID, poolIsSandbox: true, persona: 'Admin – content only' }));
     expect(html).toContain('role="region"');
     expect(html).toContain('aria-label="Environment"');
     expect(html).toContain('data-auth-kit-ribbon="local"');
     expect(html).toContain('<strong style="font-weight:700">LOCAL</strong>');
-    expect(html).toContain('signed in as Editor (test)');
+    expect(html).toContain('signed in as Admin – content only (test)');
     expect(renderToStaticMarkup(createElement(EnvironmentRibbon, { environment: 'local', poolId: 'p', poolIsSandbox: false }))).toContain('data-auth-kit-ribbon="danger"');
     expect(renderToStaticMarkup(createElement(EnvironmentRibbon, { environment: 'production', poolId: 'p', poolIsSandbox: null }))).toBe('');
   });
@@ -97,10 +97,10 @@ describe('components (server-rendered)', () => {
   });
 
   it('ViewAsBanner draws the hatched border and a sticky read-only bar with Exit', () => {
-    const html = renderToStaticMarkup(createElement(ViewAsBanner, { viewingAs: 'Editor', exitAction: '/admin/view-as/exit' }));
+    const html = renderToStaticMarkup(createElement(ViewAsBanner, { viewingAs: 'Admin – content only', exitAction: '/admin/view-as/exit' }));
     expect(html).toContain('data-auth-kit-view-as-border=""');
     expect(html).toContain('repeating-linear-gradient(45deg');
-    expect(html).toMatch(/Viewing as <strong[^>]*>Editor<\/strong>.*read-only/);
+    expect(html).toMatch(/Viewing as <strong[^>]*>Admin – content only<\/strong>.*read-only/);
     expect(html).toMatch(/<form [^>]*action="\/admin\/view-as\/exit" method="post"/);
     expect(html).toContain('>Exit</button>');
   });

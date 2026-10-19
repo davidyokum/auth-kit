@@ -159,7 +159,7 @@ npx auth-kit check-dev-route --url http://127.0.0.1:3100   # forged requests (Ho
 
 For the `[DEV]`/`[PREVIEW]` tab title and favicon, spread `environmentMetadata(environmentRibbonModel(input), { template: '%s · Reports', default: 'Reports' })` into the root layout's metadata.
 
-**View as** (the admin area's read-only mode) renders `<ViewAsBanner viewingAs="Editor" exitAction={endViewAs} />`: a hatched border around the page and a sticky "Viewing as Editor · read-only · Exit" bar. The server still blocks every write; the banner makes the mode impossible to miss. `viewAsMetadata('Editor', base)` marks the tab.
+**View as** (the admin area's read-only mode) renders `<ViewAsBanner viewingAs="Admin – content only" exitAction={endViewAs} />`: a hatched border around the page and a sticky "Viewing as Admin – content only · read-only · Exit" bar. The server still blocks every write; the banner makes the mode impossible to miss. `viewAsMetadata('Admin – content only', base)` marks the tab.
 
 ## When something's off
 
