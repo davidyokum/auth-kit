@@ -21,6 +21,12 @@ export interface WorkCounts {
 
 const SEGMENT_METHODS = new Set(['moveTo', 'lineTo', 'arc', 'ellipse', 'quadraticCurveTo', 'bezierCurveTo', 'rect', 'arcTo']);
 
+/** The recording canvas's text width: characters (code points) × 0.55 × the pixel size in the `font` string. */
+export function measuredWidth(text: string, font: string): number {
+  const size = /(\d+(?:\.\d+)?)px/.exec(font);
+  return Array.from(text).length * (size ? Number(size[1]) : 10) * 0.55;
+}
+
 function round(value: unknown): string {
   if (typeof value === 'number') return Number.isFinite(value) ? String(Math.round(value * 100) / 100) : String(value);
   if (value instanceof RecordingCanvas) return `canvas#${value.id}:${value.contentHash()}`;
@@ -58,6 +64,9 @@ export class RecordingContext {
     lineJoin: 'miter',
     imageSmoothingEnabled: true,
     imageSmoothingQuality: 'low',
+    font: '10px sans-serif',
+    textAlign: 'start',
+    textBaseline: 'alphabetic',
   };
 
   constructor(readonly canvas: RecordingCanvas) {
@@ -119,6 +128,11 @@ export class RecordingContext {
   scale(...a: number[]): void { this.record('scale', a); }
   setTransform(...a: number[]): void { this.record('setTransform', a); }
   drawImage(...a: unknown[]): void { this.record('drawImage', a); }
+  fillText(...a: unknown[]): void { this.record('fillText', a); }
+  /** Deterministic text metrics (no fonts here): each character is 0.55 × the font's pixel size wide. Not recorded (a query). */
+  measureText(text: string): { width: number } {
+    return { width: measuredWidth(text, String(this.props.font)) };
+  }
   createImageData(width: number, height: number): { width: number; height: number; data: Uint8ClampedArray } {
     this.record('createImageData', [width, height]);
     return { width, height, data: new Uint8ClampedArray(width * height * 4) };
@@ -189,9 +203,13 @@ export function nullContext(): CanvasRenderingContext2D {
     lineJoin: 'miter',
     imageSmoothingEnabled: true,
     imageSmoothingQuality: 'low',
+    font: '10px sans-serif',
+    textAlign: 'start',
+    textBaseline: 'alphabetic',
   };
-  for (const name of ['beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'arcTo', 'ellipse', 'quadraticCurveTo', 'bezierCurveTo', 'rect', 'fill', 'stroke', 'clip', 'fillRect', 'clearRect', 'strokeRect', 'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform', 'drawImage', 'putImageData']) {
+  for (const name of ['beginPath', 'closePath', 'moveTo', 'lineTo', 'arc', 'arcTo', 'ellipse', 'quadraticCurveTo', 'bezierCurveTo', 'rect', 'fill', 'stroke', 'clip', 'fillRect', 'clearRect', 'strokeRect', 'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform', 'drawImage', 'putImageData', 'fillText']) {
     ctx[name] = noop;
   }
+  ctx.measureText = (text: string) => ({ width: measuredWidth(text, String(ctx.font)) });
   return ctx as unknown as CanvasRenderingContext2D;
 }

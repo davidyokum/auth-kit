@@ -155,7 +155,7 @@ describe('families', () => {
 
   it('lists the styles', () => {
     expect(BACKDROP_STYLES).toContain('painted');
-    expect(offeredStyles()).toHaveLength(11);
+    expect(offeredStyles()).toHaveLength(14);
   });
 });
 
