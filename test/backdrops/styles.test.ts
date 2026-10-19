@@ -21,7 +21,9 @@ const BUDGET: Record<string, { calls: number; segments: number }> = {
   'stained-glass': { calls: 120, segments: 120 },
   constellation: { calls: 1500, segments: 1500 },
   ripples: { calls: 2600, segments: 2600 },
-  'county-survey': { calls: 100000, segments: 100000 },
+  'county-survey': { calls: 2350, segments: 2150 },
+  'river-basins': { calls: 2050, segments: 1850 },
+  'star-chart': { calls: 2150, segments: 1950 },
   painted: { calls: 12, segments: 0 },
 };
 
@@ -125,7 +127,7 @@ describe('the registry', () => {
   it('lists unique IDs, versions in order, labels, and frame rates within 30', () => {
     const ids = STYLE_MODULES.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toEqual(['magnetic-dots', 'contours', 'flow-lines', 'watercolor', 'aurora', 'stained-glass', 'constellation', 'ripples', 'county-survey', 'painted']);
+    expect(ids).toEqual(['magnetic-dots', 'contours', 'flow-lines', 'watercolor', 'aurora', 'stained-glass', 'constellation', 'ripples', 'county-survey', 'river-basins', 'star-chart', 'painted']);
     for (const m of STYLE_MODULES) {
       expect(m.label.length).toBeGreaterThan(2);
       m.versions.forEach((v, i) => {

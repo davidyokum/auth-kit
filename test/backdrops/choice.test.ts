@@ -34,9 +34,11 @@ describe('backdropVariations', () => {
 
   it('mixes every offered style before repeating one; never painted', () => {
     const styles = backdropVariations({ family: 'unc', salt: 'mix' }).map((v) => v.style);
-    expect(new Set(styles.slice(0, 8)).size).toBe(8);
+    expect(new Set(styles).size).toBe(Math.min(styles.length, offeredStyles().length));
     expect(styles).not.toContain('painted');
-    expect(new Set(styles)).toEqual(new Set(offeredStyles()));
+    for (const style of styles) expect(offeredStyles()).toContain(style);
+    const all = backdropVariations({ family: 'unc', salt: 'mix', count: offeredStyles().length }).map((v) => v.style);
+    expect(new Set(all)).toEqual(new Set(offeredStyles()));
   });
 
   it('can hold one style; seeds don’t depend on the family (so a family preview keeps the layouts)', () => {
@@ -153,7 +155,7 @@ describe('families', () => {
 
   it('lists the styles', () => {
     expect(BACKDROP_STYLES).toContain('painted');
-    expect(offeredStyles()).toHaveLength(8);
+    expect(offeredStyles()).toHaveLength(11);
   });
 });
 

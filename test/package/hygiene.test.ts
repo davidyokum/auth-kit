@@ -114,9 +114,10 @@ describe('module boundaries', () => {
     // The React component adds React; the dev-only picker adds the marker module.
     for (const spec of importsOf('src/backdrops/react.tsx')) expect(spec).toMatch(/^(\.\/|react$)/);
     for (const spec of importsOf('src/backdrops/picker.tsx')) expect(spec).toMatch(/^(\.\/|react$|\.\.\/dev\/marker\.js$)/);
-    // Style versions draw only through the frozen kernel and the style contract.
+    // Style versions draw only through the frozen kernel, a frozen shared core (plotter/vN), the style
+    // contract, and their own folder's data and subject lists.
     for (const file of core.filter((f) => /\/styles\/[^/]+\/v\d+\.ts$/.test(f))) {
-      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\.\/\.\.\/kernel\/v\d+\/|\.\.\/define\.js$)/);
+      for (const spec of importsOf(file)) expect(spec, `${file} imports ${spec}`).toMatch(/^(\.\.\/\.\.\/kernel\/v\d+\/|\.\.\/define\.js$|\.\.\/plotter\/v\d+\.js$|\.\/(data|subjects)\.js$)/);
     }
   });
 

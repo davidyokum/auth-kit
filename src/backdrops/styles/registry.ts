@@ -12,10 +12,12 @@ import { flowLines } from './flow-lines/index.js';
 import { magneticDots } from './magnetic-dots/index.js';
 import { painted } from './painted/index.js';
 import { ripples } from './ripples/index.js';
+import { riverBasins } from './river-basins/index.js';
 import { stainedGlass } from './stained-glass/index.js';
+import { starChart } from './star-chart/index.js';
 import { watercolor } from './watercolor/index.js';
 
-export const STYLE_MODULES = [magneticDots, contours, flowLines, watercolor, aurora, stainedGlass, constellation, ripples, countySurvey, painted] as const;
+export const STYLE_MODULES = [magneticDots, contours, flowLines, watercolor, aurora, stainedGlass, constellation, ripples, countySurvey, riverBasins, starChart, painted] as const;
 
 /** Every style ID, including retired ones and `painted`. */
 export type BackdropStyleId = (typeof STYLE_MODULES)[number]['id'];
