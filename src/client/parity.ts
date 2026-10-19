@@ -25,6 +25,7 @@
 import type { SignInMethod } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import type { SignInStep } from './steps.js';
+import { CODE_LIFETIME_POLICY } from '../shared/policy.js';
 
 /**
  * True when Cognito's answer to a first-factor request means "this account can't use that factor"
@@ -144,14 +145,14 @@ export async function decoyPasskeyPrompt(options: PasskeyPromptOptions = {}): Pr
   throw named('PasskeyAuthenticationCanceled', 'Passkey authentication has been canceled.');
 }
 
-/** Cognito's default sign-in session (and so an emailed code's lifetime): 3 minutes (`AuthSessionValidity`). */
-export const SIGN_IN_SESSION_MS = 3 * 60 * 1000;
+/** The default sign-in session (and so an emailed code's lifetime): 10 minutes (`AuthSessionValidity`; register A7). */
+export const SIGN_IN_SESSION_MS = CODE_LIFETIME_POLICY.defaultMinutes * 60 * 1000;
 
 /**
  * Answers a code typed on "Check your email" when no code was sent (the address has no account, or
  * can't use emailed codes): after a round trip's delay, the error Cognito gives a wrong code
  * (`CodeMismatchException`), or once the sign-in session would have ended (`lifetimeMs`, the site's
- * code lifetime; default 3 minutes), the expired-session error. Never contacts Cognito: there's no
+ * code lifetime; default 10 minutes), the expired-session error. Never contacts Cognito: there's no
  * sign-in session to answer.
  */
 export async function answerSimulatedCode(

@@ -199,7 +199,7 @@ describe('SignUp: the email', () => {
 });
 
 describe('SignUp: the code and after', () => {
-  it('posts { email } as JSON, then emails a code: "Check your email" and "Verify"', async () => {
+  it('posts { email } as JSON, then emails a code: "Check your email" and "Continue"', async () => {
     const { user, fetch } = setup();
     await submitEmail(user, ' ada@example.org ');
     await heading('Check your email');
@@ -210,11 +210,11 @@ describe('SignUp: the code and after', () => {
     expect(init?.headers).toEqual({ 'content-type': 'application/json' });
     expect(JSON.parse(init?.body as string)).toEqual({ email: 'ada@example.org' });
     expect(auth.signIn).toHaveBeenCalledWith({ username: 'ada@example.org', options: { authFlowType: 'USER_AUTH', preferredChallenge: 'EMAIL_OTP' } });
-    expect(screen.getByText('We’ve emailed ada@example.org. Enter the 8-digit code from that email. It works for 3 minutes and confirms the address is yours.')).toBeTruthy();
+    expect(screen.getByText('We’ve emailed ada@example.org. Enter the 8-digit code from that email. It works for 10 minutes and confirms the address is yours.')).toBeTruthy();
     expect(screen.getByText('Already have an account? The email explains how to sign in instead.')).toBeTruthy();
     expect(screen.getByText('No email after a minute? Check your junk folder, then send a new code.')).toBeTruthy();
     expect(screen.getByLabelText('8-digit code').getAttribute('autocomplete')).toBe('one-time-code');
-    expect(screen.getByRole('button', { name: 'Verify' }).getAttribute('type')).toBe('submit');
+    expect(screen.getByRole('button', { name: 'Continue' }).getAttribute('type')).toBe('submit');
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send a new code' }).disabled).toBe(true);
     expect(document.body.textContent).not.toContain('a***@e***');
   });
@@ -241,7 +241,7 @@ describe('SignUp: the code and after', () => {
     expect(plainFetch).not.toHaveBeenCalled();
   });
 
-  it('a fresh account: Verify, "Your name", "Choose how you’ll sign in next time", then "You’re set up" as a member', async () => {
+  it('a fresh account: Continue, "Your name", "Choose how you’ll sign in next time", then "You’re set up" as a member', async () => {
     auth.confirmSignIn.mockRejectedValueOnce(awsError('CodeMismatchException')).mockResolvedValueOnce(SIGNED_IN);
     const { user, navigate } = setup({ next: '/reports' });
     await submitEmail(user);

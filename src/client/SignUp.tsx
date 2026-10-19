@@ -47,7 +47,7 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   /** The site's terms, when it has them (open sign-up: "you agree to the terms and privacy notice"). A path or an http(s) URL. */
   termsUrl?: string;
   passkeysEnabled: boolean;
-  /** The same value as the preset's (register A7). Default 3. */
+  /** The same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
   /** The email field's example. Default: the family's, or `name@example.com` on open sign-up. */
   emailHint?: string;
@@ -378,7 +378,7 @@ export function SignUp(props: SignUpProps) {
           />
           <Actions classNames={classNames}>
             <Button type="submit" disabled={busy} classNames={classNames}>
-              {SIGN_UP.verify}
+              {SIGN_UP.codeSubmit}
             </Button>
           </Actions>
           <AltLinks

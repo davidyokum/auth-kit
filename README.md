@@ -68,7 +68,7 @@ export const authOptions = {
   appRoles: ['reviewer'],
   // How accounts get created (invite only by default; section 11), and how long an emailed code works:
   // accountCreation: { mode: 'domains', domains: ['example.org'], requestsAlso: true },
-  // codeLifetimeMinutes: 3,
+  // codeLifetimeMinutes: 10, // the default (register A7)
 } satisfies AuthStandardOptions;
 
 // Every pool needs the custom message trigger (synthesis fails without it): it words the code emails,
@@ -84,7 +84,7 @@ import { CUSTOM_MESSAGE_GATE_ENV } from 'auth-kit/amplify';
 export const customMessage = defineFunction({ name: 'custom-message', entry: './handler.ts', environment: { ...CUSTOM_MESSAGE_GATE_ENV } });
 // handler.ts
 import { customMessageHandler } from 'auth-kit/amplify/custom-message';
-export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 3 });
+export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 10 });
 // Your own wording instead? Keep the refusal: export const handler = withAuthKitCustomMessage(async (event) => { …; return event; });
 ```
 
@@ -723,7 +723,7 @@ export const handler = preSignUpForAccountCreation({ accountCreation });
 
 // amplify/auth/custom-message/handler.ts
 import { customMessageHandler } from 'auth-kit/amplify/custom-message';
-export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 3 });
+export const handler = customMessageHandler({ siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', helpEmail: 'apps-help@replace-me.invalid', codeLifetimeMinutes: 10 });
 
 // amplify/auth/resource.ts
 export const auth = defineAuth(standardAuthProps(authOptions, { triggers: { preSignUp, customMessage } }));
@@ -854,7 +854,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | `autocomplete` tokens, paste never blocked | `SIGN_IN_AUTOCOMPLETE` on every field; no paste blocking or `maxlength` ([passkey autofill caveat](#where-amplify-v6-differs-from-the-standard)) | Pkg |
 | Essentials plan + SES | `UserPoolTier`, `EmailConfiguration` with the domain identity | Pkg |
 | WAF web ACL with a per-IP rate rule | `createAuthWebAcl` (sign-in rule + overall rule, each with its own mode), or one [shared ACL](#waf-one-web-acl-for-all-your-sites) per account and Region; off only with `acknowledgeNoRateLimit` | Pkg ([count first](#count-first-then-block-the-sign-in-rule)) |
-| `AuthSessionValidity` 3 minutes (the emailed code's lifetime) | Preset `codeLifetimeMinutes` (default 3; A7), the same value on every screen and email that says it | Pkg |
+| `AuthSessionValidity` 10 minutes (the emailed code's lifetime; register A7) | Preset `codeLifetimeMinutes` (default 10), the same value on every screen and email that says it | Pkg |
 | Passkeys: user verification, count as MFA, final-domain RP ID | `WebAuthnUserVerification`, `WebAuthnFactorConfiguration`, RP ID validation | Pkg |
 | `PreventUserExistenceErrors` | Preset; the sign-in screens are the same for every address until a factor is proven ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)) | Pkg (on-the-wire caveat in the ADR) |
 | Invites with no password and no `email_verified` | `people.invite` (`MessageAction: SUPPRESS` + SES); the first-credential choice afterwards is required (no "Not now") | Pkg |

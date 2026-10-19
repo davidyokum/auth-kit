@@ -148,7 +148,7 @@ describe('Tier 2 pool on a branch', () => {
       IdTokenValidity: 60,
       RefreshTokenValidity: 43200,
       TokenValidityUnits: { AccessToken: 'minutes', IdToken: 'minutes', RefreshToken: 'minutes' },
-      AuthSessionValidity: 3,
+      AuthSessionValidity: 10,
     });
   });
 
@@ -503,9 +503,10 @@ describe('account creation (ADR 0023)', () => {
   });
 
   it('sets the code lifetime once, as the sign-in session', () => {
-    const t = synth({ ...BASE, codeLifetimeMinutes: 10 }).template();
-    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 10 });
-    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(3);
+    const t = synth({ ...BASE, codeLifetimeMinutes: 5 }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 5 });
+    // The default is 10 minutes (register A7).
+    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(10);
   });
 
   it('refuses the removed selfSignUp with an explanation', () => {

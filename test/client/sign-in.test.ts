@@ -695,7 +695,7 @@ describe('password sign-in', () => {
     await heading('Enter your authenticator code');
     await user.type(screen.getByLabelText('6-digit code'), '123456{Enter}');
     await heading('Sign in to Example Reports');
-    expect(summary().textContent).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect(summary().textContent).toBe('That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.');
     expect(emailField().value).toBe('ada@example.org');
   });
 
@@ -806,7 +806,7 @@ describe('emailed code (the backstop) and joining', () => {
     await askForCode(user);
     expect(auth.signIn.mock.calls[0]![0].options.preferredChallenge).toBe('EMAIL_OTP');
     // The typed address, never Cognito's masked one: an unknown address has none (ADR 0018).
-    expect(screen.getByText('If ada@example.org has an account here, we’ve emailed it an 8-digit code. It works for 3 minutes.')).toBeTruthy();
+    expect(screen.getByText('If ada@example.org has an account here, we’ve emailed it an 8-digit code. It works for 10 minutes.')).toBeTruthy();
     expect(document.body.textContent).not.toContain('a***@e***');
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send a new code' }).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Use a different email address' })).toBeTruthy();
@@ -941,13 +941,13 @@ describe('emailed code (the backstop) and joining', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('the default lifetime is 3 minutes, and an out-of-range one is refused', async () => {
+  it('the default lifetime is 10 minutes, and an out-of-range one is refused', async () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
     auth.confirmSignIn.mockRejectedValue(SESSION_EXPIRED());
     const { user } = setup();
     await askForCode(user);
     await user.type(screen.getByLabelText('8-digit code'), '12345678{Enter}');
-    expect((await findSummary()).textContent).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect((await findSummary()).textContent).toBe('That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.');
     cleanup();
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

@@ -507,7 +507,7 @@ describe('Card Studio v4’s words', () => {
   it('sign-up, request access, and signed out', () => {
     expect(copy.SIGN_UP.heading).toBe('Create your account');
     expect(copy.SIGN_UP.codeSub(personal, EMAIL)).toBe('We’ve emailed ada@example.org. Enter the 8-digit code from that email. It works for 3 minutes and confirms the address is yours.');
-    expect(copy.SIGN_UP.verify).toBe('Verify');
+    expect(copy.SIGN_UP.codeSubmit).toBe('Continue'); // register A6: Continue on a step in between
     expect(copy.SIGN_UP.nameHeading).toBe('Your name');
     expect(copy.SIGN_UP.doneSub(personal)).toBe('Your account starts as a member of Example Reports. The Example Reports team can give you more access if you need it.');
     expect(copy.SIGN_UP.doneSub(osbm)).toBe('Your account starts as a member of Example Reports. Jordan Lee can give you more access if you need it.');

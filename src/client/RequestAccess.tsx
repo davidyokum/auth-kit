@@ -1,5 +1,6 @@
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
+import { CODE_LIFETIME_POLICY } from '../shared/policy.js';
 import { postAccountForm, takeHandedOffEmail } from './account-creation-client.js';
 import { type CopyContext, ERRORS, REQUEST, SHARED, SIGN_IN, STATUS } from './copy.js';
 import { checkedHref, hrefOr } from './href.js';
@@ -34,7 +35,7 @@ type Problem = { message: string; field: 'name' | 'email' | 'reason' };
 export function RequestAccess(props: RequestAccessProps) {
   const { classNames, siteName } = props;
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
-  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: 3, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }) };
+  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: CODE_LIFETIME_POLICY.defaultMinutes, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }) };
   const hint = props.emailHint?.trim() || theme.emailHint;
   const level = props.headingLevel ?? 1;
   const uid = useId();

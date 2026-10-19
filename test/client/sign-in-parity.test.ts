@@ -304,7 +304,7 @@ describe('the same screens for every address (ADR 0018)', () => {
     const frames: string[] = [];
     await SCRIPTS['Email me a code, then guess it twice']!.run(renderSignIn(), frames);
     const first = JSON.parse(frames[0]!) as { text: string; alert: string | null };
-    expect(first.text).toContain(`If ${EMAIL} has an account here, we’ve emailed it an 8-digit code. It works for 3 minutes.`);
+    expect(first.text).toContain(`If ${EMAIL} has an account here, we’ve emailed it an 8-digit code. It works for 10 minutes.`);
     expect(first.text).toContain('Accounts with an authenticator app can’t get emailed codes. Use your password or passkey instead.');
     expect(first.text).not.toContain('s***@e***');
     expect(first.alert).toBeNull();
@@ -353,17 +353,17 @@ describe('the same screens for every address (ADR 0018)', () => {
     expect(describeAuthError(awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.'), 'code').kind).toBe('session-expired');
   });
 
-  it('a simulated code expires with the sign-in session, like a real one (3 minutes, or the site’s lifetime)', async () => {
+  it('a simulated code expires with the sign-in session, like a real one (10 minutes, or the site’s lifetime)', async () => {
     const sentAt = 1_000_000;
     const sleep = () => Promise.resolve();
-    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 60_000, sleep })).rejects.toMatchObject({ name: 'CodeMismatchException' });
-    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 3 * 60_000 + 1, sleep })).rejects.toMatchObject({
+    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 9 * 60_000, sleep })).rejects.toMatchObject({ name: 'CodeMismatchException' });
+    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 10 * 60_000 + 1, sleep })).rejects.toMatchObject({
       name: 'NotAuthorizedException',
       message: expect.stringMatching(/session is expired/),
     });
-    const tenMinutes = 10 * 60_000;
-    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 5 * 60_000, sleep, lifetimeMs: tenMinutes })).rejects.toMatchObject({ name: 'CodeMismatchException' });
-    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + tenMinutes + 1, sleep, lifetimeMs: tenMinutes })).rejects.toMatchObject({ name: 'NotAuthorizedException' });
+    const threeMinutes = 3 * 60_000;
+    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + 2 * 60_000, sleep, lifetimeMs: threeMinutes })).rejects.toMatchObject({ name: 'CodeMismatchException' });
+    await expect(answerSimulatedCode(sentAt, { now: () => sentAt + threeMinutes + 1, sleep, lifetimeMs: threeMinutes })).rejects.toMatchObject({ name: 'NotAuthorizedException' });
   });
 });
 

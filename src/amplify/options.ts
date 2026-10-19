@@ -187,7 +187,7 @@ export interface AuthStandardOptions {
   accountCreation?: AccountCreationSettings;
   /**
    * How long an emailed code works, in minutes: Cognito's sign-in session (`AuthSessionValidity`).
-   * Default 3; Cognito allows 3 to 15 (register A7 is choosing between 3 and 10). Pass the same value
+   * Default 10 (register A7); Cognito allows 3 to 15. Pass the same value
    * to the screens (`SignIn`, `SignUp`) and the custom message trigger, which all say it.
    */
   codeLifetimeMinutes?: number;

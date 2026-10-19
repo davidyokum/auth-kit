@@ -92,7 +92,7 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   inviteLine?: 'sentence' | 'link';
   /** "Trouble signing in?" inside the card (default) or just below it (register E5, Proposed). */
   troubleLink?: 'inside' | 'below';
-  /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 3. */
+  /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
   /** Where "Create an account" goes. Default `/sign-up`. A same-site path or an http(s) URL (anything else throws). */
   signUpHref?: string;

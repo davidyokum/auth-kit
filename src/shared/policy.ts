@@ -349,8 +349,8 @@ export const SESSION_POLICY = {
   refreshTokenMinutesMax: { 2: 30 * 24 * 60, 3: 24 * 60 } as Readonly<Record<AuthTier, number>>,
   /** Cognito's floor for refresh tokens. */
   refreshTokenMinutesMin: 60,
-  /** The sign-in session, which is also an emailed code's lifetime. */
-  authSessionMinutes: 3,
+  /** The sign-in session, which is also an emailed code's lifetime (register A7: 10 minutes). */
+  authSessionMinutes: 10,
   /** Step-up: a risky action needs a sign-in at most this old. */
   stepUpMaxAgeSeconds: 5 * 60,
   /** Admin routes re-read the acting person's status and groups at most this often. */
@@ -369,8 +369,9 @@ export const PASSWORD_POLICY = {
 } as const;
 
 /**
- * How long an emailed code works (register A7, Proposed: 3 or 10 minutes). It's Cognito's sign-in
- * session (`AuthSessionValidity`, 3 to 15 minutes), so one setting drives the pool and every screen and
+ * How long an emailed code works (register A7, decided 2026-10-19: 10 minutes, kinder to state email
+ * screening; the code stays single-use, 8 digits, and rate-limited). It's Cognito's sign-in session
+ * (`AuthSessionValidity`, 3 to 15 minutes), so one setting drives the pool and every screen and
  * email that mentions it: pass the same `codeLifetimeMinutes` to the preset, `SignIn`, `SignUp`, and
  * the custom message trigger.
  */

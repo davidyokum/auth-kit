@@ -22,7 +22,7 @@
 
 **The first credential is required** (A1, REPORT §3.1): `ChooseFirstCredential` has no "Not now". An account isn't left on emailed codes, the backstop, as its everyday way in. **The server enforces it** (amended 2026-10-18, after the security review): `requireUser` refuses an account with neither a passkey nor a password (403 `first_credential_required`, `getUser` returns `null`), and page guards send it to the chooser (`firstCredentialPath`, default `/account/sign-in-method`, the one page that passes `allowFirstCredentialEnrollment`). So closing the tab at the chooser, blocking the factors read, or reloading can't leave an account on codes. `SignIn` never goes in after a failed factors read: it says it couldn't check, with Try again.
 
-**One code lifetime** (A7): `codeLifetimeMinutes` (default 3; Cognito allows 3 to 15) sets the pool's `AuthSessionValidity` and every sentence that says it: the screens, the custom message trigger's emails, and the simulated-code timing that keeps unknown addresses indistinguishable.
+**One code lifetime** (A7, decided 2026-10-19: 10 minutes): `codeLifetimeMinutes` (default 10; Cognito allows 3 to 15) sets the pool's `AuthSessionValidity` and every sentence that says it: the screens, the custom message trigger's emails, and the simulated-code timing that keeps unknown addresses indistinguishable.
 
 **Families as themes** (`auth-kit/themes`; E1, E2, E4, A9). One theme per family carries:
 

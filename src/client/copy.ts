@@ -300,7 +300,8 @@ export const SIGN_UP = {
   codeHeading: 'Check your email',
   codeSub: (c: CopyContext, email: string) => `We’ve emailed ${email}. Enter the 8-digit code from that email. It works for ${minutes(c)} and confirms the address is yours.`,
   codeExisting: 'Already have an account? The email explains how to sign in instead.',
-  verify: 'Verify',
+  /** Continue, not Verify: a step in between (register A6). */
+  codeSubmit: 'Continue',
   codeHelp: 'No email after a minute? Check your junk folder, then send a new code.',
 
   nameHeading: 'Your name',

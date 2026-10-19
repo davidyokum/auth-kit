@@ -56,7 +56,7 @@ export interface CustomMessageTriggerEvent {
 
 export interface CustomMessageOptions extends Omit<EmailSite, 'theme'> {
   theme: AuthTheme | ThemeFamily;
-  /** The pool's code lifetime (the preset's `codeLifetimeMinutes`). Default 3. */
+  /** The pool's code lifetime (the preset's `codeLifetimeMinutes`). Default 10 (register A7). */
   codeLifetimeMinutes?: number;
 }
 
