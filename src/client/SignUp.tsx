@@ -60,8 +60,6 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   requestAccessHref?: string;
   /** Show "Protected against automated sign-ups." (open sign-up). Default false. */
   botNote?: boolean;
-  /** The "Your name" button (Card Studio vote): "Create account" (default) or "Finish". */
-  nameButton?: 'create' | 'finish';
   /** Account-change notices (register A10: on by default; see `SignIn`'s `notices`). `false` for a site that doesn't send them. */
   notices?: AccountNotices;
   next?: string | null;
@@ -437,7 +435,7 @@ export function SignUp(props: SignUpProps) {
           <Field id={ids.family} label={SIGN_UP.lastName} name="family-name" autoComplete="family-name" value={family} onChange={(e) => setFamily(e.target.value)} classNames={classNames} />
           <Actions classNames={classNames}>
             <Button type="submit" disabled={busy} classNames={classNames}>
-              {props.nameButton === 'finish' ? SIGN_UP.finish : SIGN_UP.createAccount}
+              {SIGN_UP.nameSubmit}
             </Button>
           </Actions>
         </form>

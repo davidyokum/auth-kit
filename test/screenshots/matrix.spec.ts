@@ -6,13 +6,25 @@
  *   face or bevel; the unstyled choice-screen buttons of v0.1.9-alpha.1 fail here), big controls are at
  *   least 44px tall, nothing overflows the card sideways, the card is its device's width, a heading shows,
  *   every slot is a known one, and nothing left the page.
+ * - Computed contrast on every card (`contrast.ts`): text 4.5:1, the focus ring and boundaries 3:1, each
+ *   measured from the rendered colours over what's really behind it. On a failure the list names each look,
+ *   what failed, the colours, the ratio, and how many cards share it.
+ * - Button words (`words.ts`, register A6): no step another step follows says "Create account", "Finish", or
+ *   "Sign in" on its primary button; checked on every card here, and in every account-creation mode below.
  * - A computed-style baseline per family (`__snapshots__/matrix.spec.ts/styles-<family>.json`): every
  *   slot's computed style on the base look (Quiet, light page, desktop), and for each other look only what
  *   differs. Any change in how the card is styled shows up here as a reviewable diff.
+ *
+ * Each family's lowest ratios, per look and kind, are written to `contrast-<family>.json` in the test's output
+ * folder (`test-results/`), for the record.
  */
-import { expect, test } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
+import { expect, test, type Page } from '@playwright/test';
+import { ACCOUNT_CREATION_MODES } from '../../src/shared/account-creation.js';
 import { PREVIEW_SCREENS } from '../../src/preview/screens.js';
+import { installContrastProbe } from './contrast.js';
 import { exitsUsed, FONT, openHarness } from './harness.js';
+import { FINAL_WORDS, installWordsProbe } from './words.js';
 
 const FAMILIES = ['osbm', 'unc', 'personal'] as const;
 const STATES = PREVIEW_SCREENS.flatMap((s) => s.states.map((st) => [s.id, st.id] as [string, string]));
@@ -29,6 +41,14 @@ interface MatrixArgs {
   states: [string, string][];
   font: string;
   slots: string[];
+  finalWords: readonly string[];
+}
+
+/** The probes the matrix calls in the page, and the keyboard as the last thing used, so focus shows its ring. */
+async function prepare(page: Page): Promise<void> {
+  await page.evaluate(installContrastProbe);
+  await page.evaluate(installWordsProbe);
+  await page.keyboard.press('Shift');
 }
 
 /** Runs in the page: draws every card of one family and checks it. */
@@ -36,6 +56,11 @@ function runMatrix(arg: MatrixArgs) {
   const P = window.AuthKitPreview;
   const host = document.getElementById('host')!;
   const violations: string[] = [];
+  const words: string[] = [];
+  /** Contrast failures, grouped: one line per look, kind, slot, and colours, with how many cards share it. */
+  const failures = new Map<string, { n: number; first: string }>();
+  /** The lowest ratio of each kind, per look (`style/theme`), and where. */
+  const lows: Record<string, Record<string, { ratio: number; fg: string; bg: string; where: string }>> = {};
   const effects: string[] = [];
   let actions = 0;
   const PROPS = [
@@ -80,6 +105,18 @@ function runMatrix(arg: MatrixArgs) {
           const where = `${look} ${screen}/${state}`;
           const stage = card.el;
           const box = card.card;
+          for (const f of window.__akContrast.measure(stage)) {
+            const key = `${cardStyle}/${theme}`;
+            const low = (lows[key] ??= {});
+            if (!low[f.kind] || f.ratio < low[f.kind]!.ratio) low[f.kind] = { ratio: f.ratio, fg: f.fg, bg: f.bg, where: `${device} ${screen}/${state} ${f.what}` };
+            if (f.info || f.ratio >= f.minimum) continue;
+            const slot = f.what.slice(0, f.what.indexOf(' ') === -1 ? undefined : f.what.indexOf(' '));
+            const line = `${look} ${f.kind} (${slot}): ${f.fg || '?'} on ${f.bg || '?'}, ${f.ratio.toFixed(3)}:1, under ${f.minimum}:1`;
+            const seen = failures.get(line);
+            if (seen) seen.n++;
+            else failures.set(line, { n: 1, first: `${screen}/${state} ${f.what}` });
+          }
+          for (const problem of window.__akWords.check(stage, card.actions(), arg.finalWords)) words.push(`${where}: ${problem}`);
           const cardFont = getComputedStyle(box).fontFamily;
           const heading = stage.querySelector('[data-auth-kit-slot="heading"]');
           if (!heading?.textContent?.trim() || heading.getBoundingClientRect().height === 0) violations.push(`${where}: no visible heading`);
@@ -156,15 +193,21 @@ function runMatrix(arg: MatrixArgs) {
     for (const key of Object.keys(base)) if (!(key in styles)) diff[key] = '(absent)';
     differences[look] = sorted(diff);
   }
-  return { violations, effects, actions, cards: Object.keys(looks).length * arg.states.length, styles: { base: sorted(base), differences } };
+  const contrast = [...failures].map(([line, { n, first }]) => `${line} (${n} card${n === 1 ? '' : 's'}, e.g. ${first})`).sort();
+  return { violations, contrast, words, lows, effects, actions, cards: Object.keys(looks).length * arg.states.length, styles: { base: sorted(base), differences } };
 }
 
 for (const family of FAMILIES) {
-  test(`every screen, state, card style, page theme, and device: ${family}`, async ({ page }) => {
+  test(`every screen, state, card style, page theme, and device: ${family}`, async ({ page }, testInfo) => {
     const { requests, navigations, errors } = await openHarness(page);
-    const result = await page.evaluate(runMatrix, { family, cardStyles: ['quiet', 'monogram', 'frosted', 'plain', 'porcelain'], states: STATES, font: FONT, slots: SLOTS });
+    await prepare(page);
+    const result = await page.evaluate(runMatrix, { family, cardStyles: ['quiet', 'monogram', 'frosted', 'plain', 'porcelain'], states: STATES, font: FONT, slots: SLOTS, finalWords: FINAL_WORDS });
+    writeFileSync(testInfo.outputPath(`contrast-${family}.json`), `${JSON.stringify(result.lows, null, 1)}\n`);
     expect(result.cards).toBe(5 * 2 * 2 * STATES.length);
-    expect(result.violations).toEqual([]);
+    // Soft, so one run lists every kind of problem.
+    expect.soft(result.violations).toEqual([]);
+    expect.soft(result.contrast).toEqual([]);
+    expect.soft(result.words).toEqual([]);
     expect(result.effects).toEqual([]);
     expect(result.actions).toBe(0);
     expect(`${JSON.stringify(result.styles, null, 1)}\n`).toMatchSnapshot(`styles-${family}.json`);
@@ -175,3 +218,28 @@ for (const family of FAMILIES) {
     expect(await exitsUsed(page)).toEqual({ touches: [], storage: [0, 0] });
   });
 }
+
+test('button words follow register A6 in every account-creation mode', async ({ page }) => {
+  const { errors } = await openHarness(page);
+  await prepare(page);
+  const result = await page.evaluate(
+    ({ states, modes, font, finalWords }) => {
+      const card = window.AuthKitPreview.render(document.getElementById('host')!, { screen: 'email', font });
+      const problems: string[] = [];
+      let buttons = 0;
+      for (const mode of modes) {
+        for (const [screen, state] of states) {
+          card.update({ screen, state, family: 'osbm', accountCreation: mode, font });
+          buttons += card.el.querySelectorAll('[data-auth-kit-slot="button"]').length;
+          for (const problem of window.__akWords.check(card.el, card.actions(), finalWords)) problems.push(`${mode} ${screen}/${state}: ${problem}`);
+        }
+      }
+      card.destroy();
+      return { problems, buttons };
+    },
+    { states: STATES, modes: [...ACCOUNT_CREATION_MODES], font: FONT, finalWords: FINAL_WORDS },
+  );
+  expect(result.buttons).toBeGreaterThan(4 * 40);
+  expect(result.problems).toEqual([]);
+  expect(errors).toEqual([]);
+});

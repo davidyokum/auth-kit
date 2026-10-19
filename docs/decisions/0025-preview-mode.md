@@ -38,6 +38,7 @@ Options considered:
   - `gh attestation verify auth-kit-preview.js --repo davidyokum/auth-kit` checks a copy.
 - **Screenshot tests** (`test/screenshots`, Playwright) run against the standalone file in the Playwright container, where the baselines were taken.
   - Every screen and state × family × card style × light/dark page × desktop/phone (3,120 cards) is checked for unstyled controls, small targets, overflow, the device's width, and a heading. Each family has a computed-style baseline, with the base look in full and the other looks as diffs.
+  - The same cards are measured for contrast (amended for v0.1.10-alpha.1, after the Sign-in Studio measured v0.1.10-alpha's card by hand): text 4.5:1, the focus ring and the boundaries of fields, outline buttons, and the card 3:1, each from the rendered card's computed colours composited over what is really behind it (the page, the card's fill, a tint or well, Plain's column, Frosted's see-through fill and its backdrop filter). Their primary buttons are checked against register A6: no step another step follows says "Create account", "Finish", or "Sign in" (also in every account-creation mode).
   - Every control on every screen is clicked in a real browser and must only report.
   - Every screen has an accessibility snapshot and a baseline image, and there are images of the choice screen in every family and style, on a phone, and on a dark page.
   - The release job waits for these tests.
@@ -58,7 +59,7 @@ Options considered:
 
 ### What the preview doesn't do
 
-- **It has no dark card.** auth-kit's card is light, and its pages are light ([0021](0021-backdrops.md)). `theme: 'dark'` draws the real card on a dark page with `color-scheme: dark`. The tests prove the card is unaffected: only the page and the area outside the card change.
+- **It has no dark card.** auth-kit's card is light, and its pages are light ([0021](0021-backdrops.md)). `theme: 'dark'` draws the real card on a dark page with `color-scheme: dark`. The card stays light; only the see-through Frosted style changes, thickening from 66% to 90% white so it keeps its contrast over the dark page (v0.1.10-alpha.1; any page that declares `color-scheme: dark` gets the same). The contrast tests prove every style passes on both pages.
 - **Emails aren't drawn yet.** The Studio's three email screens (the invite, the sign-up code, "you already have an account") stay the Studio's own. `src/shared/emails.ts` renders them, so a `message` screen can come later.
 - **It isn't a demo of the live flow.** A preview shows one state; a host follows `info.next` to draw the next one.
 

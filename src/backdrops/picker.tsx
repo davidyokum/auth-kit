@@ -436,7 +436,7 @@ const PICKER_CSS = `
 .akp-segmented { display: inline-flex; padding: 3px; gap: 2px; border-radius: 11px; background: #e7e9ed; }
 .akp-segment { font: inherit; font-size: 14px; height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: var(--akp-muted); cursor: pointer; white-space: nowrap; }
 .akp-segment[aria-checked="true"] { background: var(--akp-surface); color: var(--akp-ink); font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,.12); }
-.akp-segment:focus-visible, .akp-button:focus-visible, .akp-select:focus-visible, .akp-open:focus-visible, .akp-link:focus-visible { outline: 3px solid #3892e1; outline-offset: 2px; }
+.akp-segment:focus-visible, .akp-button:focus-visible, .akp-select:focus-visible, .akp-open:focus-visible, .akp-link:focus-visible { outline: 3px solid #2881cd; outline-offset: 2px; }
 .akp-toolbar-actions { margin-left: auto; display: flex; gap: 10px; }
 .akp-button { font: inherit; font-weight: 600; font-size: 14px; height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--akp-line); background: var(--akp-surface); color: var(--akp-ink); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .akp-button:disabled { opacity: .45; cursor: default; }

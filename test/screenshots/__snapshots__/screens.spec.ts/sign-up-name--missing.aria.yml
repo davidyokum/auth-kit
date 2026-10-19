@@ -1,9 +1,13 @@
+- alert:
+  - link "Enter your name":
+    - /url: "#_akp1-r_0_-given"
 - heading "Your name" [level=1]
 - paragraph: This is how you’ll appear on Example Reports.
 - text: First name
-- textbox "First name"
+- paragraph: "Error: Enter your name"
+- textbox "First name" [invalid]
 - text: Last name
 - textbox "Last name"
-- button "Create account"
+- button "Continue"
 - status
 - paragraph: This site is managed by the NC Office of State Budget and Management

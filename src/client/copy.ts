@@ -328,8 +328,8 @@ export const SIGN_UP = {
   nameSub: (c: CopyContext) => `This is how you’ll appear on ${c.siteName}.`,
   firstName: 'First name',
   lastName: 'Last name',
-  createAccount: 'Create account',
-  finish: 'Finish',
+  /** Continue, not "Create account" or "Finish": choosing how you'll sign in follows (register A6). */
+  nameSubmit: 'Continue',
 
   doneSub: (c: CopyContext) => `Your account starts as a member of ${c.siteName}. ${Team(c)} can give you more access if you need it.`,
   doneEmailed: 'We’ve emailed you a note about how you’ll sign in next time.',
