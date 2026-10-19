@@ -2,6 +2,34 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.10-alpha.1] - 2026-10-19
+
+Five defects the Sign-in Studio found by measuring v0.1.10-alpha's real card, fixed, and a screenshot suite that now measures every card's contrast and button words, so they can't come back. Pre-release. Breaking only for a site that passed `SignUp`'s `nameButton` (none do): see Migration.
+
+### Fixed
+
+- **The sign-up name step says Continue** (register A6: choosing how you'll sign in follows it). It said "Create account", or "Finish" with `nameButton: 'finish'`. Every sign-up path and account-creation mode was checked; no other step says "Create account" or "Finish", and "Sign in" stays only on the steps that finish (the authenticator code and the emailed code).
+- **The focus ring passes 3:1 on every surface**, with margin: the core ring deepens from `#3892e1` to `#2881cd` (the same hue). It was 2.997:1 on Plain's column (OSBM; 2.98:1 personal), and down to 2.71:1 on Plain's tinted boxes and 2.85:1 on Porcelain's well. Now at least 3.38:1 on any light surface, and 3.35:1 on Frosted over a dark page.
+- **UNC's links pass 4.5:1 on every card style**: `#007fae` becomes `#006d9b` (the same Carolina hue, deeper). They were 4.48:1 on Monogram, 4.39:1 on Frosted, 4.14:1 on Plain's column, and 3.77:1 on its tinted boxes; now at least 4.74:1 everywhere, light page or dark. `#007fae` stays in UNC's backdrop palette, where it's art, not text.
+- **Frosted works on a dark page.** Its fill was 66% white on any page, so on a dark one links fell to 2.22:1, the focus ring to 1.54:1, errors to 3.06:1, muted text to 3.92:1, and field borders to 2.24:1. Where the page is dark (`color-scheme: dark`), the fill is now 90% white (`--ak-card-bg-dark`, picked with `light-dark()` in browsers that have it), and every family passes: links at least 4.74:1, errors 5.37:1, muted text 6.63:1, the ring 3.35:1, fields 3.91:1. On a light page, Frosted is unchanged.
+
+Not changed: **the card's edge line on a dark page** stays faint (OSBM 2.81:1, UNC 1.56:1, personal 3.14:1 against the page). The card's light fill is the boundary there, at 14.4:1 or more (12.0:1 for Frosted), so the boundary passes (WCAG 1.4.11), and a stronger line would only show against the card. It's reported for information.
+
+### Changed
+
+- **Preview mode's `sign-up-name` states** are `''` (As it first shows, "Continue") and `missing` (Name missing, the field error), still 52 states in all. The retired IDs `create-account` and `finish` still draw `''`, since hosts store state IDs.
+- The localhost backdrop picker's focus ring uses the new core colour.
+
+### Tests
+
+- **Computed contrast on every card of the screenshot matrix** (52 states × 3 families × 5 card styles × light and dark page × desktop and phone): text 4.5:1 (body, headings, links, muted text, errors, control words, typed text, and field examples); the focus ring 3:1 against what it's drawn on (each control focused as the keyboard focuses it, and a control without a ring fails); the boundaries of fields, outline buttons, and the card 3:1 (the border or the fill against what's outside). Each is measured from the rendered card's computed colours, composited over what's really behind it: the page, the card's fill, a tint or well, Plain's column, and Frosted's see-through fill with its backdrop filter. Each family's lowest ratios are written to `test-results/`.
+- **Register A6's words**: no step another step follows says "Create account", "Finish", or "Sign in" on its primary button, on every card and in every account-creation mode (invite, request, domains, open).
+- On v0.1.10-alpha, both fail (the contrast in every family; the words on the name step in all four modes); with these fixes, both pass.
+
+### Migration
+
+A site that passed `nameButton` to `SignUp` removes it (none of the known sites do). A site that draws the card on a dark page declares `color-scheme: dark` there, so Frosted thickens.
+
 ## [0.1.10-alpha] - 2026-10-19
 
 Preview mode (register E9, [ADR 0025](docs/decisions/0025-preview-mode.md)): the real sign-in card, held at any screen and state with sample data, inert, for the Sign-in Studio, the primer's walkthrough, and screenshot tests. Pre-release. No breaking changes; `auth-kit/client`'s API and behaviour are unchanged.
