@@ -282,17 +282,21 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
       return fail('unavailable', `Couldn't read the current setting: ${describeAwsError(error)} Nothing changed.`);
     }
     if ((before?.version ?? 0) !== version) return fail('stale', 'The sign-in help address changed since this page loaded. Reload and try again.');
-    const from = storedHelp(before)?.address ?? help.configured;
+    const previous = storedHelp(before);
+    const from = previous?.address ?? help.configured;
     const to = mode === 'set' ? address! : help.configured;
     if (mode === 'clear' && !before) return fail('refused', 'The configured address is already in effect.', { guardrail: 'no_change' });
     if (mode === 'set' && from === to && before) return fail('refused', `${to} is already the help address.`, { guardrail: 'no_change' });
+    // The E4c acknowledgement is part of the record (L1): a reader judging the change needs to know a
+    // person's own address was set on purpose, not a role mailbox.
+    const setPersonal = mode === 'set' && personal;
 
     const run: AuditedRun<void> = await runAudited(auditLog, {
       intent: {
         actor: who.actor,
         action: ACCOUNT_AUDIT_ACTIONS.signInHelp,
-        before: { address: from, source: before ? 'override' : 'config' },
-        after: { address: to, source: mode === 'set' ? 'override' : 'config' },
+        before: { address: from, source: before ? 'override' : 'config', ...(previous?.personal === true && { personal: true }) },
+        after: { address: to, source: mode === 'set' ? 'override' : 'config', ...(setPersonal && { personal: true }) },
         reason,
         calls: [mode === 'set' ? 'DynamoDB PutItem sign-in help' : 'DynamoDB DeleteItem sign-in help', 'Owner alert (sign-in help changed)'],
         ...contextOf(who.request),
@@ -322,6 +326,7 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
             from,
             to,
             reverted: mode === 'clear',
+            ...(setPersonal && { personal: true }),
             reason,
             at: new Date(now()),
             context: who.request,
@@ -359,7 +364,7 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
           ok: true,
           message:
             mode === 'set'
-              ? `People who need help signing in are now sent to ${to}. The owner and every Super admin have been told.`
+              ? `People who need help signing in are now sent to ${to}${setPersonal ? ', a personal address' : ''}. The owner and every Super admin have been told.`
               : `The sign-in help address is back to the site's configured address, ${to}. The owner and every Super admin have been told.`,
           ...(run.result !== undefined && { auditId: run.result.id }),
         };

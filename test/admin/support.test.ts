@@ -12,6 +12,7 @@ import {
   renderInviteEmail,
   renderOwnerInviteWarningEmail,
   renderOwnershipTransferEmail,
+  renderSignInHelpChangedEmail,
   renderSuperadminGrantEmail,
   ownerCountWarning,
   RESOURCE_ACCESS_NOTE,
@@ -322,5 +323,20 @@ describe('sign-in help changed alert (M8: the owner and every Super admin)', () 
     await mailer.signInHelpChanged(alert);
     expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['olivia@example.org', 'sam@example.org'] } });
     await expect(mailer.signInHelpChanged({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
+  });
+
+  it('says plainly when the new address was set as a personal address (register E4c, L1)', () => {
+    const plain = renderSignInHelpChangedEmail(alert, { helpEmail: 'help@example.org' });
+    expect(plain.subject).toBe('Example Reports: the sign-in help address changed');
+    expect(plain.text).not.toContain('personal address');
+    const personal = renderSignInHelpChangedEmail({ ...alert, to: 'jordan.lee@example.org', personal: true }, { helpEmail: 'help@example.org' });
+    expect(personal.subject).toBe('Example Reports: the sign-in help address changed to a personal address');
+    expect(personal.text).toContain('rogue@example.org changed the sign-in help address for Example Reports from help@example.org to jordan.lee@example.org.');
+    expect(personal.text).toContain("It's set to a personal address: rogue@example.org confirmed that jordan.lee@example.org is one person's own mailbox, not a role mailbox, on purpose.");
+    expect(personal.html).toContain('set to a personal address');
+    // Going back to the configured address claims nothing about it.
+    const back = renderSignInHelpChangedEmail({ ...alert, reverted: true, personal: true }, { helpEmail: 'help@example.org' });
+    expect(back.subject).toBe('Example Reports: the sign-in help address changed');
+    expect(back.text).not.toContain('personal address');
   });
 });
