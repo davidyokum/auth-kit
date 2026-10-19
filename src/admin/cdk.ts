@@ -326,11 +326,13 @@ function createScheduledJob(scope: Construct, props: ScheduledJobProps): Schedul
   const scheduleGroup = new scheduler.CfnScheduleGroup(scope, 'Group');
   const groupName = scheduleGroup.ref;
   const schedulerRole = new iam.Role(scope, 'SchedulerRole', {
+    // Only this account's scheduler, for this schedule group. EventBridge Scheduler presents the
+    // schedule GROUP's ARN as aws:SourceArn (arn:...:schedule-group/<name>), never a schedule's
+    // ARN, and checks it when the schedule is created: a condition on `schedule/<group>/*` never
+    // matches, and CreateSchedule fails with "The execution role you provide must allow AWS
+    // EventBridge Scheduler to assume the role" (the v0.1.8-alpha demo deploy, 2026-10-18).
     assumedBy: new iam.ServicePrincipal('scheduler.amazonaws.com', {
-      conditions: {
-        StringEquals: { 'aws:SourceAccount': stack.account },
-        ArnLike: { 'aws:SourceArn': stack.formatArn({ service: 'scheduler', resource: 'schedule', resourceName: `${groupName}/*` }) },
-      },
+      conditions: { StringEquals: { 'aws:SourceAccount': stack.account, 'aws:SourceArn': scheduleGroup.attrArn } },
     }),
     description: props.schedulerRoleDescription,
   });
@@ -352,6 +354,10 @@ function createScheduledJob(scope: Construct, props: ScheduledJobProps): Schedul
     },
   });
   schedule.addDependency(scheduleGroup);
+  // The roleArn reference orders the schedule after the role only. Wait for the role's whole subtree
+  // (the role and its default policy, whose CloudFormation handler waits for IAM to propagate), so
+  // the schedule is never created against a role that can't yet invoke the function.
+  schedule.node.addDependency(schedulerRole);
 
   const alarms: cloudwatch.Alarm[] = [];
   if (props.alarmTopic) {
@@ -499,7 +505,7 @@ export interface InviteExpirySweepProps {
  *
  * - **EventBridge Scheduler** (its own schedule group) invokes a Lambda function hourly, through a
  *   role that may invoke only that function, assumable only by this account's scheduler for this
- *   group's schedules.
+ *   schedule group.
  * - **The function** runs auth-kit's `createInviteExpirySweep` as the `system:invite-expiry` actor:
  *   every disable is an intent row, the Cognito calls, then a result row, so the Activity page shows
  *   it as "Scheduled job". Its code is the release tarball's bundle (AWS SDK included), Node 22 on

@@ -302,7 +302,7 @@ describe('UnverifiedAccountSweep', () => {
     expect(actionsOf(statements)).not.toContain('cognito-idp:AdminRemoveUserFromGroup');
   });
 
-  it("the scheduler's role: this account's scheduler for this group only, and it may only invoke the function", () => {
+  it("the scheduler's role: this account's scheduler for this schedule group only, and it may only invoke the function", () => {
     const { template } = sweep();
     const schedulerRole = Object.entries(template.findResources('AWS::IAM::Role')).find(([id]) => id.startsWith('UnverifiedSchedulerRole'))![1] as {
       Properties: { AssumeRolePolicyDocument: { Statement: { Principal: unknown; Condition: Record<string, Record<string, unknown>> }[] } };
@@ -310,8 +310,9 @@ describe('UnverifiedAccountSweep', () => {
     const trust = schedulerRole.Properties.AssumeRolePolicyDocument.Statement;
     expect(trust).toHaveLength(1);
     expect(trust[0]!.Principal).toEqual({ Service: 'scheduler.amazonaws.com' });
-    expect(trust[0]!.Condition.StringEquals).toEqual({ 'aws:SourceAccount': { Ref: 'AWS::AccountId' } });
-    expect(JSON.stringify(trust[0]!.Condition.ArnLike?.['aws:SourceArn'])).toMatch(/:schedule\/",\{"Ref":"UnverifiedGroup[A-Z0-9]+"\},"\/\*/);
+    expect(trust[0]!.Condition).toEqual({
+      StringEquals: { 'aws:SourceAccount': { Ref: 'AWS::AccountId' }, 'aws:SourceArn': { 'Fn::GetAtt': [expect.stringMatching(/^UnverifiedGroup[A-Z0-9]+$/), 'Arn'] } },
+    });
     const statements = policyStatements(template, 'UnverifiedSchedulerRole');
     expect(statements).toHaveLength(1);
     expect(statements[0]).toMatchObject({ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: { 'Fn::GetAtt': [expect.stringMatching(/^UnverifiedFunction/), 'Arn'] } });

@@ -2,6 +2,16 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.8-alpha.1] - 2026-10-19
+
+Fixes the scheduled jobs' deploy. Pre-release. No API changes; logical IDs are unchanged, so a deployed job is updated in place.
+
+### Fixed
+
+- **Every Scheduler schedule now deploys** (`InviteExpirySweep`, `UnverifiedAccountSweep`, `AccessRequestDigest`). The scheduler role's trust policy scoped `aws:SourceArn` to `arn:...:schedule/<group>/*`, but EventBridge Scheduler presents the schedule group's ARN, so the condition never matched and CloudFormation's CreateSchedule failed with "The execution role you provide must allow AWS EventBridge Scheduler to assume the role" (the v0.1.8-alpha demo deploy rolled back on it). The trust is now `scheduler.amazonaws.com` with `aws:SourceAccount` and `aws:SourceArn` equal to the job's own schedule group ARN, as AWS documents. Still only this account's scheduler, for this group.
+- **Each schedule waits for its role and the role's policy** (an explicit `DependsOn`, not just the role ARN reference), so it's never created against a role that can't yet invoke its function.
+- `test/admin/scheduler-roles.test.ts` checks every schedule the kit creates in the synthesized template: the trust principal and condition, `lambda:InvokeFunction` on its own target only, and the dependencies; and that schedules come only from the shared helper.
+
 ## [0.1.8-alpha] - 2026-10-18
 
 Account creation ([ADR 0023](docs/decisions/0023-account-creation.md)), and the sign-in card in the approved words with the families as themes ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)): auth-kit brought in line with the passwords-flow decisions register (A1, A3, A4–A7, D1–D4, E1, E2, E4, E4d, E5, P8, and David's 2026-10-18 decisions on emails, the help route, and the passkey icon). Pre-release. Breaking: see Migration.
