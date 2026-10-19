@@ -6,7 +6,7 @@
  */
 import { createSesInviteMailer } from '../admin/mailer.js';
 import { regionOfUserPool } from '../admin/sweep.js';
-import { helpAddressProblems, isThemeFamily, type ThemeFamily } from '../themes/index.js';
+import { helpAddressProblems, isThemeFamily, senderProblems, type ThemeFamily } from '../themes/index.js';
 import { type AccessRequestDigestOptions, type AccessRequestDigestResult, createAccessRequestDigest } from './digest.js';
 import { ACCESS_REQUEST_DIGEST_ENV as E } from './jobs-env.js';
 import { createSignInHelp } from './sign-in-help.js';
@@ -21,6 +21,8 @@ export interface AccessRequestDigestConfig {
   signInUrl: string;
   peopleUrl: string;
   helpEmail: string;
+  /** The help address is a person's own, acknowledged by the site (register E4c). */
+  helpPersonal?: boolean;
   mailFrom: string;
   mailConfigurationSet?: string;
   recipientGroups?: string[];
@@ -46,10 +48,15 @@ export function accessRequestDigestConfig(env: Readonly<Record<string, string | 
   if (!isThemeFamily(family)) problems.push(`${E.family} must be osbm, unc, or personal`);
   for (const key of [E.signInUrl, E.peopleUrl] as const) if (!/^https:\/\/[^\s]+$/.test(value(key) ?? '')) problems.push(`${key} must be an https URL`);
   const helpEmail = value(E.helpEmail) ?? '';
-  const helpProblems = helpAddressProblems(helpEmail);
+  const helpPersonal = value(E.helpPersonal) === '1';
+  const helpProblems = helpAddressProblems(helpEmail, { personal: helpPersonal });
   if (helpProblems.length > 0) problems.push(`${E.helpEmail} must be the help mailbox (${helpProblems.join(' ')})`);
   const mailFrom = value(E.mailFrom) ?? '';
   if (!mailFrom.includes('@') || /[\r\n]/.test(mailFrom)) problems.push(`${E.mailFrom} must be a sender address`);
+  else if (isThemeFamily(family)) {
+    const senderIssues = senderProblems(mailFrom, { siteName, theme: family });
+    if (senderIssues.length > 0) problems.push(`${E.mailFrom} must be the site's sender (${senderIssues.join(' ')})`);
+  }
   const groups = value(E.recipientGroups)?.split(',').map((g) => g.trim()).filter(Boolean);
   if (problems.length > 0) throw new Error(`auth-kit access-request digest: ${problems.join('; ')}.`);
   const configurationSet = value(E.mailConfigurationSet);
@@ -62,6 +69,7 @@ export function accessRequestDigestConfig(env: Readonly<Record<string, string | 
     signInUrl: value(E.signInUrl)!,
     peopleUrl: value(E.peopleUrl)!,
     helpEmail,
+    ...(helpPersonal && { helpPersonal: true }),
     mailFrom,
     ...(configurationSet !== undefined && { mailConfigurationSet: configurationSet }),
     ...(groups !== undefined && groups.length > 0 && { recipientGroups: groups }),
@@ -86,12 +94,12 @@ export function createAccessRequestDigestHandler(options: AccessRequestDigestHan
     if (!digest) {
       const config = accessRequestDigestConfig(options.env ?? process.env);
       const help = config.settingsTable
-        ? createSignInHelp({ configured: config.helpEmail, theme: config.family, store: createDynamoSiteSettingsStore({ tableName: config.settingsTable }) })
+        ? createSignInHelp({ configured: config.helpPersonal ? { address: config.helpEmail, personal: true } : config.helpEmail, theme: config.family, store: createDynamoSiteSettingsStore({ tableName: config.settingsTable }) })
         : config.helpEmail;
       digest = (options.createDigest ?? createAccessRequestDigest)({
         requests: createDynamoAccessRequestStore({ tableName: config.requestTable }),
         userPoolId: config.userPoolId,
-        mailer: createSesInviteMailer({ from: config.mailFrom, ...(config.mailConfigurationSet !== undefined && { configurationSet: config.mailConfigurationSet }) }),
+        mailer: createSesInviteMailer({ from: config.mailFrom, site: { siteName: config.siteName, theme: config.family, signInUrl: config.signInUrl, help }, ...(config.mailConfigurationSet !== undefined && { configurationSet: config.mailConfigurationSet }) }),
         site: { siteName: config.siteName, theme: config.family, signInUrl: config.signInUrl, help },
         peopleUrl: config.peopleUrl,
         ...(config.recipientGroups !== undefined && { recipientGroups: config.recipientGroups }),

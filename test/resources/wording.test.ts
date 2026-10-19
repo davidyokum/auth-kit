@@ -83,7 +83,7 @@ describe('screens name items by noun and name, never by ID', () => {
     texts.push(said(created));
     texts.push(said(await t.actions.deleteResourceAccess(P)));
     texts.push((await t.actions.removeResourceMemberships({ sub: 'm-1' })).message);
-    for (const email of [...t.invites.map(renderInviteEmail), ...t.alerts.map(renderResourceInviteAlertEmail)]) texts.push(email.subject, email.text, email.html);
+    for (const email of [...t.invites.map(renderInviteEmail), ...t.alerts.map((a) => renderResourceInviteAlertEmail(a))]) texts.push(email.subject, email.text, email.html);
     texts.push(...(await activityText(t.auditLog)));
 
     const ids = ['p-1', 'q-1', ...(created.ok ? [created.id] : [])];

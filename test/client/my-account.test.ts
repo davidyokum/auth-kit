@@ -33,11 +33,14 @@ const section = (name: string) => screen.getByRole('region', { name });
 
 // No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
 const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
+// The account-change notice route is the site's own (register A10: notices are on by default); here it isn't mounted.
+const guardedFetch = (input: unknown) =>
+  String(input) === '/api/auth-kit/account-notice' ? Promise.resolve(new Response('', { status: 404 })) : noNetwork(input);
 
 beforeEach(() => {
   resetAmplifyMocks();
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
-  vi.stubGlobal('fetch', noNetwork);
+  vi.stubGlobal('fetch', guardedFetch);
 });
 afterEach(() => {
   cleanup();

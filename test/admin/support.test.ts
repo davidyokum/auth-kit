@@ -51,11 +51,11 @@ describe('invite email', () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client, configurationSet: 'auth', replyTo: ['help@example.org'] });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client, configurationSet: 'auth', replyTo: ['help@example.org'] });
     await mailer.sendInvite(invite);
     const input = ses.commandCalls(SendEmailCommand)[0]!.args[0].input;
     expect(input).toMatchObject({
-      FromEmailAddress: 'Example <noreply@example.org>',
+      FromEmailAddress: 'Example <sign-in@example.org>',
       Destination: { ToAddresses: ['alice@example.org'] },
       ConfigurationSetName: 'auth',
       ReplyToAddresses: ['help@example.org'],
@@ -67,7 +67,10 @@ describe('invite email', () => {
     await mailer.sendEmail({ to: ['x@example.org'], email: { subject: 'S', text: 'T', html: 'H' }, replyTo: ['help@example.org'] });
     expect(ses.commandCalls(SendEmailCommand)[2]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['x@example.org'] }, ReplyToAddresses: ['help@example.org'] });
     await expect(mailer.sendEmail({ to: [], email: { subject: 'S', text: 'T', html: 'H' } })).rejects.toThrow(/recipient/);
-    expect(() => createSesInviteMailer({ from: '' })).toThrow(/from/);
+    expect(() => createSesInviteMailer({ from: '', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' } })).toThrow(/from/);
+    // Register A10 and E4a: never noreply@, and the family's sender name.
+    expect(() => createSesInviteMailer({ from: 'Example <noreply@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' } })).toThrow(/never noreply@/);
+    expect(() => createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'osbm', help: 'help@example.org' } })).toThrow(/Example \(NC OSBM\)/);
   });
 });
 
@@ -99,16 +102,22 @@ describe('Super admin grant alert email (the default notifier)', () => {
     expect(email.html).not.toContain('<b>');
   });
 
+  it('carries the footer like every other email (register E4a): the identity sentence and the help line, no letterhead', () => {
+    const email = renderSuperadminGrantEmail(alert, { theme: 'osbm', helpEmail: 'apps-help@example.org' });
+    expect(email.text).toContain('This site is managed by the NC Office of State Budget and Management. Help: apps-help@example.org.');
+    expect(email.html).toContain('<html lang="en">');
+  });
+
   it('goes to the owner in one SES message, from the site sender', async () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.superadminGranted(alert);
     const calls = ses.commandCalls(SendEmailCommand);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args[0].input).toMatchObject({
-      FromEmailAddress: 'Example <noreply@example.org>',
+      FromEmailAddress: 'Example <sign-in@example.org>',
       Destination: { ToAddresses: ['olivia@example.org'] },
     });
     await expect(mailer.superadminGranted({ ...alert, owners: [] })).rejects.toThrow(/no owner/);
@@ -139,7 +148,7 @@ describe('ownership transfer alert email (the default notifier)', () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.ownershipTransferred(alert);
     expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input.Destination).toEqual({ ToAddresses: ['olivia@example.org', 'grace@example.org'] });
     await expect(mailer.ownershipTransferred({ ...alert, newOwner: { sub: 'g', email: '' } })).rejects.toThrow(/both/);
@@ -164,7 +173,7 @@ describe('last-owner warning email (the sweep leaves the only owner’s unused i
     expect(email.text).toContain('invited as an owner of Example & Co on October 10, 2026 (UTC)');
     expect(email.text).toContain("you're the site's only owner, so yours was left open");
     expect(email.text).toContain('Sign in at https://reports.example.org/sign-in?x="1"&$& with this email address');
-    expect(email.html).toContain('<a href="https://reports.example.org/sign-in?x=&quot;1&quot;&amp;$&amp;">');
+    expect(email.html).toContain('<a href="https://reports.example.org/sign-in?x=&quot;1&quot;&amp;$&amp;"');
     expect(email.html).toContain('Olivia &lt;b&gt;');
     expect(email.html).not.toContain('<b>');
     expect(`${email.text}${email.html}`).not.toMatch(/password|code:/i);
@@ -184,7 +193,7 @@ describe('last-owner warning email (the sweep leaves the only owner’s unused i
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.ownerInviteUnused(warning);
     await mailer.ownerInviteUnused({ ...warning, to: { email: 'ops@example.org', kind: 'fallback' } });
     expect(ses.commandCalls(SendEmailCommand).map((c) => c.args[0].input.Destination)).toEqual([
@@ -309,7 +318,7 @@ describe('sign-in help changed alert (M8: the owner and every Super admin)', () 
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);
     ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
-    const mailer = createSesInviteMailer({ from: 'Example <noreply@example.org>', client });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@example.org>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org' }, client });
     await mailer.signInHelpChanged(alert);
     expect(ses.commandCalls(SendEmailCommand)[0]!.args[0].input).toMatchObject({ Destination: { ToAddresses: ['olivia@example.org', 'sam@example.org'] } });
     await expect(mailer.signInHelpChanged({ ...alert, owners: [] })).rejects.toThrow(/no owner/);

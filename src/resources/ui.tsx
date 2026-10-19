@@ -267,7 +267,7 @@ export interface WhoHasAccessProps {
   access: ResourceAccessList;
   /** The server actions (each wraps `resourceActions.forms.*`). Leave one out to hide it. */
   actions: WhoHasAccessActions;
-  /** The app's word for the item. Default: the type's noun. */
+  /** The app's word for the item. Default: the type's noun, which the access list carries (never "item"; register C5). */
   noun?: string;
   /** Usual invite domains; others get a warning and a confirmation box. */
   inviteDomains?: readonly string[];
@@ -289,7 +289,7 @@ export function WhoHasAccess(props: WhoHasAccessProps): ReactNode {
   const headingId = useId();
   const { access } = props;
   if (access.state === 'not_found') return null;
-  const noun = props.noun ?? (access.state === 'ok' ? access.noun : 'item');
+  const noun = props.noun ?? access.noun;
   const copy = resourceAccessCopy(noun);
   if (access.state === 'unavailable') {
     return (
@@ -370,7 +370,7 @@ export function WhoHasAccess(props: WhoHasAccessProps): ReactNode {
 // ---- Explaining resource roles where site roles are chosen ------------------------------------
 
 /** The combining rule as a table: every site role (on every item) and every resource role (on one item). */
-export function ResourceAccessTable({ noun = 'item', caption }: { noun?: string; caption?: string }): ReactNode {
+export function ResourceAccessTable({ noun, caption }: { noun: string; caption?: string }): ReactNode {
   return (
     <table className="ak-table ak-resource-matrix">
       <caption>{caption ?? `What each role allows on a ${noun}. On any ${noun}, a person gets whichever of their two rows allows more.`}</caption>
@@ -403,8 +403,8 @@ export function ResourceAccessTable({ noun = 'item', caption }: { noun?: string;
 }
 
 export interface ResourceRolesSummaryProps {
-  /** The app's word for its items. Default "item". */
-  noun?: string;
+  /** The app's word for its items ("project"), required (register C5). */
+  noun: string;
   nounPlural?: string;
   /** Where people manage access to items (the items' list). */
   href?: string;
@@ -414,7 +414,7 @@ export interface ResourceRolesSummaryProps {
  * For the People page's role picker (`resourceAccess` slot): where access to one item lives, the
  * three resource roles, and how they combine with site roles.
  */
-export function ResourceRolesSummary({ noun = 'item', nounPlural, href }: ResourceRolesSummaryProps): ReactNode {
+export function ResourceRolesSummary({ noun, nounPlural, href }: ResourceRolesSummaryProps): ReactNode {
   const plural = nounPlural ?? `${noun}s`;
   const roles = resourceRoleDescriptions(noun);
   return (

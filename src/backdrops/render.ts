@@ -26,7 +26,7 @@ export interface BackdropOptions extends BackdropArtOptions {
   interactive?: boolean;
   /** `'auto'` (default) follows the OS setting; `true` always draws a still frame. */
   reducedMotion?: boolean | 'auto';
-  /** Where the card sits: an element (tracked as it moves and resizes), a rectangle in CSS pixels, or the default (centered, 440px wide). Styles keep their focal points visible around it; taps on it never reach a style. */
+  /** Where the card sits: an element (tracked as it moves and resizes), a rectangle in CSS pixels, or the default (centered, 380px wide, as `SignIn` draws it; register E5). Styles keep their focal points visible around it; taps on it never reach a style. */
   card?: BackdropRect | Element | null;
   /** A lower frame-rate cap than the style's (never higher than 30). */
   maxFps?: number;

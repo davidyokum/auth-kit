@@ -16,7 +16,8 @@ Phase 2 built the kit 0005 promised: seeding, the "Sign in as…" exchange, the 
 5. **The dev route is public in the proxy.** With a default-deny proxy, a production build would answer `/api/dev/sign-in` with 401, which can't prove the route is absent (the primer's e2e test expects 404). Apps list the route in `publicRoutes` in every environment; `check-dev-route` explains a 401 when it sees one.
 6. **`personas.json` uses the primer's shape** (`key`, `email`, `groups`, optional `label` and `attributes`), replacing phase 1's `role`/`appRoles`. Several personas may share a role (the auth matrix needs a second member); every admin role and a no-group member must be covered, and with `appRoles` every app role too.
 7. **The route is `/api/dev/sign-in`** (primer), not phase 1's `/dev/sign-in`. Writes must come from the page (Origin or `Sec-Fetch-Site`) and be JSON, which blocks another site signing you in or out.
-8. **`auth-kit/dev` has a `default` export condition.** Next compiles `next.config.ts` to CommonJS and `require`s it; with only an `import` condition, `require('auth-kit/dev')` doesn't resolve.
+8. **No role overrides in the browser** (register B1, added 2026-10-19). A role is only ever a real Cognito group on a seeded persona: there's no cookie, query parameter, header, or local-storage switch that changes what the server thinks someone can do, in development or anywhere else. To see the site as another role, sign in as that role's persona; View as is read-only and the server still blocks every write.
+9. **`auth-kit/dev` has a `default` export condition.** Next compiles `next.config.ts` to CommonJS and `require`s it; with only an `import` condition, `require('auth-kit/dev')` doesn't resolve.
 
 ## Consequences
 

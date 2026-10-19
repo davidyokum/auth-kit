@@ -122,7 +122,9 @@ describe('InviteExpirySweep', () => {
     const { template } = synth({
       ownerWarnings: {
         siteName: 'Example Reports',
-        from: '"Example Reports (NC)" <noreply@mail.example.org>',
+        family: 'osbm',
+        helpEmail: 'apps-help@example.org',
+        from: '"Example Reports (NC OSBM)" <sign-in@mail.example.org>',
         signInUrl: 'https://reports.example.org/sign-in',
         fallbackEmail: 'ops@example.org',
         configurationSet: 'auth',
@@ -132,7 +134,9 @@ describe('InviteExpirySweep', () => {
       Environment: {
         Variables: Match.objectLike({
           AUTH_KIT_SITE_NAME: 'Example Reports',
-          AUTH_KIT_MAIL_FROM: '"Example Reports (NC)" <noreply@mail.example.org>',
+          AUTH_KIT_MAIL_FROM: '"Example Reports (NC OSBM)" <sign-in@mail.example.org>',
+          AUTH_KIT_FAMILY: 'osbm',
+          AUTH_KIT_HELP_EMAIL: 'apps-help@example.org',
           AUTH_KIT_SIGN_IN_URL: 'https://reports.example.org/sign-in',
           AUTH_KIT_OWNER_WARNING_FALLBACK: 'ops@example.org',
           AUTH_KIT_MAIL_CONFIGURATION_SET: 'auth',
@@ -155,11 +159,15 @@ describe('InviteExpirySweep', () => {
   });
 
   it('ownerWarnings: an explicit SES identity, and settings that would send something odd are refused', () => {
-    const { template } = synth({ ownerWarnings: { siteName: 'Example Reports', from: 'noreply@mail.example.org', sesIdentity: 'example.org' } });
+    const { template } = synth({ ownerWarnings: { siteName: 'Example Reports', family: 'personal', helpEmail: 'help@example.org', from: 'Example Reports <sign-in@mail.example.org>', sesIdentity: 'example.org' } });
     const sesStatement = policyStatements(template, 'InviteExpiryFunctionRole').find((s) => actionsOf([s]).includes('ses:SendEmail'))!;
     expect(JSON.stringify(sesStatement.Resource)).toContain(':identity/example.org"');
-    const base = { siteName: 'Example Reports', from: 'Example Reports <noreply@example.org>' };
+    const base = { siteName: 'Example Reports', family: 'personal' as const, helpEmail: 'help@example.org', from: 'Example Reports <sign-in@example.org>' };
     expect(() => synth({ ownerWarnings: { ...base, siteName: ' ' } })).toThrow(/siteName/);
+    // Register A10 and E4a: a reply-able sign-in@ sender with the family's suffix, and a usable help address.
+    expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports <noreply@example.org>' } })).toThrow(/never noreply@/);
+    expect(() => synth({ ownerWarnings: { ...base, family: 'osbm' } })).toThrow(/Example Reports \(NC OSBM\)/);
+    expect(() => synth({ ownerWarnings: { ...base, helpEmail: 'jordan.lee@example.org' } })).toThrow(/personal: true/);
     expect(() => synth({ ownerWarnings: { ...base, from: 'Example Reports' } })).toThrow(/from/);
     expect(() => synth({ ownerWarnings: { ...base, signInUrl: 'http://reports.example.org/sign-in' } })).toThrow(/https/);
     expect(() => synth({ ownerWarnings: { ...base, fallbackEmail: 'ops' } })).toThrow(/fallbackEmail/);

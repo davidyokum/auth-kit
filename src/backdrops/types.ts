@@ -40,7 +40,7 @@ export interface BackdropCardTheme {
   buttonText: string;
   /** The keyboard focus ring. */
   focus: string;
-  /** The 4px rule across the top of the card. Decorative: never text. */
+  /** Retired by register E4 (no colored line on top of the card): kept as a brand constant, never drawn. */
   rule: string;
 }
 

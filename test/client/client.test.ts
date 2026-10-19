@@ -217,11 +217,11 @@ describe('describeAuthError', () => {
     expect(lockout.message).toBe('Too many attempts from this network. Wait 5 minutes, then try again.');
   });
 
-  it('spots an expired sign-in session and names the code lifetime (default 3 minutes)', () => {
+  it('spots an expired sign-in session and names the code lifetime (default 10 minutes)', () => {
     const expired = awsError('NotAuthorizedException', 'Invalid session for the user, session is expired.');
     const info = describeAuthError(expired, 'code');
     expect(info.kind).toBe('session-expired');
-    expect(info.message).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect(info.message).toBe('That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.');
     expect(describeAuthError(expired, 'totp', { codeLifetimeMinutes: 10 }).message).toBe(
       'That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.',
     );

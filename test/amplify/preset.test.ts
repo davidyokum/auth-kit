@@ -1,3 +1,5 @@
+import { Construct } from 'constructs';
+import { UNVERIFIED_SWEEP_MARK } from '../../src/amplify/sweep-mark.js';
 import { AmplifyAuth, type AuthProps } from '@aws-amplify/auth-construct';
 import { App, Fn, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
@@ -20,9 +22,11 @@ const BASE: AuthStandardOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' },
+  email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
+  // The pool's own web ACL, deliberately (register F7: deployed pools otherwise reuse the shared one).
+  waf: { ownWebAcl: true },
 };
 
 /** `none` = plain CDK, no Amplify context. */
@@ -41,7 +45,8 @@ function synth(
     branch = 'main',
     beforeApply,
     customMessage = true,
-  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean } = {},
+    sweep = true,
+  }: { type?: DeploymentType; branch?: string; beforeApply?: (auth: AmplifyAuth, stack: Stack) => void; customMessage?: boolean; sweep?: boolean } = {},
 ) {
   const context: Record<string, string> = {};
   if (type !== 'none') context['amplify-backend-type'] = type;
@@ -51,6 +56,8 @@ function synth(
   const stack = new Stack(app, 'AuthStack');
   const auth = new AmplifyAuth(stack, 'auth', standardAuthProps(options) as unknown as AuthProps);
   if (customMessage) addCustomMessageTrigger(auth, stack);
+  // Stands in for UnverifiedAccountSweep (test/accounts/cdk.test.ts covers the real one's mark).
+  if (sweep) Object.assign(new Construct(stack, 'UnverifiedSweepMark'), { [UNVERIFIED_SWEEP_MARK]: { userPool: auth.resources.userPool } });
   beforeApply?.(auth, stack);
   const applied = applyAuthStandard(auth, options);
   return { app, stack, auth, applied, template: () => Template.fromStack(stack) };
@@ -101,7 +108,7 @@ describe('Tier 2 pool on a branch', () => {
       AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
       EmailConfiguration: {
         EmailSendingAccount: 'DEVELOPER',
-        From: 'Example Reports <noreply@example.org>',
+        From: 'Example Reports <sign-in@example.org>',
         ReplyToEmailAddress: 'help@example.org',
         SourceArn: {
           'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/example.org']],
@@ -115,8 +122,8 @@ describe('Tier 2 pool on a branch', () => {
     expect(formatSender('Example Site (NC OSBM)', 'sign-in@example.org')).toBe('"Example Site (NC OSBM)" <sign-in@example.org>');
     expect(formatSender('Example Site (UNC)', 'sign-in@example.org')).toBe('"Example Site (UNC)" <sign-in@example.org>');
     expect(formatSender('Reports, Example', 'a@example.org')).toBe('"Reports, Example" <a@example.org>');
-    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)' } }).template();
-    quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <noreply@example.org>' }) });
+    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)', family: 'unc' } }).template();
+    quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <sign-in@example.org>' }) });
     expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
 
@@ -148,7 +155,7 @@ describe('Tier 2 pool on a branch', () => {
       IdTokenValidity: 60,
       RefreshTokenValidity: 43200,
       TokenValidityUnits: { AccessToken: 'minutes', IdToken: 'minutes', RefreshToken: 'minutes' },
-      AuthSessionValidity: 3,
+      AuthSessionValidity: 10,
     });
   });
 
@@ -417,7 +424,7 @@ describe('account creation (ADR 0023)', () => {
     ['domains', { mode: 'domains', domains: ['example.edu'] }],
     ['open', { mode: 'open' }],
   ] as const)("keeps Cognito's own SignUp off in mode %s", (mode, accountCreation) => {
-    const t = synth({ ...BASE, accountCreation, ...(mode === 'open' && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
+    const t = synth({ ...BASE, accountCreation, ...((mode === 'open' || mode === 'domains') && { siteWebAclArn: SITE_ACL }) }, { beforeApply: preSignUpTrigger }).template();
     t.hasResourceProperties('AWS::Cognito::UserPool', { AdminCreateUserConfig: Match.objectLike({ AllowAdminCreateUserOnly: true }) });
   });
 
@@ -461,6 +468,8 @@ describe('account creation (ADR 0023)', () => {
 
   it('open mode requires the site’s CLOUDFRONT web ACL with the challenge rules (M4)', () => {
     expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'open' } })).toThrow(/mode 'open' needs siteWebAclArn.*createSiteWebAcl/s);
+    // Register D3: every sign-up gets the silent check, domains mode included.
+    expect(() => normalizeOptions({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } })).toThrow(/mode 'domains' needs siteWebAclArn/);
     expect(normalizeOptions({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).siteWebAclArn).toBe(SITE_ACL);
     expect(synth({ ...BASE, accountCreation: { mode: 'open' }, siteWebAclArn: SITE_ACL }).applied.siteWebAclArn).toBe(SITE_ACL);
     // A REGIONAL ACL (the user pool's kind) or another Region can't front CloudFront.
@@ -472,7 +481,7 @@ describe('account creation (ADR 0023)', () => {
   });
 
   it('refuses domains mode without the preSignUp trigger that re-checks the list', () => {
-    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] } });
+    const { template } = synth({ ...BASE, accountCreation: { mode: 'domains', domains: ['example.edu'] }, siteWebAclArn: SITE_ACL });
     expect(() => template()).toThrow(/preSignUpForAccountCreation/);
   });
 
@@ -502,10 +511,21 @@ describe('account creation (ADR 0023)', () => {
     expect(client.Properties).not.toHaveProperty('WriteAttributes');
   });
 
+  it('a sign-up site fails synthesis without the unverified-account sweep for its pool (register D3)', () => {
+    for (const accountCreation of [{ mode: 'domains', domains: ['example.org'] }, { mode: 'open' }] as const) {
+      const options = { ...BASE, accountCreation, siteWebAclArn: SITE_ACL };
+      const { template } = synth(options, { sweep: false, beforeApply: preSignUpTrigger });
+      expect(() => template()).toThrow(/UnverifiedAccountSweep/);
+    }
+    // An invite-only site has no sign-up accounts to sweep.
+    expect(() => synth(BASE, { sweep: false }).template()).not.toThrow();
+  });
+
   it('sets the code lifetime once, as the sign-in session', () => {
-    const t = synth({ ...BASE, codeLifetimeMinutes: 10 }).template();
-    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 10 });
-    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(3);
+    const t = synth({ ...BASE, codeLifetimeMinutes: 5 }).template();
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { AuthSessionValidity: 5 });
+    // The default is 10 minutes (register A7).
+    expect(normalizeOptions(BASE).codeLifetimeMinutes).toBe(10);
   });
 
   it('refuses the removed selfSignUp with an explanation', () => {
@@ -528,15 +548,23 @@ describe('WAF options', () => {
     ]);
   });
 
+  it('a deployed pool reuses the shared web ACL unless its own is deliberate (register F7); a sandbox needs neither', () => {
+    const { waf: _waf, ...noWaf } = BASE;
+    expect(() => synth(noWaf)).toThrow(/shared web ACL \(register F7.*ownWebAcl: true/s);
+    expect(() => synth(noWaf, { type: 'sandbox' })).not.toThrow();
+    expect(synth({ ...noWaf, waf: { webAclArn: `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:regional/webacl/shared/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` } }).applied.waf.mode).toBe('shared');
+    expect(() => normalizeOptions({ ...noWaf, waf: { ownWebAcl: true, webAclArn: 'x' } })).toThrow(/can't be combined/);
+  });
+
   it('sets each rule\'s mode on its own, with custom limits', () => {
-    const t = synth({ ...BASE, waf: { signInRule: 'block', overallRule: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
+    const t = synth({ ...BASE, waf: { ownWebAcl: true, signInRule: 'block', overallRule: 'count', signInLimit: 50, overallLimit: 500, evaluationWindowSec: 600 } }).template();
     t.hasResourceProperties('AWS::WAFv2::WebACL', {
       Rules: [
         Match.objectLike({ Action: { Block: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 50, EvaluationWindowSec: 600 }) } }),
         Match.objectLike({ Action: { Count: {} }, Statement: { RateBasedStatement: Match.objectLike({ Limit: 500 }) } }),
       ],
     });
-    expect(actions(synth({ ...BASE, waf: { signInRule: 'block' } }).template())).toEqual([
+    expect(actions(synth({ ...BASE, waf: { ownWebAcl: true, signInRule: 'block' } }).template())).toEqual([
       ['auth-kit-sign-in-attempts-per-ip', { Block: {} }],
       ['auth-kit-requests-per-ip', { Block: {} }],
     ]);
@@ -702,9 +730,9 @@ describe('option validation', () => {
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
     ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
-    ['from name with brackets', { email: { fromAddress: 'a@example.org', fromName: 'X <y>' } }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['from name with brackets', { email: { fromAddress: 'sign-in@example.org', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
+    ['SES domain mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -722,9 +750,13 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['no help address', { email: { fromAddress: 'a@example.org', fromName: 'X' } as never }, /needs a help address/],
-    ['a placeholder help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
-    ['a personal help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['no help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['a noreply@ sender (register A10)', { email: { fromAddress: 'noreply@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /never noreply@/],
+    ['a sender other than sign-in@', { email: { fromAddress: 'auth@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /sign-in@example.org/],
+    ['an OSBM sender without the suffix (register E4a)', { email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'osbm', replyTo: 'help@example.org' } }, /\(NC OSBM\)/],
+    ['a sender without a family', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', replyTo: 'help@example.org' } as never }, /email.family is required/],
     ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
     ['an admin pool with sign-up', { adminPool: true, accountCreation: { mode: 'open' } }, /admin pool is invite only/],
     ['an empty domain list', { accountCreation: { mode: 'domains', domains: [] } }, /at least one domain/],
@@ -748,6 +780,10 @@ describe('option validation', () => {
     ['a malformed web ACL ARN', { waf: { webAclArn: 'arn:aws:wafv2:us-east-1:acct:regional/webacl/x/y' } }, /isn't a REGIONAL web ACL ARN/],
     ['a CloudFront (global) web ACL', { waf: { webAclArn: `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:global/webacl/x/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` } }, /REGIONAL/],
   ];
+  it('takes a person’s own help address only with the site’s acknowledgement (register E4c)', () => {
+    const o = normalizeOptions({ ...BASE, email: { ...BASE.email, replyTo: { address: 'Jordan.Lee@example.org', personal: true } } });
+    expect(o.email.replyTo).toBe('jordan.lee@example.org');
+  });
   it.each(bad)('rejects %s', (_label, change, message) => {
     expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(AuthStandardConfigError);
     expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(message);
@@ -756,7 +792,7 @@ describe('option validation', () => {
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
     expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });
@@ -773,7 +809,7 @@ describe('standardAuthProps', () => {
       multifactor: { mode: 'OPTIONAL', totp: true },
       accountRecovery: 'EMAIL_ONLY',
       groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
-      senders: { email: { fromEmail: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
+      senders: { email: { fromEmail: 'sign-in@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
     });
   });
 

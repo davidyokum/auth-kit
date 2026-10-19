@@ -644,9 +644,10 @@ describe('open sign-up needs the WAF challenge (M4)', () => {
     expect((await t.routes.signUp(post('sign-up', { email: 'new@example.org' }, { cookie: 'not-aws-waf-token=x' }))).status).toBe(503);
   });
 
-  it('domains mode doesn’t need it, and requireWafToken: false turns it off (local development)', async () => {
+  it('domains mode needs it too (register D3), and requireWafToken: false turns it off (local development)', async () => {
     const domains = setupRoutes({ accountCreation: { mode: 'domains', domains: ['example.org'] } });
-    expect((await domains.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
+    expect((await domains.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(503);
+    expect((await domains.routes.signUp(post('sign-up', { email: 'a@example.org' }))).status).toBe(200);
     const local = setupRoutes({ requireWafToken: false });
     expect((await local.routes.signUp(post('sign-up', { email: 'a@example.org' }, { cookie: null }))).status).toBe(200);
   });

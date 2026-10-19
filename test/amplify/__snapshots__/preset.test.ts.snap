@@ -249,7 +249,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
       "DeletionProtection": "ACTIVE",
       "EmailConfiguration": {
         "EmailSendingAccount": "DEVELOPER",
-        "From": "Example Reports <noreply@example.org>",
+        "From": "Example Reports <sign-in@example.org>",
         "ReplyToEmailAddress": "help@example.org",
         "SourceArn": {
           "Fn::Join": [
@@ -348,7 +348,7 @@ exports[`Tier 2 pool on a branch > matches the template snapshot 1`] = `
     "Properties": {
       "AccessTokenValidity": 60,
       "AllowedOAuthFlowsUserPoolClient": false,
-      "AuthSessionValidity": 3,
+      "AuthSessionValidity": 10,
       "EnableTokenRevocation": true,
       "ExplicitAuthFlows": [
         "ALLOW_USER_AUTH",

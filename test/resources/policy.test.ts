@@ -16,7 +16,6 @@ import {
   RESOURCE_ACCESS_MATRIX,
   RESOURCE_ACTIONS,
   RESOURCE_POLICY,
-  RESOURCE_ROLE_DESCRIPTIONS,
   RESOURCE_ROLE_LABEL,
   RESOURCE_ROLE_RANK,
   RESOURCE_ROLES,
@@ -67,8 +66,8 @@ describe('vocabulary', () => {
     expect(project.manager.cannot).toMatch(/every project keeps at least one/);
     expect(project.contributor).toEqual({ can: 'See and edit this project.', cannot: 'Change who has access to it.' });
     expect(project.reader).toEqual({ can: 'See this project.', cannot: 'Edit it or change who has access to it.' });
-    expect(RESOURCE_ROLE_DESCRIPTIONS.reader.can).toBe('See this item.');
-    const words = JSON.stringify([project, RESOURCE_ROLE_DESCRIPTIONS, resourceAccessCopy('project')]);
+    expect(resourceRoleDescriptions('plan').reader.can).toBe('See this plan.');
+    const words = JSON.stringify([project, resourceAccessCopy('project')]);
     expect(words).not.toMatch(/resource|record/i);
   });
 

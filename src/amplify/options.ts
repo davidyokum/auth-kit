@@ -14,7 +14,7 @@ import {
   WAF_POLICY,
   codeLifetimeMinutes,
 } from '../shared/policy.js';
-import { helpAddressProblems } from '../themes/index.js';
+import { type HelpAddressSetting, type ThemeFamily, helpSettingProblems, isThemeFamily, readHelpSetting, senderAddressProblems, senderNameProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
 export class AuthStandardConfigError extends Error {
@@ -25,17 +25,24 @@ export class AuthStandardConfigError extends Error {
 }
 
 export interface AuthEmailOptions {
-  /** Address auth email comes from, e.g. `noreply@example.org`. Its domain must be verified in SES. */
+  /**
+   * Address auth email comes from: the site's reply-able `sign-in@` mailbox, e.g. `sign-in@reports.example.org`
+   * (personal sites: `sign-in@yokum.app`). Never `noreply@` (register A10; synthesis fails). Its domain
+   * must be verified in SES.
+   */
   fromAddress: string;
-  /** Display name, e.g. `Example Reports (NC OSBM)` (`senderDisplayName` from `auth-kit/themes`). */
+  /** Display name: `senderDisplayName(siteName, family)` from `auth-kit/themes`, e.g. `Example Reports (NC OSBM)` (register E4a; checked against `family`). */
   fromName: string;
+  /** The site's family: the sender's name must carry its suffix ("(NC OSBM)", "(UNC)", none on personal sites; register E4a). */
+  family: ThemeFamily;
   /**
    * The site's help address: the family's role-based help mailbox (`theme.help.address`, or the
    * site's override). Required (ADR 0024): it's the Reply-To on every auth email Cognito sends, and
    * the address the help screens and email footers name. Synthesis fails while it's missing, a
-   * placeholder (`apps-help@replace-me.invalid`), or a person's own address.
+   * placeholder (`apps-help@replace-me.invalid`), or a person's own address the site hasn't
+   * acknowledged (`{ address, personal: true }`, register E4c).
    */
-  replyTo: string;
+  replyTo: HelpAddressSetting;
   /**
    * The verified SES identity that authorizes `fromAddress`: a domain (the default is `fromAddress`'s
    * domain) or the address itself. Amplify's typed `senders.email` can only point at an address
@@ -89,6 +96,13 @@ export interface WafOptions {
   webAclArn?: string;
   /** Protect sandbox pools too (a created ACL is billed; a shared one isn't). Default `false`. */
   enabledInSandbox?: boolean;
+  /**
+   * Give this pool a web ACL of its own outside a sandbox. Register F7 is one shared web ACL per
+   * account (`webAclArn`, from `createSharedAuthWebAcl`), so without `webAclArn` a deployed branch fails
+   * synthesis unless this says the own ACL is deliberate (a site alone in its account, or the first one
+   * before the shared ACL exists). Sandboxes don't need it.
+   */
+  ownWebAcl?: true;
   /** Sign-in attempts (InitiateAuth + RespondToAuthChallenge) per IP per window. Default 100. */
   signInLimit?: number;
   /** All inspected requests per IP per window. Default 1000. */
@@ -117,7 +131,7 @@ export interface WafRuleSettings {
 }
 
 export type NormalizedWafOptions =
-  | ({ mode: 'create'; enabledInSandbox: boolean } & WafRuleSettings)
+  | ({ mode: 'create'; enabledInSandbox: boolean; ownWebAcl: boolean } & WafRuleSettings)
   | { mode: 'shared'; webAclArn: string; enabledInSandbox: boolean }
   | { mode: 'off' };
 
@@ -146,7 +160,8 @@ export interface AuthStandardOptions {
   tier: AuthTier;
   /**
    * Configure this backend's pool as a Tier 3 admin pool: MFA required, no emailed codes, recovery by
-   * an admin only, and passkeys (once `passkeys` is set) as the way in. Amplify allows one auth
+   * an admin only; admins use passkeys day to day (once `passkeys` is set) and keep a password plus an
+   * authenticator as the second way in (register A3). Amplify allows one auth
    * resource per backend, so an admin pool lives in its own Amplify backend.
    */
   adminPool?: boolean;
@@ -187,7 +202,7 @@ export interface AuthStandardOptions {
   accountCreation?: AccountCreationSettings;
   /**
    * How long an emailed code works, in minutes: Cognito's sign-in session (`AuthSessionValidity`).
-   * Default 3; Cognito allows 3 to 15 (register A7 is choosing between 3 and 10). Pass the same value
+   * Default 10 (register A7); Cognito allows 3 to 15. Pass the same value
    * to the screens (`SignIn`, `SignUp`) and the custom message trigger, which all say it.
    */
   codeLifetimeMinutes?: number;
@@ -195,8 +210,8 @@ export interface AuthStandardOptions {
    * The CLOUDFRONT-scope web ACL in front of the site's sign-up route (`createSiteWebAcl`, with
    * `accountCreationWafRules`: a silent challenge and a per-IP limit), as a literal ARN
    * (`arn:aws:wafv2:us-east-1:<account>:global/webacl/<name>/<id>`). **Required in `open` mode**
-   * (ADR 0023): anyone may create an account there, so the challenge is the bot check, and synthesis
-   * fails without it. Optional in `domains` mode. Associate it with the Amplify app (Hosting →
+   * (ADR 0023, register D3): every sign-up gets the silent check, so synthesis fails without it in
+   * `domains` and `open` modes. Associate it with the Amplify app (Hosting →
    * Firewall); the sign-up route also refuses requests that didn't pass the challenge.
    */
   siteWebAclArn?: string;
@@ -209,7 +224,7 @@ export interface NormalizedAuthStandardOptions {
   owner: string;
   tier: AuthTier;
   adminPool: boolean;
-  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'replyTo'>> &
+  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'family'>> & { replyTo: string } &
     Pick<AuthEmailOptions, 'configurationSet' | 'verification' | 'invitation'>;
   passkeys: Required<PasskeyOptions> | null;
   groups: string[];
@@ -240,7 +255,7 @@ function fail(message: string): never {
 }
 
 const RULE_KEYS = ['signInLimit', 'overallLimit', 'evaluationWindowSec', 'signInRule', 'overallRule'] as const;
-const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', ...RULE_KEYS]);
+const WAF_KEYS = new Set<string>(['webAclArn', 'enabledInSandbox', 'ownWebAcl', ...RULE_KEYS]);
 // A REGIONAL web ACL (Cognito can't use CloudFront-scoped ones). WAF IDs are UUIDs.
 const WEB_ACL_ARN_RE =
   /^arn:aws(?:-cn|-us-gov|-iso[a-z-]*)?:wafv2:([a-z]{2}(?:-[a-z]+)+-\d):\d{12}:regional\/webacl\/[A-Za-z0-9_-]{1,128}\/[0-9a-f-]{36}$/;
@@ -279,7 +294,9 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
   if (w.enabledInSandbox !== undefined && typeof w.enabledInSandbox !== 'boolean') fail('waf.enabledInSandbox must be true or false.');
   const enabledInSandbox = w.enabledInSandbox === true;
 
+  if (w.ownWebAcl !== undefined && w.ownWebAcl !== true) fail('waf.ownWebAcl is true or left out.');
   if (w.webAclArn !== undefined) {
+    if (w.ownWebAcl === true) fail("waf.ownWebAcl can't be combined with waf.webAclArn: the shared web ACL is the pool's.");
     const extra = RULE_KEYS.filter((k) => w[k] !== undefined);
     if (extra.length > 0) {
       fail(`waf.${extra.join(', waf.')} can't be combined with waf.webAclArn: a shared web ACL's rules are set where it's created.`);
@@ -295,8 +312,8 @@ function normalizeWaf(input: unknown, acknowledgeNoRateLimit: unknown): Normaliz
     return { mode: 'shared', webAclArn: arn, enabledInSandbox };
   }
 
-  const { webAclArn: _webAclArn, enabledInSandbox: _enabledInSandbox, ...rules } = w;
-  return { mode: 'create', enabledInSandbox, ...wafRuleSettings(rules, 'waf') };
+  const { webAclArn: _webAclArn, enabledInSandbox: _enabledInSandbox, ownWebAcl: _ownWebAcl, ...rules } = w;
+  return { mode: 'create', enabledInSandbox, ownWebAcl: w.ownWebAcl === true, ...wafRuleSettings(rules, 'waf') };
 }
 
 /** The retired single `action` (it applied to both rules). */
@@ -378,11 +395,17 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!email) fail('email settings are required: auth email must go through SES from a verified domain.');
   const fromAddress = (email.fromAddress ?? '').trim();
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
+  const senderProblems = senderAddressProblems(fromAddress);
+  if (senderProblems.length > 0) fail(`email.fromAddress: ${senderProblems.join(' ')}`);
   const fromName = (email.fromName ?? '').trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
-  const helpProblems = helpAddressProblems(email.replyTo);
+  if (!isThemeFamily(email.family)) fail("email.family is required: 'osbm', 'unc', or 'personal' (the sender's name carries the family's suffix, register E4a).");
+  const nameProblems = senderNameProblems(fromName, email.family);
+  if (nameProblems.length > 0) fail(`email.fromName: ${nameProblems.join(' ')}`);
+  const helpProblems = helpSettingProblems(email.replyTo);
   if (helpProblems.length > 0) fail(`email.replyTo is the site's help address (the Reply-To on auth emails, and the address the help screens name). ${helpProblems.join(' ')}`);
-  if (!EMAIL_RE.test(email.replyTo.trim())) fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
+  const replyTo = readHelpSetting(email.replyTo).address;
+  if (!EMAIL_RE.test(replyTo)) fail(`email.replyTo is not a valid address: "${replyTo}".`);
   const sesIdentity = (email.sesIdentity ?? domainOf(fromAddress)).trim().toLowerCase();
   if (sesIdentity.includes('@')) {
     if (sesIdentity !== fromAddress.toLowerCase()) {
@@ -466,10 +489,10 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     if (!allowsSelfSignUp(accountCreation)) fail(`siteWebAclArn guards the sign-up route; accountCreation.mode '${accountCreation.mode}' has none.`);
     siteWebAclArn = o.siteWebAclArn.trim();
   }
-  if (accountCreation.mode === 'open' && siteWebAclArn === null) {
+  if (allowsSelfSignUp(accountCreation) && siteWebAclArn === null) {
     fail(
-      "accountCreation mode 'open' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route " +
-        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Anyone can create an account in open mode, so the challenge is required (ADR 0023).',
+      `accountCreation mode '${accountCreation.mode}' needs siteWebAclArn: the CLOUDFRONT web ACL with accountCreationWafRules (a silent challenge and a per-IP limit) in front of the sign-up route ` +
+        '(createSiteWebAcl from auth-kit/amplify, deployed in us-east-1 and associated with the Amplify app). Every sign-up gets the silent WAF check (register D3, ADR 0023).',
     );
   }
   let codeLifetime: number;
@@ -488,7 +511,8 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
       fromAddress,
       fromName,
       sesIdentity,
-      replyTo: email.replyTo.trim().toLowerCase(),
+      replyTo,
+      family: email.family,
       ...(email.configurationSet !== undefined && { configurationSet: email.configurationSet }),
       ...(email.verification !== undefined && { verification: email.verification }),
       ...(email.invitation !== undefined && { invitation: email.invitation }),

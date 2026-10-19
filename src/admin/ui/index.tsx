@@ -32,7 +32,7 @@ import {
   roleLabel,
   type PeopleActionDetail,
 } from '../copy.js';
-import { ADMIN_ROLE_RANK, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
+import { ADMIN_ROLE_RANK, OWNER_CHOICE_LABEL, ROLE_MATRIX, STANDARD_GROUPS, type SiteRole } from '../../shared/policy.js';
 import {
   PEOPLE_FORM_FIELDS as F,
   PENDING_REQUESTS_SHOWN,
@@ -403,7 +403,7 @@ export function RoleMatrixTable({ caption }: { caption?: string }): ReactNode {
       <tbody>
         {ROLE_MATRIX.rows.map((row) => (
           <tr key={row.role}>
-            <th scope="row">{row.role === OWNER_GROUP ? `${row.label} (only one)` : row.label}</th>
+            <th scope="row">{row.role === OWNER_GROUP ? OWNER_CHOICE_LABEL : row.label}</th>
             {ROLE_MATRIX.columns.map((c) => {
               const cell = row.cells[c];
               return (
@@ -1113,7 +1113,7 @@ export type SignInHelpSettingsView =
   | {
       state: 'ok';
       configured: string;
-      override: { address: string; updatedAt: string; updatedBy: { sub: string; email?: string }; reason?: string } | null;
+      override: { address: string; personal?: true; updatedAt: string; updatedBy: { sub: string; email?: string }; reason?: string } | null;
       effective: { address: string; source: 'override' | 'config' };
       version: number;
     }
@@ -1168,6 +1168,10 @@ export function SignInHelpSettings(props: SignInHelpSettingsProps): ReactNode {
         <label className="ak-field">
           <span>Help address</span>
           <input type="email" name="address" required maxLength={254} autoComplete="off" spellCheck={false} defaultValue={view.effective.address} />
+        </label>
+        <label className="ak-check">
+          <input type="checkbox" name="personal" defaultChecked={view.override?.personal === true} />
+          <span>This is a person’s own address, on purpose (the site deliberately names one person). Without this, a first.last address is refused.</span>
         </label>
         <ReasonField required label="Reason (goes in the audit log and the owner’s alert)" />
         <p className="ak-note">Changing it needs a sign-in in the last few minutes.</p>

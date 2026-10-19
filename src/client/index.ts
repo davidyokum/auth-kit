@@ -60,7 +60,7 @@ export {
 export { Icon, ICON_NAMES, type IconName } from './icons.js';
 export { wafAwareFetch, postAccountForm, type PostOutcome } from './account-creation-client.js';
 // The families as themes (auth-kit/themes), for the screens' `theme` prop.
-export { authTheme, FAMILY_THEMES, resolveTheme, type AuthTheme, type AuthThemeOverrides, type ThemeFamily } from '../themes/index.js';
+export { authTheme, CARD_STYLES, FAMILY_THEMES, resolveTheme, type AuthTheme, type AuthThemeOverrides, type CardStyle, type ThemeFamily } from '../themes/index.js';
 export { buildOtpauthUri, formatSetupKey } from './totp.js';
 export { isBreachedPassword, PWNED_PASSWORDS_RANGE_URL, type BreachedPasswordCheck } from './breached.js';
 export { CognitoRequestError } from './cognito.js';
@@ -104,7 +104,9 @@ export { ChooseFirstCredential, type ChooseFirstCredentialProps, type FirstCrede
 export { AuthenticatorSetup, type AuthenticatorSetupProps } from './AuthenticatorSetup.js';
 export { TOTPEnrollmentGate, type TOTPEnrollmentGateProps } from './TOTPEnrollmentGate.js';
 export { MyAccount, type MyAccountProps, type MyAccountSelfService, type SelfServiceResult } from './MyAccount.js';
-export { Card as AuthCard, type CardBottom as AuthCardBottom } from './ui.js';
+export { Card as AuthCard, monogramOf, type CardBottom as AuthCardBottom } from './ui.js';
 export { PasswordForm, breachedPasswordProblem, type PasswordFormProps, type PasswordCheckOptions } from './PasswordForm.js';
 export { authKitStyles } from './styles.js';
+export { sendAccountNotice, type AccountNotices } from './notices.js';
+export { ACCOUNT_NOTICE_PATH, ACCOUNT_NOTICE_EVENTS, type AccountNoticeEvent } from '../shared/notices.js';
 export type { AuthKitClassNames, AuthKitSlot, StyleProps, HeadingLevel } from './ui.js';

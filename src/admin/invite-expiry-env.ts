@@ -8,6 +8,10 @@ export const INVITE_EXPIRY_ENV = {
   runEveryMinutes: 'AUTH_KIT_RUN_EVERY_MINUTES',
   /** The last-owner warning (`ownerWarnings`): the site's name, the SES sender, and the rest. */
   siteName: 'AUTH_KIT_SITE_NAME',
+  /** The site's family and help address: the warning's footer (register E4a). */
+  family: 'AUTH_KIT_FAMILY',
+  helpEmail: 'AUTH_KIT_HELP_EMAIL',
+  helpPersonal: 'AUTH_KIT_HELP_PERSONAL',
   mailFrom: 'AUTH_KIT_MAIL_FROM',
   signInUrl: 'AUTH_KIT_SIGN_IN_URL',
   ownerWarningFallback: 'AUTH_KIT_OWNER_WARNING_FALLBACK',

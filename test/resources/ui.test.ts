@@ -117,8 +117,10 @@ describe('WhoHasAccess, for others', () => {
   });
 
   it('a failed load says why; "not found" renders nothing (the page has already 404ed)', () => {
-    const out = html({ state: 'unavailable', reason: 'Couldn’t load who has access: timed out. This isn’t an empty list.' }, { noun: 'plan' });
+    const out = html({ state: 'unavailable', noun: 'plan', reason: 'Couldn’t load who has access: timed out. This isn’t an empty list.' });
     expect(out).toContain('Who has access to this plan (—)');
+    // The type's noun travels with the failure, so the screen never falls back to "item" (register C5).
+    expect(out).not.toContain('item');
     expect(out).toContain('role="alert"');
     expect(html({ state: 'not_found' })).toBe('');
   });

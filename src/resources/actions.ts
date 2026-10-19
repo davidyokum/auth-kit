@@ -641,15 +641,15 @@ export function createResourceActions<G extends string, C extends string>(config
     } catch {
       return { state: 'not_found' };
     }
+    const typeConfig = types.get(ref.type);
     let access: ResourceAccess<C>;
     try {
       access = await auth.resourceAccess(ref.type, ref.id);
     } catch (error) {
       const f = authFailure(error);
-      return { state: 'unavailable', reason: f ? f.error : describeAwsError(error) };
+      return { state: 'unavailable', noun: typeConfig.noun, reason: f ? f.error : describeAwsError(error) };
     }
     if (!access.can('view')) return { state: 'not_found' };
-    const typeConfig = types.get(ref.type);
     try {
       const current = await store.getAccess(ref);
       return {
@@ -667,7 +667,7 @@ export function createResourceActions<G extends string, C extends string>(config
       };
     } catch (error) {
       report(error, 'resources: listAccess');
-      return { state: 'unavailable', reason: `Couldn’t load who has access to this ${typeConfig.noun}: ${describeAwsError(error)} This isn’t an empty list.` };
+      return { state: 'unavailable', noun: typeConfig.noun, reason: `Couldn’t load who has access to this ${typeConfig.noun}: ${describeAwsError(error)} This isn’t an empty list.` };
     }
   }
 

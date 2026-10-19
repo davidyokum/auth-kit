@@ -6,6 +6,7 @@
  * - say what to do next, and name the help address when it can't be fixed here.
  */
 import { ERRORS } from './copy.js';
+import { CODE_LIFETIME_POLICY } from '../shared/policy.js';
 
 /** The placeholders some messages carry. Each has a sensible default when a caller doesn't pass it. */
 export interface MessageWords {
@@ -80,7 +81,7 @@ export function describeAuthError(error: unknown, context: AuthErrorContext = 's
   const name = errorName(error);
   const message = errorMessage(error);
   const wrongEmailCode = ERRORS.wrongEmailCode({ siteName: words.siteName ?? 'this site' });
-  const sessionExpired = ERRORS.sessionExpired({ codeLifetimeMinutes: words.codeLifetimeMinutes ?? 3 });
+  const sessionExpired = ERRORS.sessionExpired({ codeLifetimeMinutes: words.codeLifetimeMinutes ?? CODE_LIFETIME_POLICY.defaultMinutes });
   const network = ERRORS.network(words.helpAddress !== undefined ? { helpAddress: words.helpAddress } : undefined);
 
   switch (name) {

@@ -26,11 +26,22 @@ describe('families as themes (E1, E2, E4, A9)', () => {
     expect([FAMILY_THEMES.osbm.emailHint, FAMILY_THEMES.unc.emailHint, FAMILY_THEMES.personal.emailHint]).toEqual(['name@osbm.nc.gov', 'name@unc.edu', 'name@example.com']);
   });
 
-  it('keeps the authorized-use line off by default (register A10 is Proposed), and only OSBM has one', () => {
-    for (const theme of Object.values(FAMILY_THEMES)) expect(theme.showAuthorizedUse).toBe(false);
-    expect(FAMILY_THEMES.osbm.authorizedUseLine).toBe('This is a State of North Carolina system for authorized use.');
-    expect(FAMILY_THEMES.unc.authorizedUseLine).toBeNull();
-    expect(authTheme('osbm', { showAuthorizedUse: true }).showAuthorizedUse).toBe(true);
+  it('has no authorized-use line (register A10 dropped it) and refuses the old override', () => {
+    for (const theme of Object.values(FAMILY_THEMES)) expect(theme).not.toHaveProperty('authorizedUseLine');
+    expect(() => authTheme('osbm', { showAuthorizedUse: true } as never)).toThrow(/authorized-use line was dropped/);
+  });
+
+  it('the personal family lives on yokum.app (register F11): sign-in@ and help@', () => {
+    expect(FAMILY_THEMES.personal.senderAddress).toBe('sign-in@yokum.app');
+    expect(FAMILY_THEMES.personal.help.address).toBe('help@yokum.app');
+    expect(FAMILY_THEMES.personal.help.domains).toEqual(['yokum.app']);
+    expect([FAMILY_THEMES.osbm.senderAddress, FAMILY_THEMES.unc.senderAddress]).toEqual([null, null]);
+  });
+
+  it('defaults to the Quiet card and takes the other four styles per site (register E5)', () => {
+    for (const theme of Object.values(FAMILY_THEMES)) expect(theme.cardStyle).toBe('quiet');
+    for (const style of ['quiet', 'monogram', 'frosted', 'plain', 'porcelain'] as const) expect(authTheme('unc', { cardStyle: style }).cardStyle).toBe(style);
+    expect(() => authTheme('unc', { cardStyle: 'glass' as never })).toThrow(/cardStyle must be one of/);
   });
 
   it('lets a site set its own email hint (A9), and nothing it shouldn’t', () => {
@@ -63,8 +74,8 @@ describe('families as themes (E1, E2, E4, A9)', () => {
 });
 
 describe('the help route (David, 2026-10-18; Card Studio v4)', () => {
-  it('ships no help address, names the owner on OSBM and UNC sites, and the team on personal ones', () => {
-    for (const theme of Object.values(FAMILY_THEMES)) expect(theme.help.address).toBeNull();
+  it('ships no help address for OSBM and UNC (personal: help@yokum.app), names the owner on OSBM and UNC sites, and the team on personal ones', () => {
+    expect([FAMILY_THEMES.osbm.help.address, FAMILY_THEMES.unc.help.address]).toEqual([null, null]);
     expect([FAMILY_THEMES.osbm.help.named, FAMILY_THEMES.unc.help.named, FAMILY_THEMES.personal.help.named]).toEqual([true, true, false]);
     expect(FAMILY_THEMES.osbm.help.itDesk).toBe('your agency’s IT help desk');
     expect(FAMILY_THEMES.unc.help.itDesk).toBe('the UNC IT help desk');
@@ -78,6 +89,11 @@ describe('the help route (David, 2026-10-18; Card Studio v4)', () => {
     expect(helpAddressProblems(HELP_ADDRESS_PLACEHOLDER)[0]).toMatch(/placeholder/);
     for (const bad of ['help@site.test', 'todo@example.org', 'changeme@example.org', 'help@your-domain.org']) expect(helpAddressProblems(bad)[0], bad).toMatch(/placeholder/);
     expect(helpAddressProblems('jordan.lee@example.org')[0]).toMatch(/person's own address/);
+    // A person's own address only with the site's acknowledgement (register E4c).
+    expect(helpAddressProblems('jordan.lee@example.org', { personal: true })).toEqual([]);
+    const own = authTheme('osbm', { helpAddress: { address: 'Jordan.Lee@agency.example.org', personal: true } });
+    expect([own.help.address, own.help.personal]).toEqual(['jordan.lee@agency.example.org', true]);
+    expect(() => authTheme('osbm', { helpAddress: 'jordan.lee@agency.example.org' })).toThrow(/personal: true/);
     expect(helpAddressProblems('not an address')[0]).toMatch(/isn't an email address/);
     expect(() => authTheme('osbm', { helpAddress: HELP_ADDRESS_PLACEHOLDER })).toThrow(/placeholder/);
   });
@@ -127,10 +143,28 @@ describe('the help address is a plain mailbox (M8)', () => {
     for (const good of ['apps-help@osbm.nc.gov', 'it_help+reports@unc.edu', 'desk.2@example.org']) expect(helpAddressProblems(good), good).toEqual([]);
   });
 
-  it('the families list their own domains for the Super admin override; personal lists none', () => {
+  it('the families list their own domains for the Super admin override; personal lists yokum.app (register F11)', () => {
     expect(FAMILY_THEMES.osbm.help.domains).toEqual(['nc.gov']);
     expect(FAMILY_THEMES.unc.help.domains).toEqual(['unc.edu']);
-    expect(FAMILY_THEMES.personal.help.domains).toEqual([]);
+    expect(FAMILY_THEMES.personal.help.domains).toEqual(['yokum.app']);
   });
 });
 
+
+describe('the card styles (register E5; Card Studio tokens())', () => {
+  it('Quiet keeps the 12px card and defined edge; the others change only what their direction does', () => {
+    const quiet = themeCssVariables(authTheme('osbm'));
+    expect(quiet['--ak-card-radius']).toBe('12px');
+    expect(quiet['--ak-edge']).toBe(cardEdgeColor(authTheme('osbm')));
+    const porcelain = themeCssVariables(authTheme('osbm', { cardStyle: 'porcelain' }));
+    expect(porcelain['--ak-card-radius']).toBe('20px');
+    expect(porcelain['--ak-button-bg']).toBe('linear-gradient(180deg, #1e79c8, #196ab1)');
+    const frosted = themeCssVariables(authTheme('unc', { cardStyle: 'frosted' }));
+    expect(frosted['--ak-card-bg']).toBe('rgba(255,255,255,0.66)');
+    expect(frosted['--ak-card-solid']).toMatch(/^#[0-9a-f]{6}$/);
+    const plain = authTheme('personal', { cardStyle: 'plain' });
+    expect(themeCssVariables(plain)['--ak-edge']).toBe('transparent');
+    expect(checkCardEdge(plain)).toMatchObject({ required: false, pass: true });
+    expect(themeCssVariables(authTheme('unc', { cardStyle: 'monogram' }))['--ak-mono']).toBe('#4b9cd3');
+  });
+});

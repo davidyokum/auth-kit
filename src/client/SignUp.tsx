@@ -6,6 +6,7 @@ import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.
 import { handOffEmail, postAccountForm } from './account-creation-client.js';
 import { confirmCode, fetchAuthFactors, requestEmailCode, saveName } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
 import { ChooseFirstCredential } from './ChooseFirstCredential.js';
 import { type CopyContext, ERRORS, FIRST_VISIT, SIGN_IN, SIGN_UP, STATUS } from './copy.js';
 import { checkedHref, hrefOr } from './href.js';
@@ -47,7 +48,7 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   /** The site's terms, when it has them (open sign-up: "you agree to the terms and privacy notice"). A path or an http(s) URL. */
   termsUrl?: string;
   passkeysEnabled: boolean;
-  /** The same value as the preset's (register A7). Default 3. */
+  /** The same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
   /** The email field's example. Default: the family's, or `name@example.com` on open sign-up. */
   emailHint?: string;
@@ -62,8 +63,8 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   botNote?: boolean;
   /** The "Your name" button (Card Studio vote): "Create account" (default) or "Finish". */
   nameButton?: 'create' | 'finish';
-  /** The site emails security notices (REPORT §5.2f). Default false. */
-  securityNotices?: boolean;
+  /** Account-change notices (register A10: on by default; see `SignIn`'s `notices`). `false` for a site that doesn't send them. */
+  notices?: AccountNotices;
   next?: string | null;
   defaultNext?: string;
   allowedRedirectPrefixes?: readonly string[];
@@ -81,7 +82,7 @@ type View =
   | { name: 'name' }
   | { name: 'choose' }
   | { name: 'enroll-authenticator' }
-  | { name: 'done' }
+  | { name: 'done'; emailed: boolean }
   | { name: 'finishing' };
 
 /**
@@ -94,9 +95,10 @@ export function SignUp(props: SignUpProps) {
   const { classNames, siteName } = props;
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
   const settings = useMemo(() => normalizeAccountCreation(props.accountCreation, 'SignUp accountCreation'), [props.accountCreation]);
+  const notices = useMemo(() => resolveNotices(props.notices, 'SignUp'), [props.notices]);
   const lifetime = checkedLifetime(props.codeLifetimeMinutes, 'SignUp codeLifetimeMinutes');
   const open = settings.mode === 'open';
-  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: lifetime, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }) };
+  const c: CopyContext = { siteName, theme, codeLifetimeMinutes: lifetime, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }), publicSite: settings.mode === 'open' };
   const words: MessageWords = { siteName, codeLifetimeMinutes: lifetime, helpAddress: props.help.address };
   const level = props.headingLevel ?? 1;
   const hint = props.emailHint?.trim() || (open ? 'name@example.com' : theme.emailHint);
@@ -378,7 +380,7 @@ export function SignUp(props: SignUpProps) {
           />
           <Actions classNames={classNames}>
             <Button type="submit" disabled={busy} classNames={classNames}>
-              {SIGN_UP.verify}
+              {SIGN_UP.codeSubmit}
             </Button>
           </Actions>
           <AltLinks
@@ -434,7 +436,9 @@ export function SignUp(props: SignUpProps) {
           issuer={siteName}
           accountName={email.trim()}
           headingLevel={level}
-          onDone={() => go({ name: 'done' })}
+          onDone={(how) => {
+            void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', emailed }));
+          }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
           classNames={classNames}
@@ -450,7 +454,7 @@ export function SignUp(props: SignUpProps) {
           <Glyph classNames={classNames} />
           {heading(FIRST_VISIT.doneHeading)}
           <Text classNames={classNames}>{SIGN_UP.doneSub(c)}</Text>
-          {props.securityNotices ? <Text classNames={classNames}>{SIGN_UP.doneEmailed}</Text> : null}
+          {view.name === 'done' && view.emailed ? <Text classNames={classNames}>{SIGN_UP.doneEmailed}</Text> : null}
           <Actions classNames={classNames}>
             <Button classNames={classNames} onClick={finish}>
               {FIRST_VISIT.continueTo(c)}
@@ -465,7 +469,7 @@ export function SignUp(props: SignUpProps) {
   }
 
   return (
-    <Card name="sign-up" view={view.name} theme={theme} bottom={{ extra }} rootRef={rootRef} {...(props.className !== undefined && { className: props.className })} classNames={classNames}>
+    <Card name="sign-up" view={view.name} theme={theme} siteName={siteName} bottom={{ extra }} rootRef={rootRef} {...(props.className !== undefined && { className: props.className })} classNames={classNames}>
       {body}
       <StatusRegion status={fb.status} classNames={classNames} />
     </Card>

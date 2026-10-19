@@ -1,6 +1,6 @@
 # 0013. One shared web ACL per account and Region
 
-- **Status:** Accepted, 2026-10-17 (amends [0004](0004-waf-rate-rule.md)); amended by [0017](0017-per-rule-waf-modes.md) (per-rule modes on `createSharedAuthWebAcl`)
+- **Status:** Accepted, 2026-10-17 (amends [0004](0004-waf-rate-rule.md)); amended by [0017](0017-per-rule-waf-modes.md) (per-rule modes on `createSharedAuthWebAcl`) and on 2026-10-19 (register F7: the shared ACL is the default outside sandboxes)
 
 ## Context
 
@@ -8,8 +8,7 @@
 
 ## Decision
 
-- **Default:** the preset still creates a web ACL for the pool, which suits a first site.
-- **Recommended for more than one site:** one shared web ACL per AWS account and Region, made once with `createSharedAuthWebAcl` (the same two rate rules, no association) in its own small stack, and each site's preset reuses it with `waf: { webAclArn }`. The preset then only adds an association. The ARN must be a REGIONAL web ACL; a Region different from the pool's fails synthesis when both are known.
+- **The default (amended 2026-10-19, register F7):** one shared web ACL per AWS account and Region, made once with `createSharedAuthWebAcl` (the same two rate rules, no association) in its own small stack, and each site's preset reuses it with `waf: { webAclArn }`. A deployed branch without `webAclArn` fails synthesis unless it says its own ACL is deliberate: `waf: { ownWebAcl: true }` (a site alone in its account, or the first one before the shared ACL exists). Sandboxes need neither (they skip WAF unless `enabledInSandbox`). Before 0.1.9 the preset created an ACL per pool by default. The preset then only adds an association. The ARN must be a REGIONAL web ACL; a Region different from the pool's fails synthesis when both are known.
 - **Off:** `waf: false` is accepted only with `acknowledgeNoRateLimit: true`, and still warns at synthesis. Cognito doesn't lock out wrong emailed codes, so "no rate limit" must be a visible, deliberate choice. `waf.enabled` is retired.
 
 ## Consequences

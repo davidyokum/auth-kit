@@ -15,6 +15,8 @@ export const ACCESS_REQUEST_DIGEST_ENV = {
   signInUrl: 'AUTH_KIT_SIGN_IN_URL',
   peopleUrl: 'AUTH_KIT_PEOPLE_URL',
   helpEmail: 'AUTH_KIT_HELP_EMAIL',
+  /** `1` when the help address is a person's own, acknowledged by the site (register E4c). */
+  helpPersonal: 'AUTH_KIT_HELP_PERSONAL',
   mailFrom: 'AUTH_KIT_MAIL_FROM',
   mailConfigurationSet: 'AUTH_KIT_MAIL_CONFIGURATION_SET',
   recipientGroups: 'AUTH_KIT_RECIPIENT_GROUPS',

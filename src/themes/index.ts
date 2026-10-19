@@ -8,22 +8,43 @@
  * - the footer identity line ("This site is managed by the NC Office of State Budget and
  *   Management"; personal sites name nobody), on the card and at the foot of every email;
  * - the email field's example address (a site may set its own, A9);
- * - the help route: the role-based help mailbox (required, never a person's own address, and no
- *   default ships), whether screens name the site's owner or say "the {Site} team", how the team
- *   confirms it's you, where to go for the email account, device, or app itself (the IT desk), and
- *   the OSBM Teams check;
- * - an optional authorized-use line (OSBM; off by default while register A10 is open).
+ * - the sender's address: always a reply-able `sign-in@` mailbox, never `noreply@` (register A10); the
+ *   personal family's is `sign-in@yokum.app` (register F11);
+ * - the help route: the role-based help mailbox (required; a person's own address only when a site
+ *   acknowledges it, register E4c; the personal family's default is `help@yokum.app`, F11; OSBM and UNC
+ *   ship none until their role mailboxes exist), whether screens name the site's owner or say "the
+ *   {Site} team", how the team confirms it's you, where to go for the email account, device, or app
+ *   itself (the IT desk), and the OSBM Teams check;
+ * - the card's style (register E5: Quiet by default; Monogram, Frosted, Plain, and Porcelain per site)
+ *   and its edge.
+ *
+ * Register A10 dropped the OSBM "authorized use" line and MyNCID-like colours; a reserved "Sign in
+ * with NCID" slot is in the backlog (only if state single sign-on happens), so nothing here hooks it.
  *
  * Pure: no React, no AWS. The client, the server's mailer, and the custom message trigger all read it.
  */
 import { BACKDROP_FAMILIES } from '../backdrops/families.js';
-import { contrastRatio, over, toHex } from '../backdrops/kernel/v1/color.js';
+import { contrastRatio, over, parseHex, toHex } from '../backdrops/kernel/v1/color.js';
 import type { BackdropFamily, BackdropPalette } from '../backdrops/types.js';
 
 export type ThemeFamily = BackdropFamily;
 
-/** The card's edge (register E5, Proposed; ADR 0021's 3:1 edge rule). */
+/** The card's edge (register E5: `defined`, a line that reaches 3:1, by default; ADR 0021's edge rule). */
 export type CardEdge = 'defined' | 'soft';
+
+/**
+ * The card's style (register E5, decided 2026-10-19; Card Studio's directions, `design/shared/sign-in-card.js`):
+ * - `quiet` (default): a white card, the defined edge, a soft shadow, generous spacing, no accent line;
+ * - `monogram`: Quiet plus the site's initials as a small badge above the heading, warmer neutrals, rounder corners;
+ * - `frosted`: a translucent, blurred panel (solid where the browser can't blur);
+ * - `plain`: no card: the form sits in a soft, readable column the backdrop fades into (the one
+ *   exception to E4's no-fade rule, kept for some sites; it has no edge);
+ * - `porcelain`: a luminous sheet: the edge, layered soft shadows with a faint glow in the family
+ *   colour, 20px corners, rounder controls, and the other ways in on a tinted well.
+ */
+export type CardStyle = 'quiet' | 'monogram' | 'frosted' | 'plain' | 'porcelain';
+
+export const CARD_STYLES: readonly CardStyle[] = Object.freeze(['quiet', 'monogram', 'frosted', 'plain', 'porcelain']);
 
 /** The colors the card, its controls, and the emails use. Every value is `#rrggbb`. */
 export interface ThemeColors {
@@ -61,12 +82,16 @@ export interface ThemeColors {
  */
 export interface ThemeHelp {
   /**
-   * The family's role-based help mailbox: one per family, never per site and never a person's own
-   * address. It's also the Reply-To on auth emails and the "Help:" line in their footer. Required, and
-   * no default ships: set it with `authTheme(family, { helpAddress })` (a site may override it, and a
-   * Super admin may override that without a deploy; `auth-kit/accounts`' sign-in help setting).
+   * The help mailbox: role-based by default (the family's, or the site's own, e.g. Project Portal →
+   * `portal@osbm.nc.gov`), and a person's own address only when the site acknowledges it
+   * (`authTheme(family, { helpAddress: { address, personal: true } })`, register E4c). It's also the
+   * Reply-To on auth emails and the "Help:" line in their footer. The personal family's default is
+   * `help@yokum.app` (register F11); OSBM and UNC ship none, so a site sets its own (a Super admin may
+   * override it without a deploy; `auth-kit/accounts`' sign-in help setting).
    */
   address: string | null;
+  /** The address is a person's own, acknowledged by the site (register E4c). */
+  personal: boolean;
   /** Name the site's owner ("Jordan Lee looks after Example Reports"), or say "the {Site} team". */
   named: boolean;
   /** How the team confirms it's you before resetting anything: "on Teams or by phone". */
@@ -97,6 +122,11 @@ export interface AuthTheme {
   /** In the sender's display name: "{Site} (NC OSBM)". Null: just "{Site}". */
   senderSuffix: string | null;
   /**
+   * The family's sender address, when it has a shared one: `sign-in@yokum.app` for personal sites
+   * (register F11). Null: each site sends from its own `sign-in@` mailbox (register A10).
+   */
+  senderAddress: string | null;
+  /**
    * The footer identity line (E4), the same words on the card and at the foot of every email (David,
    * 2026-10-18: emails match the card, with no letterhead). Null on personal sites, which never name a person.
    */
@@ -105,18 +135,19 @@ export interface AuthTheme {
   emailHint: string;
   /** The help route (REPORT §7.2, Card Studio v4; ADR 0024). */
   help: Readonly<ThemeHelp>;
-  /** The family's authorized-use line, when it has one. Shown only with `showAuthorizedUse`. */
-  authorizedUseLine: string | null;
-  /** Show the authorized-use line on the sign-in card. Default false (register A10 is still Proposed). */
-  showAuthorizedUse: boolean;
   /** `defined` (default): a line in the family ink that reaches 3:1 on every backdrop color. `soft`: a hairline. */
   cardEdge: CardEdge;
+  /** The card's style (register E5). Default `quiet`. */
+  cardStyle: CardStyle;
 }
 
 /** What a site may change about its family's theme. */
-export interface AuthThemeOverrides extends Partial<Pick<AuthTheme, 'emailHint' | 'showAuthorizedUse' | 'cardEdge'>> {
-  /** The help mailbox (required before a deploy; `helpAddressProblems` says why one can't be used). */
-  helpAddress?: string;
+export interface AuthThemeOverrides extends Partial<Pick<AuthTheme, 'emailHint' | 'cardEdge' | 'cardStyle'>> {
+  /**
+   * The help mailbox (required before a deploy; `helpSettingProblems` says why one can't be used): a
+   * role-based address, or `{ address, personal: true }` for a site that deliberately names one person.
+   */
+  helpAddress?: HelpAddressSetting;
   /** Override whether screens name the owner: a public site in a named family says "the {Site} team". */
   helpNamed?: boolean;
 }
@@ -144,8 +175,8 @@ const base = (family: ThemeFamily) => ({
   family,
   colors: Object.freeze(colorsOf(family)),
   palette: BACKDROP_FAMILIES[family].palette,
-  showAuthorizedUse: false,
   cardEdge: 'defined' as const,
+  cardStyle: 'quiet' as const,
 });
 
 /** The three families, exactly as REPORT §7.2 and the register (E1, E2, E4) set them. Brand constants. */
@@ -155,38 +186,40 @@ export const FAMILY_THEMES: Readonly<Record<ThemeFamily, Readonly<AuthTheme>>> =
     label: 'NC OSBM',
     organization: 'NC Office of State Budget and Management',
     senderSuffix: 'NC OSBM',
+    senderAddress: null,
     footer: 'This site is managed by the NC Office of State Budget and Management',
     emailHint: 'name@osbm.nc.gov',
-    help: Object.freeze({ address: null, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', devDesk: 'your agency’s IT help desk', teamsCheck: true, domains: Object.freeze(['nc.gov']) }),
-    authorizedUseLine: 'This is a State of North Carolina system for authorized use.',
+    help: Object.freeze({ address: null, personal: false, named: true, verify: 'on Teams or by phone', itDesk: 'your agency’s IT help desk', devDesk: 'your agency’s IT help desk', teamsCheck: true, domains: Object.freeze(['nc.gov']) }),
   }),
   unc: Object.freeze({
     ...base('unc'),
     label: 'UNC',
     organization: 'UNC-Chapel Hill',
     senderSuffix: 'UNC',
+    senderAddress: null,
     footer: 'This site is managed by UNC-Chapel Hill',
     emailHint: 'name@unc.edu',
-    help: Object.freeze({ address: null, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', devDesk: 'the UNC IT help desk', teamsCheck: false, domains: Object.freeze(['unc.edu']) }),
-    authorizedUseLine: null,
+    help: Object.freeze({ address: null, personal: false, named: true, verify: 'by phone or in person', itDesk: 'the UNC IT help desk', devDesk: 'the UNC IT help desk', teamsCheck: false, domains: Object.freeze(['unc.edu']) }),
   }),
   personal: Object.freeze({
     ...base('personal'),
     label: 'Personal',
     organization: null,
     senderSuffix: null,
+    // Register F11 (2026-10-19): the personal family lives on yokum.app.
+    senderAddress: 'sign-in@yokum.app',
     footer: null,
     emailHint: 'name@example.com',
     help: Object.freeze({
-      address: null,
+      address: 'help@yokum.app',
+      personal: false,
       named: false,
       verify: 'by email',
       itDesk: 'your email provider, or your IT help desk if your organization runs your email',
       devDesk: 'the device maker’s support',
       teamsCheck: false,
-      domains: Object.freeze([]),
+      domains: Object.freeze(['yokum.app']),
     }),
-    authorizedUseLine: null,
   }),
 });
 
@@ -206,20 +239,21 @@ export function isThemeFamily(value: unknown): value is ThemeFamily {
 export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {}): AuthTheme {
   if (!isThemeFamily(family)) throw new Error(`auth-kit/themes: family "${String(family)}" isn't one of ${THEME_FAMILIES.join(', ')}.`);
   for (const key of Object.keys(overrides)) {
-    if (!['emailHint', 'showAuthorizedUse', 'cardEdge', 'helpAddress', 'helpNamed'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
+    if (key === 'showAuthorizedUse') throw new Error('auth-kit/themes: the authorized-use line was dropped (register A10, 2026-10-19); remove showAuthorizedUse.');
+    if (!['emailHint', 'cardEdge', 'cardStyle', 'helpAddress', 'helpNamed'].includes(key)) throw new Error(`auth-kit/themes: "${key}" can't be overridden per site.`);
   }
   if (overrides.cardEdge !== undefined && overrides.cardEdge !== 'defined' && overrides.cardEdge !== 'soft') {
     throw new Error(`auth-kit/themes: cardEdge must be 'defined' or 'soft'.`);
   }
-  if (overrides.showAuthorizedUse !== undefined && typeof overrides.showAuthorizedUse !== 'boolean') {
-    throw new Error('auth-kit/themes: showAuthorizedUse must be true or false.');
+  if (overrides.cardStyle !== undefined && !CARD_STYLES.includes(overrides.cardStyle)) {
+    throw new Error(`auth-kit/themes: cardStyle must be one of ${CARD_STYLES.join(', ')}.`);
   }
   if (overrides.helpNamed !== undefined && typeof overrides.helpNamed !== 'boolean') throw new Error('auth-kit/themes: helpNamed must be true or false.');
-  let helpAddress: string | undefined;
+  let siteHelp: { address: string; personal: boolean } | undefined;
   if (overrides.helpAddress !== undefined) {
-    helpAddress = overrides.helpAddress.trim().toLowerCase();
-    const problems = helpAddressProblems(helpAddress);
+    const problems = helpSettingProblems(overrides.helpAddress);
     if (problems.length > 0) throw new Error(`auth-kit/themes: helpAddress: ${problems.join(' ')}`);
+    siteHelp = readHelpSetting(overrides.helpAddress);
   }
   const hint = overrides.emailHint?.trim();
   if (overrides.emailHint !== undefined && (!hint || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hint))) {
@@ -228,15 +262,15 @@ export function authTheme(family: ThemeFamily, overrides: AuthThemeOverrides = {
   const familyTheme = FAMILY_THEMES[family];
   const help = Object.freeze({
     ...familyTheme.help,
-    ...(helpAddress !== undefined && { address: helpAddress }),
+    ...(siteHelp !== undefined && { address: siteHelp.address, personal: siteHelp.personal }),
     ...(overrides.helpNamed !== undefined && { named: overrides.helpNamed }),
   });
   return Object.freeze({
     ...familyTheme,
     help,
     ...(hint !== undefined && { emailHint: hint }),
-    ...(overrides.showAuthorizedUse !== undefined && { showAuthorizedUse: overrides.showAuthorizedUse }),
     ...(overrides.cardEdge !== undefined && { cardEdge: overrides.cardEdge }),
+    ...(overrides.cardStyle !== undefined && { cardStyle: overrides.cardStyle }),
   });
 }
 
@@ -251,12 +285,31 @@ const PERSONAL_LOCAL_PART = /^([a-z]+)\.([a-z]+)$/;
 const ROLE_WORDS = new Set(['help', 'helpdesk', 'support', 'apps', 'app', 'admin', 'admins', 'info', 'team', 'desk', 'service', 'services', 'it', 'sign', 'signin', 'access', 'accounts', 'web', 'office', 'contact']);
 
 /**
+ * A site's help address (register E4c): a role-based mailbox by default (`'portal@osbm.nc.gov'`), or a
+ * person's own address that the site acknowledges on purpose, never by default:
+ * `{ address: 'jordan.lee@example.org', personal: true }` (a site that deliberately signals it's one
+ * person).
+ */
+export type HelpAddressSetting = string | { readonly address: string; readonly personal: true };
+
+/** A help address setting, split into the address and whether a person's own address was acknowledged. */
+export function readHelpSetting(setting: HelpAddressSetting | null | undefined): { address: string; personal: boolean } {
+  if (setting !== null && typeof setting === 'object') {
+    if (setting.personal !== true) throw new Error('auth-kit: a help address object acknowledges a person’s own address: { address, personal: true }.');
+    return { address: typeof setting.address === 'string' ? setting.address.trim().toLowerCase() : '', personal: true };
+  }
+  return { address: typeof setting === 'string' ? setting.trim().toLowerCase() : '', personal: false };
+}
+
+/**
  * Why an address can't be the site's help mailbox, or `[]` when it can. Refused: nothing at all, a
  * malformed address, a placeholder (`replace-me`, `placeholder`, `changeme`, `todo`, or a reserved
  * test domain such as `.invalid` or `.test`), and an address with an obvious person's name
- * (`first.last@…`, unless either part is a role word like `help`): the help mailbox is role-based, so it outlives whoever answers it.
+ * (`first.last@…`, unless either part is a role word like `help`): the help mailbox is role-based, so
+ * it outlives whoever answers it. A person's own address passes only when the site acknowledges it
+ * (`{ personal: true }`, register E4c).
  */
-export function helpAddressProblems(address: string | null | undefined): string[] {
+export function helpAddressProblems(address: string | null | undefined, options: { personal?: boolean } = {}): string[] {
   const value = (address ?? '').trim().toLowerCase();
   if (value === '') return ['The site needs a help address: a role-based mailbox, like apps-help@your-agency.gov, on the help screens and as the Reply-To on auth emails.'];
   if (!/^[^\s@<>"(),;:]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(value)) return [`"${address}" isn't an email address.`];
@@ -267,8 +320,84 @@ export function helpAddressProblems(address: string | null | undefined): string[
   const tld = domain.slice(domain.lastIndexOf('.') + 1);
   if (PLACEHOLDER_MARKERS.test(value) || RESERVED_TLDS.includes(tld)) return [`"${address}" is a placeholder: set the site's real help mailbox.`];
   const personal = PERSONAL_LOCAL_PART.exec(local);
-  if (personal && !ROLE_WORDS.has(personal[1]!) && !ROLE_WORDS.has(personal[2]!)) return [`"${address}" looks like a person's own address. Use a role-based mailbox (apps-help@…, help@…) that outlives whoever answers it.`];
+  if (personal && options.personal !== true && !ROLE_WORDS.has(personal[1]!) && !ROLE_WORDS.has(personal[2]!)) {
+    return [
+      `"${address}" looks like a person's own address. Use a role-based mailbox (apps-help@…, help@…) that outlives whoever answers it, or, if the site deliberately names one person, acknowledge it: { address: '${value}', personal: true }.`,
+    ];
+  }
   return [];
+}
+
+/** `helpAddressProblems` for a setting (a role-based address, or an acknowledged person's own). */
+export function helpSettingProblems(setting: HelpAddressSetting | null | undefined): string[] {
+  let read: { address: string; personal: boolean };
+  try {
+    read = readHelpSetting(setting);
+  } catch (error) {
+    return [(error as Error).message.replace(/^auth-kit: /, '')];
+  }
+  return helpAddressProblems(read.address, { personal: read.personal });
+}
+
+// ---- The sender (register A10, E4a) -------------------------------------------------------------
+
+/** Every auth-kit sender is a reply-able `sign-in@` mailbox (register A10), never `noreply@`. */
+export const SENDER_LOCAL_PART = 'sign-in';
+
+const NO_REPLY = /^(no-?reply|do-?not-?reply|donotreply|no_reply|bounce|mailer-daemon)$/i;
+
+/** Why an address can't send auth-kit's email, or `[]`: it must be `sign-in@{the site's domain}`. */
+export function senderAddressProblems(address: string | null | undefined): string[] {
+  const value = (address ?? '').trim();
+  if (!/^[^\s@<>"]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(value)) return [`"${address ?? ''}" isn't a sender address like sign-in@example.org.`];
+  const local = value.slice(0, value.lastIndexOf('@'));
+  if (NO_REPLY.test(local)) return [`"${value}" can't be replied to. Send from a reply-able ${SENDER_LOCAL_PART}@ mailbox (register A10), never noreply@.`];
+  if (local.toLowerCase() !== SENDER_LOCAL_PART) return [`"${value}" isn't the site's ${SENDER_LOCAL_PART}@ mailbox. Auth email comes from ${SENDER_LOCAL_PART}@${value.slice(value.lastIndexOf('@') + 1)} (register A10).`];
+  return [];
+}
+
+/** Why a display name isn't the family's sender name ("{Site} (NC OSBM)", "{Site} (UNC)", "{Site}"), or `[]`. */
+export function senderNameProblems(name: string, theme: AuthTheme | ThemeFamily, siteName?: string): string[] {
+  const t = resolveTheme(theme);
+  const value = name.trim();
+  if (siteName !== undefined) {
+    const expected = senderDisplayName(siteName.trim(), t);
+    return value === expected ? [] : [`The sender's name is "${expected}" (register E4a), not "${value}".`];
+  }
+  const suffixes = Object.values(FAMILY_THEMES).map((f) => f.senderSuffix).filter((s): s is string => s !== null);
+  if (t.senderSuffix) {
+    return value.endsWith(` (${t.senderSuffix})`) && value.length > t.senderSuffix.length + 3 ? [] : [`The sender's name ends "(${t.senderSuffix})" on ${t.label} sites: "{Site} (${t.senderSuffix})" (register E4a), not "${value}".`];
+  }
+  return suffixes.some((s) => value.endsWith(`(${s})`)) || value === '' ? [`A personal site's sender name is just the site's name (register E4a), not "${value}".`] : [];
+}
+
+/** `Name <address>`, quoting the name when it has a character that needs it (`(`, `,`, `.`...). */
+export function formatSenderAddress(name: string, address: string): string {
+  return /[()<>[\]:;@\\,."]/.test(name) ? `"${name.replace(/["\\]/g, '')}" <${address}>` : `${name} <${address}>`;
+}
+
+/** The name and address in a sender (`"Name" <a@b>`, `Name <a@b>`, or `a@b`). */
+export function parseSender(from: string): { name: string; address: string } {
+  const m = /^\s*(?:"([^"]*)"|([^<]*?))\s*<([^<>\s]+)>\s*$/.exec(from);
+  if (m) return { name: (m[1] ?? m[2] ?? '').trim(), address: m[3]! };
+  return { name: '', address: from.trim() };
+}
+
+/**
+ * Why a full sender can't send a site's auth email, or `[]`: the family's display name and the
+ * reply-able `sign-in@` address, e.g. `"Example Reports (NC OSBM)" <sign-in@reports.example.org>`.
+ */
+export function senderProblems(from: string, site: { siteName: string; theme: AuthTheme | ThemeFamily }): string[] {
+  if (/[\r\n]/.test(from)) return ['A sender has no line breaks.'];
+  const { name, address } = parseSender(from);
+  return [...senderAddressProblems(address), ...senderNameProblems(name, site.theme, site.siteName)];
+}
+
+/** The site's sender: `"{Site} (NC OSBM)" <sign-in@…>` (checked; throws on a bad address). */
+export function siteSender(siteName: string, theme: AuthTheme | ThemeFamily, address: string): string {
+  const problems = senderAddressProblems(address);
+  if (problems.length > 0) throw new Error(`auth-kit: ${problems.join(' ')}`);
+  return formatSenderAddress(senderDisplayName(siteName, theme), address.trim());
 }
 
 /** A theme from either a theme or a family name (the screens' `theme` prop takes both). Default personal. */
@@ -313,8 +442,9 @@ export function softCardEdge(input: { ink: string }): string {
   return toHex(over('#ffffff', 0.84, input.ink));
 }
 
-/** The theme's card edge color. */
+/** The theme's card edge color (transparent for the Plain style, which has no card). */
 export function cardEdgeColor(theme: AuthTheme): string {
+  if (theme.cardStyle === 'plain') return 'transparent';
   return theme.cardEdge === 'soft' ? softCardEdge({ ink: theme.colors.ink }) : definedCardEdge({ palette: theme.palette, ink: theme.colors.ink, surface: theme.colors.surface });
 }
 
@@ -331,6 +461,8 @@ export interface CardEdgeCheck {
 /** Checks the theme's edge against every backdrop color (WCAG 1.4.11). Only `defined` is required to pass. */
 export function checkCardEdge(theme: AuthTheme): CardEdgeCheck {
   const color = cardEdgeColor(theme);
+  // Plain has no card and so no edge to check (the one exception to E4, register E5).
+  if (theme.cardStyle === 'plain') return { edge: theme.cardEdge, color, against: [], pass: true, required: false };
   const round = (n: number) => Math.round(n * 100) / 100;
   const against = (Object.keys(theme.palette) as (keyof BackdropPalette)[]).map((name) => {
     const value = theme.palette[name];
@@ -339,6 +471,109 @@ export function checkCardEdge(theme: AuthTheme): CardEdgeCheck {
     return { name, value, line: round(line), surface: round(surface), pass: Math.max(line, surface) >= CARD_EDGE_CONTRAST };
   });
   return { edge: theme.cardEdge, color, against, pass: against.every((a) => a.pass), required: theme.cardEdge === 'defined' };
+}
+
+// ---- The card's styles (register E5; Card Studio's tokens(), light theme) ------------------------
+
+/** The few family colors only the styles use (Card Studio's FAM: tint, the gradient's end, the monogram). */
+const STYLE_BRAND: Readonly<Record<ThemeFamily, { tint: string; button2: string; mono: string; monoInk: string }>> = Object.freeze({
+  osbm: { tint: '#dce9f5', button2: '#196ab1', mono: '#092940', monoInk: '#ffffff' },
+  unc: { tint: '#dcebf6', button2: '#0d1f3a', mono: '#4b9cd3', monoInk: '#13294b' },
+  personal: { tint: '#e7e3dd', button2: '#0c0a09', mono: '#1c326e', monoInk: '#ffffff' },
+});
+
+/** `a` moved toward `b` by `t` (Card Studio's mixHex). */
+const mixHex = (a: string, b: string, t: number) => toHex(over(b, t, a));
+const rgbaHex = (hex: string, a: number) => {
+  const [r, g, b] = parseHex(hex);
+  return `rgba(${r},${g},${b},${a})`;
+};
+
+/**
+ * The style's CSS custom properties (Card Studio's `tokens(dir, …)` for the light theme): the card's
+ * fill, corners, shadow, spacing, the quiet fills (status, well), and the button's fill. The edge
+ * stays `--ak-edge` (the defined 3:1 line by default; none on Plain).
+ */
+export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, string> {
+  const ink = theme.colors.ink;
+  const brand = STYLE_BRAND[theme.family];
+  const sh = (a: number) => rgbaHex(ink, a);
+  const W = '#ffffff';
+  const v: Record<`--ak-${string}`, string> = {
+    '--ak-ground': theme.palette.page,
+    '--ak-card-bg': theme.colors.surface,
+    '--ak-card-solid': theme.colors.surface,
+    '--ak-card-radius': '12px',
+    '--ak-control-radius': '8px',
+    '--ak-card-padding': '36px 32px 24px',
+    '--ak-card-padding-phone': '28px 22px 20px',
+    '--ak-card-shadow': `0 1px 2px ${sh(0.05)}, 0 16px 36px -16px ${sh(0.22)}`,
+    '--ak-hair': mixHex(ink, W, 0.9),
+    '--ak-status': sh(0.045),
+    '--ak-well': 'transparent',
+    '--ak-button-bg': theme.colors.button,
+    '--ak-button-shadow': 'none',
+    '--ak-mono': brand.mono,
+    '--ak-mono-ink': brand.monoInk,
+  };
+  switch (theme.cardStyle) {
+    case 'quiet':
+      break;
+    case 'monogram':
+      Object.assign(v, {
+        '--ak-card-bg': '#fffefc',
+        '--ak-card-solid': '#fffefc',
+        '--ak-surface': '#fffefc',
+        '--ak-hair': '#ebe6de',
+        '--ak-text': '#3f3933',
+        '--ak-muted': '#625a51',
+        '--ak-field-border': '#7d746a',
+        '--ak-status': 'rgba(120,90,50,0.06)',
+        '--ak-card-radius': '16px',
+        '--ak-control-radius': '10px',
+        '--ak-card-shadow': '0 1px 2px rgba(70,50,30,.06), 0 18px 40px -18px rgba(70,50,30,.26)',
+      });
+      break;
+    case 'frosted':
+      Object.assign(v, {
+        '--ak-card-bg': 'rgba(255,255,255,0.66)',
+        '--ak-card-solid': toHex(over(W, 0.66, theme.palette.page)),
+        '--ak-hair': sh(0.12),
+        '--ak-status': 'rgba(255,255,255,0.62)',
+        '--ak-muted': mixHex(theme.colors.muted, ink, 0.25),
+        '--ak-card-radius': '18px',
+        '--ak-control-radius': '10px',
+        '--ak-card-shadow': `0 0 0 1px ${sh(0.14)}, 0 26px 60px -26px ${sh(0.42)}`,
+      });
+      break;
+    case 'plain':
+      Object.assign(v, {
+        '--ak-card-bg': 'transparent',
+        '--ak-card-solid': theme.palette.page,
+        '--ak-card-shadow': 'none',
+        '--ak-card-radius': '0',
+        '--ak-status': sh(0.05),
+      });
+      break;
+    case 'porcelain': {
+      const [r, g, b] = parseHex(theme.colors.button);
+      Object.assign(v, {
+        '--ak-hair': sh(0.08),
+        '--ak-field-border': mixHex(ink, W, 0.48),
+        '--ak-well': mixHex(brand.tint, W, 0.45),
+        '--ak-status': mixHex(brand.tint, W, 0.4),
+        '--ak-card-radius': '20px',
+        '--ak-control-radius': '12px',
+        '--ak-card-padding': '40px 34px 26px',
+        '--ak-card-padding-phone': '30px 22px 22px',
+        '--ak-card-shadow': `0 0 0 1px ${sh(0.07)}, 0 1px 2px ${sh(0.05)}, 0 8px 20px -10px ${sh(0.12)}, 0 34px 70px -32px rgba(${r},${g},${b},.34)`,
+        '--ak-button-bg': `linear-gradient(180deg, ${theme.colors.button}, ${brand.button2})`,
+        '--ak-button-shadow': `0 1px 0 rgba(255,255,255,.14) inset, 0 8px 18px -10px rgba(${r},${g},${b},.7)`,
+      });
+      break;
+    }
+  }
+  return v;
 }
 
 /**
@@ -360,5 +595,6 @@ export function themeCssVariables(theme: AuthTheme): Record<`--ak-${string}`, st
     '--ak-field-border': c.fieldBorder,
     '--ak-accent': c.accent,
     '--ak-edge': cardEdgeColor(theme),
+    ...cardStyleVariables(theme),
   };
 }

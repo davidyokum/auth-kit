@@ -3,6 +3,7 @@
  * (Amplify Hosting's SSR compute role is set in the Amplify console). The CDK construct in
  * `auth-kit/admin/cdk` builds the same statements.
  */
+import { type AccountCreationSettings, allowsSelfSignUp, normalizeAccountCreation } from '../shared/account-creation.js';
 
 export interface IamStatement {
   Sid?: string;
@@ -191,6 +192,8 @@ export const SELF_SERVICE_COGNITO_ACTIONS = [
 ] as const;
 /** The unverified-account sweep: list everyone, read a due account's roles, delete it. */
 export const UNVERIFIED_SWEEP_COGNITO_ACTIONS = ['cognito-idp:ListUsers', 'cognito-idp:AdminListGroupsForUser', 'cognito-idp:AdminGetUser', 'cognito-idp:AdminDeleteUser'] as const;
+/** The account-change notice route (register A10): read the account's own address. Its passkey check uses the person's own token. */
+export const ACCOUNT_NOTICE_COGNITO_ACTIONS = ['cognito-idp:ListUsers'] as const;
 /** The digest reads who manages people. */
 export const ACCESS_REQUEST_DIGEST_COGNITO_ACTIONS = ['cognito-idp:ListUsersInGroup'] as const;
 
@@ -204,13 +207,18 @@ export function accountCreationAppPolicy(options: {
   rateLimitTableArn: string;
   /** `AccessRequestTable`, where the site takes requests. */
   accessRequestTableArn?: string;
-  /** Sign-up sites: the sign-up route's and members' own Cognito calls. */
-  selfSignUp: boolean;
+  /** The site's account creation (the preset's setting): sign-up sites get the sign-up route's and members' own Cognito calls. */
+  accountCreation: AccountCreationSettings;
+  /** The account-change notice route (register A10, on by default). `false` only for a site that doesn't send them. */
+  notices?: boolean;
   /** SES identity (and configuration set) ARNs, for "you already have an account" and the notices. */
   sesResourceArns?: readonly string[];
 }): IamPolicyDocument {
+  if ('selfSignUp' in options) throw new Error('auth-kit: accountCreationAppPolicy takes accountCreation (the preset\'s setting) instead of selfSignUp.');
+  const signUpSite = allowsSelfSignUp(normalizeAccountCreation(options.accountCreation, 'accountCreationAppPolicy accountCreation'));
   const cognito = [
-    ...(options.selfSignUp ? [...SIGN_UP_COGNITO_ACTIONS, ...SELF_SERVICE_COGNITO_ACTIONS] : []),
+    ...(signUpSite ? [...SIGN_UP_COGNITO_ACTIONS, ...SELF_SERVICE_COGNITO_ACTIONS] : []),
+    ...(options.notices !== false ? ACCOUNT_NOTICE_COGNITO_ACTIONS : []),
     // The request route checks whether the address has an account.
     ...(options.accessRequestTableArn ? ['cognito-idp:ListUsers'] : []),
   ];

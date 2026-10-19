@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { safeRedirect } from '../server/redirect.js';
-import { type AccountCreationSettings, normalizeAccountCreation } from '../shared/account-creation.js';
+import { type AccountCreationSettings, domainsInWords, normalizeAccountCreation } from '../shared/account-creation.js';
 import { codeLifetimeMinutes as checkedLifetime } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import {
@@ -17,6 +17,8 @@ import {
   signInWithPassword,
 } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import type { AccountNoticeEvent } from '../shared/notices.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
 import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
 import { hrefOr } from './href.js';
@@ -90,19 +92,21 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   accountCreation?: AccountCreationSettings;
   /** The invite-only line: a "Need access?" link to who to ask (default), or the plain sentence. */
   inviteLine?: 'sentence' | 'link';
-  /** "Trouble signing in?" inside the card (default) or just below it (register E5, Proposed). */
+  /** "Trouble signing in?" inside the card (the default, register E5) or just below it. */
   troubleLink?: 'inside' | 'below';
-  /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 3. */
+  /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
   /** Where "Create an account" goes. Default `/sign-up`. A same-site path or an http(s) URL (anything else throws). */
   signUpHref?: string;
   /** Where "Need access? Request it." goes. Default `/request-access`. A same-site path or an http(s) URL (anything else throws). */
   requestAccessHref?: string;
   /**
-   * The site emails security notices (a passkey added, a password changed; REPORT §5.2f), so the
-   * screens may say "We've emailed you a note about this." Default false: auth-kit doesn't send them yet.
+   * Account-change notices (register A10: on by default): after the first passkey or password, or a
+   * password reset, `SignIn` asks the site's notice route (`createAccountNoticeRoute`, mounted at
+   * `/api/auth-kit/account-notice` unless `url` says otherwise) to email the account, and says "We've
+   * emailed you a note about this." only when it did. `false` for a site that doesn't send them.
    */
-  securityNotices?: boolean;
+  notices?: AccountNotices;
   /** The `next` search parameter. Goes through `safeRedirect` (same-site paths only). */
   next?: string | null;
   /** Where to go when `next` is missing or unsafe. Default `/`. */
@@ -141,7 +145,7 @@ type View =
   | { name: 'check-failed' }
   | { name: 'enroll-authenticator' }
   | { name: 'first-credential' }
-  | { name: 'done'; how: FirstCredential }
+  | { name: 'done'; how: FirstCredential; emailed: boolean }
   | { name: 'offer-passkey' }
   | { name: 'trouble' }
   /** `askEmail`: the address wasn't typed when the screen opened, so its action asks for it (and keeps asking while it's typed). */
@@ -247,6 +251,8 @@ export function SignIn(props: SignInProps) {
     codeLifetimeMinutes: lifetime,
     helpAddress: props.help.address,
     ...(props.help.owner !== undefined && { ownerName: props.help.owner }),
+    // Open sign-up sites are public: "the {Site} team", never a person, and no Teams check (E4c).
+    publicSite: accountCreation.mode === 'open',
   };
   const words: MessageWords = { siteName, codeLifetimeMinutes: lifetime, helpAddress: props.help.address };
   const emailCodeEnabled = props.emailCodeEnabled ?? true;
@@ -256,6 +262,8 @@ export function SignIn(props: SignInProps) {
   const signUpHref = hrefOr('signUpHref', props.signUpHref, '/sign-up');
   const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
   const passkeyOptions = props.passkey;
+  const notices = useMemo(() => resolveNotices(props.notices, 'SignIn'), [props.notices]);
+  const pendingNotice = useRef<AccountNoticeEvent | null>(null);
   const uid = useId();
   const ids = { email: `${uid}-email`, password: `${uid}-password`, code: `${uid}-code`, newPassword: `${uid}-new-password` };
   const rootRef = useRef<HTMLDivElement>(null);
@@ -317,6 +325,11 @@ export function SignIn(props: SignInProps) {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
     userIdRef.current = (await currentUser())?.userId;
+    if (pendingNotice.current) {
+      const event = pendingNotice.current;
+      pendingNotice.current = null;
+      await sendAccountNotice(notices, event);
+    }
     let factors: ClientAuthFactors | null | undefined;
     try {
       factors = await (props.loadFactors ?? fetchAuthFactors)();
@@ -342,7 +355,7 @@ export function SignIn(props: SignInProps) {
       case 'done':
         return finish();
     }
-  }, [finish, go, passkeysEnabled, props.loadFactors, props.reauth, set]);
+  }, [finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set]);
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
@@ -541,18 +554,22 @@ export function SignIn(props: SignInProps) {
     switch (accountCreation.mode) {
       case 'request':
         return line(
-          <a href={requestAccessHref} {...slot(classNames, 'link')}>
-            {ACCESS_LINE.request}
-          </a>,
+          <>
+            {ACCESS_LINE.newTo(c)}{' '}
+            <a href={requestAccessHref} {...slot(classNames, 'link')}>
+              {ACCESS_LINE.requestAccess}
+            </a>
+          </>,
         );
       case 'domains':
       case 'open':
         return line(
           <>
-            {ACCESS_LINE.newHere}{' '}
+            {ACCESS_LINE.newTo(c)}{' '}
             <a href={signUpHref} {...slot(classNames, 'link')}>
               {ACCESS_LINE.createAccount}
             </a>
+            {accountCreation.mode === 'domains' ? ACCESS_LINE.withDomains(domainsInWords(accountCreation.domains)) : null}
           </>,
         );
       case 'invite':
@@ -574,7 +591,6 @@ export function SignIn(props: SignInProps) {
   switch (view.name) {
     case 'email':
       bottom.access = props.reauth ? undefined : accessLine();
-      bottom.notice = true;
       body = (
         <form noValidate onSubmit={onSubmit(() => requireEmail() && (passkeysEnabled ? startPasskey() : go({ name: 'password', challenge: false })))} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
@@ -882,7 +898,9 @@ export function SignIn(props: SignInProps) {
                 }
                 return;
               }
-              // The new password signs them straight in; the authenticator code comes next, as usual.
+              // The new password signs them straight in; the authenticator code comes next, as usual. Once
+              // they're in, the account gets the "password changed" notice (register A10).
+              pendingNotice.current = 'password-changed';
               await attempt(firstFactor('password', () => signInWithPassword(email, password)), 'sign-in', STATUS.signingIn);
             })();
           })}
@@ -951,7 +969,9 @@ export function SignIn(props: SignInProps) {
           issuer={siteName}
           accountName={email.trim()}
           headingLevel={level}
-          onDone={(how) => go({ name: 'done', how })}
+          onDone={(how) => {
+            void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
+          }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
           classNames={classNames}
@@ -965,7 +985,7 @@ export function SignIn(props: SignInProps) {
           {heading(FIRST_VISIT.doneHeading)}
           <Text classNames={classNames}>
             {view.how === 'password' ? FIRST_VISIT.donePassword : FIRST_VISIT.donePasskey(c)}
-            {props.securityNotices ? ` ${FIRST_VISIT.emailedNote}` : ''}
+            {view.emailed ? ` ${FIRST_VISIT.emailedNote}` : ''}
           </Text>
           <Actions classNames={classNames}>
             <Button classNames={classNames} onClick={finish}>
@@ -986,9 +1006,10 @@ export function SignIn(props: SignInProps) {
               classNames={classNames}
               disabled={busy}
               onClick={() =>
-                void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then((r) => {
+                void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then(async (r) => {
                   if (r.ok) {
                     set({ status: STATUS.passkeySaved });
+                    await sendAccountNotice(notices, 'passkey-added');
                     finish();
                   }
                 })
@@ -1032,7 +1053,7 @@ export function SignIn(props: SignInProps) {
       break;
     case 'help': {
       bottom.back = { label: SIGN_IN.back, onClick: () => go({ name: 'trouble' }) };
-      const screen = helpScreen(view.topic, c, { securityNotices: props.securityNotices === true });
+      const screen = helpScreen(view.topic, c, { securityNotices: notices !== null });
       const contact = contactLines(c, { teams: screen.teams === true });
       const action = screen.button;
       const runAction = () => {
@@ -1098,6 +1119,7 @@ export function SignIn(props: SignInProps) {
   return (
     <Card
       name="sign-in"
+      siteName={siteName}
       view={view.name}
       theme={theme}
       bottom={bottom}

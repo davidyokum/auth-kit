@@ -381,10 +381,21 @@ describe('the override stays on allowed domains (M8)', () => {
     expect(osbm.overrideProblems('help@not-our-desk.net')[0]).toMatch(/must be on osbm\.nc\.gov, nc\.gov/);
     expect(osbm.overrideProblems('help@evilnc.gov')[0]).toMatch(/must be on/);
     const personal = createSignInHelp({ configured: CONFIGURED });
-    expect(personal.allowedDomains).toEqual(['example.org']);
+    // The personal family's own domain is yokum.app (register F11).
+    expect(personal.allowedDomains).toEqual(['example.org', 'yokum.app']);
     expect(personal.overrideProblems('desk@help.example.org')).toEqual([]);
     expect(personal.overrideProblems('desk@example.net')[0]).toMatch(/allowedDomains/);
     expect(createSignInHelp({ configured: CONFIGURED, allowedDomains: ['desk.example.net'] }).overrideProblems('help@desk.example.net')).toEqual([]);
+  });
+
+  it('a person’s own address only with an acknowledgement, in config and in the Settings override (register E4c)', async () => {
+    expect(() => createSignInHelp({ configured: 'jordan.lee@example.org' })).toThrow(/personal: true/);
+    const own = createSignInHelp({ configured: { address: 'jordan.lee@example.org', personal: true } });
+    expect(own.configured).toBe('jordan.lee@example.org');
+    expect(own.overrideProblems('sam.carter@example.org')[0]).toMatch(/person's own address/);
+    expect(own.overrideProblems('sam.carter@example.org', { personal: true })).toEqual([]);
+    const t = setupActions();
+    expect(await t.actions.set({ address: 'sam.carter@example.org', reason: REASON, version: 0 })).toMatchObject({ ok: false, code: 'invalid' });
   });
 
   it('a stored override off the list (written straight into the table, or a list narrowed since) falls back to the configured address', async () => {

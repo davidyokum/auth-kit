@@ -1,6 +1,6 @@
 # 0002. MFA optional in the pool; the app requires TOTP of password users
 
-- **Status:** Accepted, 2026-10-17; amended 2026-10-18 (admins, below)
+- **Status:** Accepted, 2026-10-17; amended 2026-10-18 (admins, below) and 2026-10-19 (no opt-out on a site)
 - **Standard:** 03 §2 Sign-in; primer §4 "Requiring the authenticator"
 
 ## Context
@@ -25,3 +25,7 @@ The standard wants every password user to have an authenticator code. Cognito se
 ## Amendment, 2026-10-18: admins (register A3)
 
 In an admin pool (`MfaConfiguration = ON`), every admin has a password and an authenticator: the password is how a new admin's first sign-in works (a one-time password; there are no emailed codes), and it stays as a second way in beside the passkey they use day to day ([0001](0001-passkey-first.md#amendment-2026-10-18-admins-keep-a-password-plus-authenticator-route-register-a3)). Nothing neutralizes it later.
+
+## Amendment, 2026-10-19: no opt-out on a site
+
+`createServerAuth`'s `requireTotpForPasswordUsers: false` (and `requireFirstCredential: false`, register A1) are accepted only in the auth matrix's server mode (`matrixOverrides().serverAuth`, [0016](0016-matrix-server-mode.md)), so a test can reach a persona the standard otherwise refuses. Anywhere else `createServerAuth` throws: a site can't switch the rule off.
