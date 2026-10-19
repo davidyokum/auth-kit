@@ -6,6 +6,7 @@
 import { aurora } from './aurora/index.js';
 import { constellation } from './constellation/index.js';
 import { contours } from './contours/index.js';
+import { countySurvey } from './county-survey/index.js';
 import type { BackdropStyleModule, StyleVersion } from './define.js';
 import { flowLines } from './flow-lines/index.js';
 import { magneticDots } from './magnetic-dots/index.js';
@@ -14,7 +15,7 @@ import { ripples } from './ripples/index.js';
 import { stainedGlass } from './stained-glass/index.js';
 import { watercolor } from './watercolor/index.js';
 
-export const STYLE_MODULES = [magneticDots, contours, flowLines, watercolor, aurora, stainedGlass, constellation, ripples, painted] as const;
+export const STYLE_MODULES = [magneticDots, contours, flowLines, watercolor, aurora, stainedGlass, constellation, ripples, countySurvey, painted] as const;
 
 /** Every style ID, including retired ones and `painted`. */
 export type BackdropStyleId = (typeof STYLE_MODULES)[number]['id'];
