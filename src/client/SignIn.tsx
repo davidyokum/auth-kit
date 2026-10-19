@@ -3,22 +3,9 @@ import { safeRedirect } from '../server/redirect.js';
 import { type AccountCreationSettings, domainsInWords, normalizeAccountCreation } from '../shared/account-creation.js';
 import { codeLifetimeMinutes as checkedLifetime } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
-import {
-  completeNewPassword,
-  confirmCode,
-  confirmPassword,
-  confirmPasswordReset,
-  currentUser,
-  fetchAuthFactors,
-  registerPasskey,
-  requestEmailCode,
-  requestPasswordReset,
-  signInWithPasskey,
-  signInWithPassword,
-} from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
-import { hasPasskeyHint, passkeyHintSkipped, rememberPasskey } from './passkey-hint.js';
-import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
+import { tagged, useDriver } from './driver.js';
+import { type AccountNotices, resolveNotices } from './notices.js';
 import type { AccountNoticeEvent } from '../shared/notices.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
 import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
@@ -26,8 +13,8 @@ import { hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode } from './ladder.js';
 import type { AuthErrorContext, AuthErrorInfo, AuthErrorKind, MessageWords } from './messages.js';
-import { type PasskeyPromptOptions, answerSimulatedCode, decoyPasskeyPrompt, isFirstFactorRefusal, isFirstFactorUnavailable } from './parity.js';
-import { type PasswordCheckOptions, breachedPasswordProblem } from './PasswordForm.js';
+import { type PasskeyPromptOptions, answerSimulatedCode, isFirstFactorRefusal, isFirstFactorUnavailable } from './parity.js';
+import type { PasswordCheckOptions } from './PasswordForm.js';
 import type { SignInStep } from './steps.js';
 import {
   Actions,
@@ -132,7 +119,11 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   emailHint?: string;
 }
 
-type View =
+/**
+ * Where the card is (its state machine's states). Exported for the driver (ADR 0025), not from
+ * `auth-kit/client`: a preview holds the card at one of these.
+ */
+export type SignInView =
   | { name: 'email' }
   /** `fromHint`: this browser's passkey hint opened the prompt straight from the email step (register A5a). */
   | { name: 'passkey'; cancelled: boolean; fromHint?: boolean }
@@ -158,8 +149,9 @@ type View =
   | { name: 'help'; topic: HelpTopic; askEmail?: boolean }
   | { name: 'access-help' };
 
+type View = SignInView;
+
 const RESEND_COOLDOWN_MS = 30_000;
-const OFFER_KEY = 'auth-kit:passkey-offer-dismissed:';
 
 /** A step for the screens: Cognito's, or "check your email" when nothing was sent. */
 type ScreenStep = SignInStep | { step: 'email-code-simulated' };
@@ -178,7 +170,12 @@ function passwordRefused(): Error {
  * what an unknown address gets: a passkey prompt that finds nothing, a password that doesn't match, or
  * "check your email" with nothing sent. Cognito's list of the account's other factors is never shown.
  */
-function firstFactor(method: SignInMethod, request: () => Promise<SignInStep>, passkey: PasskeyPromptOptions = {}): () => Promise<ScreenStep> {
+function firstFactor(
+  method: SignInMethod,
+  request: () => Promise<SignInStep>,
+  decoyPasskeyPrompt: (options?: PasskeyPromptOptions) => Promise<never>,
+  passkey: PasskeyPromptOptions = {},
+): () => Promise<ScreenStep> {
   const unavailable = async (): Promise<ScreenStep> => {
     switch (method) {
       case 'passkey':
@@ -202,24 +199,6 @@ function firstFactor(method: SignInMethod, request: () => Promise<SignInStep>, p
   };
 }
 
-function offerDismissed(userId: string | undefined): boolean {
-  if (!userId) return false;
-  try {
-    return window.localStorage.getItem(OFFER_KEY + userId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function dismissOffer(userId: string | undefined): void {
-  if (!userId) return;
-  try {
-    window.localStorage.setItem(OFFER_KEY + userId, '1');
-  } catch {
-    // Private mode or blocked storage: the offer may show again next time.
-  }
-}
-
 function looksLikeEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
@@ -227,6 +206,9 @@ function looksLikeEmail(email: string): boolean {
 function clockTime(at: number): string {
   return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(at));
 }
+
+/** The help screens' one button, as an action's name (ADR 0025). */
+const HELP_ACTION = { 'email-code': 'send-email-code', 'reset-code': 'send-reset-code', 'resend-code': 'resend-code' } as const;
 
 /** The views that carry "Trouble signing in?" (Card Studio: every sign-in screen, not setup or help). */
 const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'password', 'totp', 'email-code', 'reset-code', 'reset-password']);
@@ -248,6 +230,9 @@ const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'pass
  */
 export function SignIn(props: SignInProps) {
   const { classNames, passkeysEnabled, siteName } = props;
+  // The live driver unless a preview holds the card (ADR 0025): every effect below goes through it.
+  const driver = useDriver();
+  const init = driver.initial('sign-in');
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
   const lifetime = checkedLifetime(props.codeLifetimeMinutes, 'SignIn codeLifetimeMinutes');
   const accountCreation = useMemo(() => normalizeAccountCreation(props.accountCreation, 'SignIn accountCreation'), [props.accountCreation]);
@@ -277,13 +262,13 @@ export function SignIn(props: SignInProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const secretRef = useRef<HTMLInputElement>(null);
-  const fb = useFeedback();
+  const fb = useFeedback(init?.feedback);
   const { set } = fb;
-  const [view, setView] = useState<View>({ name: 'email' });
-  const [email, setEmail] = useState('');
-  const [secretValue, setSecretValue] = useState('');
-  const [codeValue, setCodeValue] = useState('');
-  const [resendReady, setResendReady] = useState(true);
+  const [view, setView] = useState<View>(init?.view ?? { name: 'email' });
+  const [email, setEmail] = useState(init?.email ?? '');
+  const [secretValue, setSecretValue] = useState(init?.secret ?? '');
+  const [codeValue, setCodeValue] = useState(init?.code ?? '');
+  const [resendReady, setResendReady] = useState(init?.resendReady ?? true);
   const userIdRef = useRef<string | undefined>(undefined);
   useFocusOnViewChange(rootRef, view.name);
 
@@ -291,14 +276,14 @@ export function SignIn(props: SignInProps) {
   useEffect(() => {
     if (!props.reauth) return;
     let active = true;
-    void currentUser().then((user) => {
+    void driver.currentUser().then((user) => {
       const loginId = user?.loginId;
       if (active && loginId) setEmail((e) => e || loginId);
     });
     return () => {
       active = false;
     };
-  }, [props.reauth]);
+  }, [props.reauth, driver]);
 
   // "Send a new code" waits a little between sends (each one emails the person and counts toward WAF limits).
   useEffect(() => {
@@ -321,8 +306,8 @@ export function SignIn(props: SignInProps) {
     const target = safeRedirect(props.next, props.defaultNext ?? '/', {
       ...(props.allowedRedirectPrefixes !== undefined && { allowedPrefixes: props.allowedRedirectPrefixes }),
     });
-    (props.navigate ?? ((path: string) => window.location.assign(path)))(target);
-  }, [props.next, props.defaultNext, props.allowedRedirectPrefixes, props.navigate]);
+    (props.navigate ?? driver.navigate)(target);
+  }, [props.next, props.defaultNext, props.allowedRedirectPrefixes, props.navigate, driver]);
 
   /**
    * After Cognito says DONE: decide what else this person needs before entering the site. Never in
@@ -332,16 +317,16 @@ export function SignIn(props: SignInProps) {
   const afterSignIn = useCallback(async () => {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
-    userIdRef.current = (await currentUser())?.userId;
-    if (methodRef.current === 'passkey') await rememberPasskey(email);
+    userIdRef.current = (await driver.currentUser())?.userId;
+    if (methodRef.current === 'passkey') await driver.rememberPasskey(email);
     if (pendingNotice.current) {
       const event = pendingNotice.current;
       pendingNotice.current = null;
-      await sendAccountNotice(notices, event);
+      await driver.sendAccountNotice(notices, event);
     }
     let factors: ClientAuthFactors | null | undefined;
     try {
-      factors = await (props.loadFactors ?? fetchAuthFactors)();
+      factors = await (props.loadFactors ?? driver.fetchAuthFactors)();
     } catch {
       factors = null;
     }
@@ -358,13 +343,13 @@ export function SignIn(props: SignInProps) {
         set({ status: null });
         return go({ name: 'first-credential' });
       case 'offer-passkey':
-        if (props.reauth || offerDismissed(userIdRef.current)) return finish();
+        if (props.reauth || driver.passkeyOfferDismissed(userIdRef.current)) return finish();
         set({ status: null });
         return go({ name: 'offer-passkey' });
       case 'done':
         return finish();
     }
-  }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set]);
+  }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set, driver]);
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
@@ -463,7 +448,7 @@ export function SignIn(props: SignInProps) {
   function startPasskey(fromHint = false) {
     methodRef.current = 'passkey';
     go({ name: 'passkey', cancelled: false, fromHint });
-    void attempt(firstFactor('passkey', () => signInWithPasskey(email), passkeyOptions), 'sign-in').then((kind) => {
+    void attempt(firstFactor('passkey', () => driver.signInWithPasskey(email), driver.decoyPasskeyPrompt, passkeyOptions), 'sign-in').then((kind) => {
       // A closed window, or no passkey here (indistinguishable): a calm note, not an error.
       if (kind === 'passkey-cancelled') {
         set({ error: null, field: null });
@@ -481,7 +466,7 @@ export function SignIn(props: SignInProps) {
     if (!requireEmail()) return;
     if (!passkeysEnabled) return go({ name: 'password', challenge: false });
     const typed = email;
-    void hasPasskeyHint(typed).then((hinted) => {
+    void driver.hasPasskeyHint(typed).then((hinted) => {
       if (hinted) startPasskey(true);
       else go({ name: 'choose' });
     });
@@ -490,13 +475,13 @@ export function SignIn(props: SignInProps) {
   function sendEmailCode() {
     if (!requireEmail()) return;
     methodRef.current = 'email-code';
-    void attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', STATUS.sendingCode);
+    void attempt(firstFactor('email-code', () => driver.requestEmailCode(email), driver.decoyPasskeyPrompt), 'sign-in', STATUS.sendingCode);
   }
 
   function resendEmailCode() {
     if (!requireEmail()) return;
     void (async () => {
-      const kind = await attempt(firstFactor('email-code', () => requestEmailCode(email)), 'sign-in', STATUS.sendingCode);
+      const kind = await attempt(firstFactor('email-code', () => driver.requestEmailCode(email), driver.decoyPasskeyPrompt), 'sign-in', STATUS.sendingCode);
       if (kind === null) setView((v) => (v.name === 'email-code' ? { ...v, resentAt: Date.now() } : v));
     })();
   }
@@ -504,7 +489,7 @@ export function SignIn(props: SignInProps) {
   function sendResetCode() {
     if (!requireEmail()) return;
     void (async () => {
-      const result = await fb.run(() => requestPasswordReset(email), { context: 'reset-password', words, busyStatus: STATUS.sendingCode });
+      const result = await fb.run(() => driver.requestPasswordReset(email), { context: 'reset-password', words, busyStatus: STATUS.sendingCode });
       if (result.ok) {
         setResendReady(false);
         go({ name: 'reset-code' });
@@ -528,12 +513,21 @@ export function SignIn(props: SignInProps) {
     </Heading>
   );
 
-  function onSubmit(handler: () => void) {
-    return (event: FormEvent) => {
+  /**
+   * A form's submit, named for the driver (ADR 0025): the props for the `<form>`. A form with nothing to
+   * submit (a help screen without a button) gets no name.
+   */
+  function onSubmit(name: string | null, handler: () => void) {
+    const run = (event: FormEvent) => {
       event.preventDefault();
       if (!busy) handler();
     };
+    const submit = name === null ? run : driver.act(name, run);
+    return { onSubmit: submit, ...tagged(submit) };
   }
+  /** A control's handler, named for the driver: itself when live, a report in preview. */
+  const act = <A extends unknown[]>(name: string, handler: (...args: A) => void) => driver.act(name, handler);
+  const changeEmail = act('change-email', backToEmail);
 
   const emailField = (
     <Field
@@ -571,26 +565,30 @@ export function SignIn(props: SignInProps) {
     />
   );
 
-  const passwordAlt: AltLink = { icon: 'password', label: SIGN_IN.usePassword, onClick: () => (requireEmail() ? go({ name: 'password', challenge: false }) : undefined), disabled: busy };
-  const passkeyAlt: AltLink = { icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: () => requireEmail() && startPasskey(), disabled: busy };
-  const codeAlt: AltLink = { icon: 'mail', label: SIGN_IN.emailCode, onClick: sendEmailCode, disabled: busy };
+  const usePassword = () => (requireEmail() ? go({ name: 'password', challenge: false }) : undefined);
+  const usePasskey = () => requireEmail() && startPasskey();
+  const alt = (name: string, icon: AltLink['icon'], label: string, handler: () => void): AltLink => ({ icon, label, onClick: act(name, handler), disabled: busy });
+  const passwordAlt = alt('use-password', 'password', SIGN_IN.usePassword, usePassword);
+  const passkeyAlt = alt('use-passkey', 'fingerprint', SIGN_IN.usePasskey, usePasskey);
+  const codeAlt = alt('send-email-code', 'mail', SIGN_IN.emailCode, sendEmailCode);
   /** Another way in, from the prompt the hint opened: twice in a row forgets the hint (register A5a). */
-  const skipped = (alt: AltLink): AltLink => ({
-    ...alt,
-    onClick: () => {
-      void passkeyHintSkipped(email);
-      alt.onClick();
-    },
-  });
+  const skipped = (name: string, icon: AltLink['icon'], label: string, handler: () => void): AltLink =>
+    alt(name, icon, label, () => {
+      void driver.passkeyHintSkipped(email);
+      handler();
+    });
 
   function accessLine(): ReactNode {
     const line = (children: ReactNode) => <p {...slot(classNames, 'access')}>{children}</p>;
+    const requestAccessLink = driver.act('request-access');
+    const signUpLink = driver.act('create-account');
+    const needAccess = act('need-access', () => go({ name: 'access-help' }));
     switch (accountCreation.mode) {
       case 'request':
         return line(
           <>
             {ACCESS_LINE.newTo(c)}{' '}
-            <a href={requestAccessHref} {...slot(classNames, 'link')}>
+            <a href={requestAccessHref} onClick={requestAccessLink} {...tagged(requestAccessLink)} {...slot(classNames, 'link')}>
               {ACCESS_LINE.requestAccess}
             </a>
           </>,
@@ -600,7 +598,7 @@ export function SignIn(props: SignInProps) {
         return line(
           <>
             {ACCESS_LINE.newTo(c)}{' '}
-            <a href={signUpHref} {...slot(classNames, 'link')}>
+            <a href={signUpHref} onClick={signUpLink} {...tagged(signUpLink)} {...slot(classNames, 'link')}>
               {ACCESS_LINE.createAccount}
             </a>
             {accountCreation.mode === 'domains' ? ACCESS_LINE.withDomains(domainsInWords(accountCreation.domains)) : null}
@@ -611,7 +609,7 @@ export function SignIn(props: SignInProps) {
           ? line(
               <>
                 {ACCESS_LINE.inviteOnly(c)}{' '}
-                <button type="button" onClick={() => go({ name: 'access-help' })} {...slot(classNames, 'linkButton')}>
+                <button type="button" onClick={needAccess} {...tagged(needAccess)} {...slot(classNames, 'linkButton')}>
                   {ACCESS_LINE.needAccess}
                 </button>
               </>,
@@ -626,7 +624,7 @@ export function SignIn(props: SignInProps) {
     case 'email':
       bottom.access = props.reauth ? undefined : accessLine();
       body = (
-        <form noValidate onSubmit={onSubmit(continueFromEmail)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...onSubmit('continue', continueFromEmail)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(title)}
           {reauthNote}
@@ -640,16 +638,19 @@ export function SignIn(props: SignInProps) {
         </form>
       );
       break;
-    case 'choose':
+    case 'choose': {
+      const wayPasskey = act('use-passkey', () => startPasskey());
+      const wayPassword = act('use-password', () => go({ name: 'password', challenge: false }));
+      const wayCode = act('send-email-code', sendEmailCode);
       body = (
         <div {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_IN.chooseHeading)}
-          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
+          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
           {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, tinted and "(recommended)". */}
           <ul {...slot(classNames, 'ways')}>
             <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={() => startPasskey()} data-auth-kit-choice="passkey" data-auth-kit-recommended="" {...slot(classNames, 'way')}>
+              <button type="button" disabled={busy} onClick={wayPasskey} {...tagged(wayPasskey)} data-auth-kit-choice="passkey" data-auth-kit-recommended="" {...slot(classNames, 'way')}>
                 <Icon name="fingerprint" />
                 <span {...slot(classNames, 'wayText')}>
                   <span {...slot(classNames, 'wayLabel')}>
@@ -661,7 +662,7 @@ export function SignIn(props: SignInProps) {
               </button>
             </li>
             <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={() => go({ name: 'password', challenge: false })} data-auth-kit-choice="password" {...slot(classNames, 'way')}>
+              <button type="button" disabled={busy} onClick={wayPassword} {...tagged(wayPassword)} data-auth-kit-choice="password" {...slot(classNames, 'way')}>
                 <Icon name="password" />
                 <span {...slot(classNames, 'wayText')}>
                   <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.choosePassword}</span>
@@ -671,7 +672,7 @@ export function SignIn(props: SignInProps) {
             </li>
             {emailCodeEnabled ? (
               <li {...slot(classNames, 'listItem')}>
-                <button type="button" disabled={busy} onClick={sendEmailCode} data-auth-kit-choice="email-code" {...slot(classNames, 'way')}>
+                <button type="button" disabled={busy} onClick={wayCode} {...tagged(wayCode)} data-auth-kit-choice="email-code" {...slot(classNames, 'way')}>
                   <Icon name="mail" />
                   <span {...slot(classNames, 'wayText')}>
                     <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.chooseCode}</span>
@@ -684,21 +685,29 @@ export function SignIn(props: SignInProps) {
         </div>
       );
       break;
+    }
     case 'passkey':
       body = (
         <div {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_IN.passkeyHeading)}
           <Text classNames={classNames}>{SIGN_IN.passkeySub}</Text>
-          <Who lead={SIGN_IN.signingInAs} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
+          <Who lead={SIGN_IN.signingInAs} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
           {view.cancelled ? <Note classNames={classNames}>{ERRORS.passkeyCancelled}</Note> : fb.error ? null : <Wait label={SIGN_IN.waitingForPasskey} classNames={classNames} />}
           <Actions classNames={classNames}>
-            <Button variant="secondary" disabled={busy} classNames={classNames} onClick={() => startPasskey(view.fromHint === true)}>
+            <Button variant="secondary" disabled={busy} classNames={classNames} onClick={act('try-again', () => startPasskey(view.fromHint === true))}>
               {SIGN_IN.tryAgain}
             </Button>
           </Actions>
           <Text classNames={classNames}>{SIGN_IN.passkeyOnPhone}</Text>
-          <AltLinks links={(view.fromHint ? [skipped(passwordAlt), ...(emailCodeEnabled ? [skipped(codeAlt)] : [])] : [passwordAlt, ...(emailCodeEnabled ? [codeAlt] : [])])} classNames={classNames} />
+          <AltLinks
+            links={
+              view.fromHint
+                ? [skipped('use-password', 'password', SIGN_IN.usePassword, usePassword), ...(emailCodeEnabled ? [skipped('send-email-code', 'mail', SIGN_IN.emailCode, sendEmailCode)] : [])]
+                : [passwordAlt, ...(emailCodeEnabled ? [codeAlt] : [])]
+            }
+            classNames={classNames}
+          />
         </div>
       );
       break;
@@ -706,7 +715,7 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-password', () => {
             if (!requireEmail()) return;
             if (secretValue === '') {
               set({ error: ERRORS.emptyPassword, field: 'secret', status: null });
@@ -714,14 +723,18 @@ export function SignIn(props: SignInProps) {
               return;
             }
             if (!view.challenge) methodRef.current = 'password';
-            void attempt(view.challenge ? () => confirmPassword(secretValue) : firstFactor('password', () => signInWithPassword(email, secretValue)), 'sign-in', STATUS.signingIn);
+            void attempt(
+              view.challenge ? () => driver.confirmPassword(secretValue) : firstFactor('password', () => driver.signInWithPassword(email, secretValue), driver.decoyPasskeyPrompt),
+              'sign-in',
+              STATUS.signingIn,
+            );
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
         >
           {summary}
           {heading(SIGN_IN.passwordHeading)}
-          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={backToEmail} disabled={busy} classNames={classNames} />
+          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
           <HiddenUsername email={email.trim()} />
           <PasswordField
             id={ids.password}
@@ -736,7 +749,7 @@ export function SignIn(props: SignInProps) {
             classNames={classNames}
           />
           <p {...slot(classNames, 'text')}>
-            <Button variant="link" classNames={classNames} disabled={busy} onClick={() => go({ name: 'help', topic: 'password' })}>
+            <Button variant="link" classNames={classNames} disabled={busy} onClick={act('forgot-password', () => go({ name: 'help', topic: 'password' }))}>
               {SIGN_IN.forgotPassword}
             </Button>
           </p>
@@ -753,13 +766,13 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-totp', () => {
             if (!/^\d{6}$/.test(normalizeCode(codeValue))) {
               set({ error: ERRORS.totpTooShort, field: 'code', status: null });
               secretRef.current?.focus();
               return;
             }
-            void attempt(() => confirmCode(codeValue), 'totp', STATUS.checkingCode);
+            void attempt(() => driver.confirmCode(codeValue), 'totp', STATUS.checkingCode);
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -774,7 +787,7 @@ export function SignIn(props: SignInProps) {
             </Button>
           </Actions>
           <p {...slot(classNames, 'text')}>
-            <Button variant="link" classNames={classNames} disabled={busy} onClick={() => go({ name: 'help', topic: 'totp' })}>
+            <Button variant="link" classNames={classNames} disabled={busy} onClick={act('lost-authenticator', () => go({ name: 'help', topic: 'totp' }))}>
               {SIGN_IN.lostAuthenticator}
             </Button>
           </p>
@@ -788,7 +801,7 @@ export function SignIn(props: SignInProps) {
           {heading(SIGN_IN.codeHeading)}
           <Text classNames={classNames}>{SIGN_IN.codeSub(c, email.trim())}</Text>
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={backToEmail}>
+            <Button classNames={classNames} onClick={act('start-again', backToEmail)}>
               {SIGN_IN.startAgain}
             </Button>
           </Actions>
@@ -796,14 +809,14 @@ export function SignIn(props: SignInProps) {
       ) : (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-code', () => {
             if (!/^\d{8}$/.test(normalizeCode(codeValue))) {
               set({ error: ERRORS.codeTooShort, field: 'code', status: null });
               secretRef.current?.focus();
               return;
             }
             const sentAt = view.resentAt ?? view.sentAt;
-            void attempt(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : confirmCode(codeValue)), 'code', STATUS.checkingCode);
+            void attempt(() => (view.simulated ? answerSimulatedCode(sentAt, { lifetimeMs: lifetime * 60_000 }) : driver.confirmCode(codeValue)), 'code', STATUS.checkingCode);
           })}
           aria-busy={busy || undefined}
           {...slot(classNames, 'form')}
@@ -825,8 +838,8 @@ export function SignIn(props: SignInProps) {
           </Actions>
           <AltLinks
             links={[
-              { icon: 'refresh', label: SIGN_IN.sendNewCode, onClick: resendEmailCode, disabled: busy || !resendReady },
-              { icon: 'back', label: SIGN_IN.differentEmail, onClick: backToEmail, disabled: busy },
+              { icon: 'refresh', label: SIGN_IN.sendNewCode, onClick: act('resend-code', resendEmailCode), disabled: busy || !resendReady },
+              { icon: 'back', label: SIGN_IN.differentEmail, onClick: act('different-email', backToEmail), disabled: busy },
             ]}
             classNames={classNames}
           />
@@ -838,7 +851,7 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-new-password', () => {
             const problem = newPasswordProblem(secretValue);
             if (problem) {
               set({ error: problem, field: 'new-password', status: null });
@@ -847,13 +860,13 @@ export function SignIn(props: SignInProps) {
             }
             void (async () => {
               set({ busy: true, error: null, status: STATUS.checkingPassword });
-              const breached = await breachedPasswordProblem(secretValue, props.checkBreachedPassword);
+              const breached = await driver.breachedPasswordProblem(secretValue, props.checkBreachedPassword);
               set({ busy: false, status: null });
               if (breached) {
                 set({ error: breached, field: 'new-password' });
                 return;
               }
-              await attempt(() => completeNewPassword(secretValue), 'set-password', STATUS.saving);
+              await attempt(() => driver.completeNewPassword(secretValue), 'set-password', STATUS.saving);
             })();
           })}
           aria-busy={busy || undefined}
@@ -895,11 +908,11 @@ export function SignIn(props: SignInProps) {
           enrollment={{
             secret: view.secret,
             verify: async (code) => {
-              const step = await confirmCode(code);
+              const step = await driver.confirmCode(code);
               handleStep(step);
             },
           }}
-          onCancel={backToEmail}
+          onCancel={act('start-again', backToEmail)}
           cancelLabel={SIGN_IN.startAgain}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           classNames={classNames}
@@ -910,7 +923,7 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-reset-code', () => {
             const code = normalizeCode(codeValue);
             if (code === '') {
               set({ error: ERRORS.resetCodeEmpty, field: 'code', status: null });
@@ -933,8 +946,8 @@ export function SignIn(props: SignInProps) {
           </Actions>
           <AltLinks
             links={[
-              { icon: 'refresh', label: SIGN_IN.sendNewCode, onClick: sendResetCode, disabled: busy || !resendReady },
-              { icon: 'back', label: SIGN_IN.differentEmail, onClick: backToEmail, disabled: busy },
+              { icon: 'refresh', label: SIGN_IN.sendNewCode, onClick: act('resend-reset-code', sendResetCode), disabled: busy || !resendReady },
+              { icon: 'back', label: SIGN_IN.differentEmail, onClick: act('different-email', backToEmail), disabled: busy },
             ]}
             classNames={classNames}
           />
@@ -945,7 +958,7 @@ export function SignIn(props: SignInProps) {
       body = (
         <form
           noValidate
-          onSubmit={onSubmit(() => {
+          {...onSubmit('submit-new-password', () => {
             const problem = newPasswordProblem(secretValue);
             if (problem) {
               set({ error: problem, field: 'new-password', status: null });
@@ -954,14 +967,14 @@ export function SignIn(props: SignInProps) {
             const password = secretValue;
             void (async () => {
               set({ busy: true, error: null, status: STATUS.checkingPassword });
-              const breached = await breachedPasswordProblem(password, props.checkBreachedPassword);
+              const breached = await driver.breachedPasswordProblem(password, props.checkBreachedPassword);
               set({ busy: false, status: null });
               if (breached) {
                 set({ error: breached, field: 'new-password' });
                 return;
               }
               const failed: { kind?: AuthErrorKind } = {};
-              const result = await fb.run(() => confirmPasswordReset(email, view.code, password), {
+              const result = await fb.run(() => driver.confirmPasswordReset(email, view.code, password), {
                 context: 'reset-password',
                 words,
                 busyStatus: STATUS.saving,
@@ -980,7 +993,7 @@ export function SignIn(props: SignInProps) {
               // The new password signs them straight in; the authenticator code comes next, as usual. Once
               // they're in, the account gets the "password changed" notice (register A10).
               pendingNotice.current = 'password-changed';
-              await attempt(firstFactor('password', () => signInWithPassword(email, password)), 'sign-in', STATUS.signingIn);
+              await attempt(firstFactor('password', () => driver.signInWithPassword(email, password), driver.decoyPasskeyPrompt), 'sign-in', STATUS.signingIn);
             })();
           })}
           aria-busy={busy || undefined}
@@ -1021,7 +1034,7 @@ export function SignIn(props: SignInProps) {
           {heading(title)}
           <Note classNames={classNames}>{SIGN_IN.checkFailed(c)}</Note>
           <Actions classNames={classNames}>
-            <Button classNames={classNames} disabled={busy} onClick={() => void afterSignIn()}>
+            <Button classNames={classNames} disabled={busy} onClick={act('try-again', () => void afterSignIn())}>
               {SIGN_IN.tryAgain}
             </Button>
           </Actions>
@@ -1050,7 +1063,7 @@ export function SignIn(props: SignInProps) {
           headingLevel={level}
           onDone={(how) => {
             // ChooseFirstCredential has already set the passkey hint for accountName (register A5a).
-            void sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
+            void driver.sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
           }}
           {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
@@ -1068,7 +1081,7 @@ export function SignIn(props: SignInProps) {
             {view.emailed ? ` ${FIRST_VISIT.emailedNote}` : ''}
           </Text>
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={finish}>
+            <Button classNames={classNames} onClick={act('continue-to-site', finish)}>
               {FIRST_VISIT.continueTo(c)}
             </Button>
           </Actions>
@@ -1085,16 +1098,16 @@ export function SignIn(props: SignInProps) {
             <Button
               classNames={classNames}
               disabled={busy}
-              onClick={() =>
-                void fb.run(registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then(async (r) => {
+              onClick={act('create-passkey', () =>
+                void fb.run(driver.registerPasskey, { context: 'passkey-register', words, busyStatus: FIRST_VISIT.waitingForDevice }).then(async (r) => {
                   if (r.ok) {
                     set({ status: STATUS.passkeySaved });
-                    await rememberPasskey(email);
-                    await sendAccountNotice(notices, 'passkey-added');
+                    await driver.rememberPasskey(email);
+                    await driver.sendAccountNotice(notices, 'passkey-added');
                     finish();
                   }
-                })
-              }
+                }),
+              )}
             >
               {FIRST_VISIT.createPasskey}
             </Button>
@@ -1102,10 +1115,10 @@ export function SignIn(props: SignInProps) {
               variant="link"
               classNames={classNames}
               disabled={busy}
-              onClick={() => {
-                dismissOffer(userIdRef.current);
+              onClick={act('not-now', () => {
+                driver.dismissPasskeyOffer(userIdRef.current);
                 finish();
-              }}
+              })}
             >
               {SIGN_IN.notNow}
             </Button>
@@ -1114,26 +1127,29 @@ export function SignIn(props: SignInProps) {
       );
       break;
     case 'trouble':
-      bottom.back = { label: SIGN_IN.backToSignIn, onClick: backToEmail };
+      bottom.back = { label: SIGN_IN.backToSignIn, onClick: act('back-to-sign-in', backToEmail) };
       body = (
         <div {...slot(classNames, 'form')}>
           {heading(TROUBLE.heading)}
           <Text classNames={classNames}>{TROUBLE.sub}</Text>
           <ul {...slot(classNames, 'list')}>
-            {TROUBLE.rows.map(([topic, label]) => (
-              <li key={topic} {...slot(classNames, 'listItem')}>
-                <button type="button" onClick={() => go({ name: 'help', topic, askEmail: !looksLikeEmail(email) })} {...slot(classNames, 'secondaryButton')}>
-                  <span>{label}</span>
-                  <Icon name="chevron" />
-                </button>
-              </li>
-            ))}
+            {TROUBLE.rows.map(([topic, label]) => {
+              const open = act(`help-${topic}`, () => go({ name: 'help', topic, askEmail: !looksLikeEmail(email) }));
+              return (
+                <li key={topic} {...slot(classNames, 'listItem')}>
+                  <button type="button" onClick={open} {...tagged(open)} {...slot(classNames, 'secondaryButton')}>
+                    <span>{label}</span>
+                    <Icon name="chevron" />
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       );
       break;
     case 'help': {
-      bottom.back = { label: SIGN_IN.back, onClick: () => go({ name: 'trouble' }) };
+      bottom.back = { label: SIGN_IN.back, onClick: act('back', () => go({ name: 'trouble' })) };
       // The promise ahead of time only where the site says it mounted the notice route (L5; ADR 0024).
       const screen = helpScreen(view.topic, c, { securityNotices: notices?.mounted === true });
       const contact = contactLines(c, { teams: screen.teams === true });
@@ -1147,7 +1163,7 @@ export function SignIn(props: SignInProps) {
       // opens, not from what's typed now, or the field would vanish as soon as the text looked like an address.
       const needsEmail = action !== undefined && view.askEmail === true && (action.action !== 'email-code' || emailCodeEnabled);
       body = (
-        <form noValidate onSubmit={onSubmit(runAction)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate {...onSubmit(action ? HELP_ACTION[action.action] : null, runAction)} aria-busy={busy || undefined} {...slot(classNames, 'form')}>
           {summary}
           {heading(screen.heading)}
           {screen.intro ? <Text classNames={classNames}>{screen.intro}</Text> : null}
@@ -1169,8 +1185,9 @@ export function SignIn(props: SignInProps) {
       break;
     }
     case 'access-help': {
-      bottom.back = { label: SIGN_IN.backToSignIn, onClick: backToEmail };
+      bottom.back = { label: SIGN_IN.backToSignIn, onClick: act('back-to-sign-in', backToEmail) };
       const named = CONTACT.looksAfter(c);
+      const mail = driver.act('email-help');
       body = (
         <div {...slot(classNames, 'form')}>
           {heading(ACCESS_HELP.heading(c))}
@@ -1182,7 +1199,7 @@ export function SignIn(props: SignInProps) {
             </p>
             <p>
               {CONTACT.email}{' '}
-              <a href={`mailto:${props.help.address}`} {...slot(classNames, 'link')}>
+              <a href={`mailto:${props.help.address}`} onClick={mail} {...tagged(mail)} {...slot(classNames, 'link')}>
                 {props.help.address}
               </a>
               .{named ? ` ${named}` : ''}
@@ -1196,7 +1213,7 @@ export function SignIn(props: SignInProps) {
   }
 
   const troubleHere = TROUBLE_VIEWS.has(view.name);
-  const openTrouble = () => go({ name: 'trouble' });
+  const openTrouble = act('trouble', () => go({ name: 'trouble' }));
   if (troubleHere && (props.troubleLink ?? 'inside') === 'inside') bottom.trouble = openTrouble;
   return (
     <Card

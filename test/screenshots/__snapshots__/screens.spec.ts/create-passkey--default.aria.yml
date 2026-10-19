@@ -1,0 +1,11 @@
+- heading "Create a passkey" [level=1]
+- paragraph: Confirm with your face, fingerprint, or device PIN when your browser asks. Nothing to remember or type.
+- status: Waiting for your device…
+- button "Try again"
+- paragraph: Want the passkey on your phone? Choose the phone option in the window that opens.
+- list:
+  - listitem:
+    - button "Use a password instead"
+- paragraph: Don’t create a passkey on a shared computer.
+- status
+- paragraph: This site is managed by the NC Office of State Budget and Management

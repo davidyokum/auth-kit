@@ -1,0 +1,6 @@
+- heading "Create a passkey on this device?" [level=1]
+- paragraph: Next time, sign in with your face, fingerprint, or device PIN. Nothing to remember or type.
+- button "Create a passkey"
+- button "Not now"
+- status
+- paragraph: This site is managed by the NC Office of State Budget and Management

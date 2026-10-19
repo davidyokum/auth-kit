@@ -1,0 +1,16 @@
+- heading "Check your email" [level=1]
+- paragraph: /If ada@example\.org has an account here, we’ve emailed it an 8-digit code\. It works for \d+ minutes\./
+- status:
+  - paragraph: /We sent a new code at \d+:\d+ AM\. Use the newest one\./
+- text: 8-digit code
+- textbox "8-digit code"
+- button "Sign in"
+- list:
+  - listitem:
+    - button "Send a new code"
+  - listitem:
+    - button "Use a different email address"
+- paragraph: No email after a minute? Check your junk folder, then send a new code. Accounts with an authenticator app can’t get emailed codes. Use your password or passkey instead.
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

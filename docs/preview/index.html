@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>auth-kit preview</title>
+<!--
+  Preview mode (ADR 0025), with no build step: the real sign-in card from auth-kit-preview.js, a release
+  file. Locally: `npm run demo:preview` (it builds release/ and serves the repo on 127.0.0.1:4173). Elsewhere,
+  put auth-kit-preview.js (and auth-kit-preview-backdrops.js, for backdrops) beside the page and change
+  the script's src.
+-->
+<style>
+  :root { color-scheme: light dark; --bg: #f6f7f9; --panel: #ffffff; --ink: #1f2328; --muted: #59636e; --line: #d0d7de; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --panel: #161b22; --ink: #e6edf3; --muted: #8d96a0; --line: #30363d; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  header p { margin: 0; color: var(--muted); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px 16px; padding: 16px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  select { font: inherit; min-height: 36px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
+  .check { display: flex; align-items: center; gap: 6px; align-self: end; min-height: 36px; }
+  main { display: flex; flex-wrap: wrap; gap: 16px; padding: 0 16px 16px; align-items: flex-start; }
+  #scene { position: relative; display: grid; place-items: center; min-height: 640px; flex: 1 1 600px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  #log { flex: 0 1 320px; min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 640px; overflow: auto; }
+  @media (max-width: 700px) { #scene { min-height: 520px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>auth-kit preview</h1>
+  <p>The real sign-in card, held at any screen and state with sample data. Nothing on it does anything: each click is logged instead.</p>
+</header>
+<div class="controls">
+  <label>Screen <select id="screen"></select></label>
+  <label>State <select id="state"></select></label>
+  <label>Family <select id="family"></select></label>
+  <label>Card style <select id="cardStyle"></select></label>
+  <label>Page <select id="theme"><option>light</option><option>dark</option></select></label>
+  <label>Device <select id="device"><option>desktop</option><option>phone</option></select></label>
+  <label>Account creation <select id="accountCreation"><option>invite</option><option>request</option><option>domains</option><option>open</option></select></label>
+  <label>Backdrop <select id="backdrop"><option value="">None</option></select></label>
+  <label class="check"><input type="checkbox" id="remembered"> Browser remembers a passkey</label>
+</div>
+<main>
+  <div id="scene"></div>
+  <pre id="log" aria-live="polite">Actions appear here.</pre>
+</main>
+<script src="../../release/auth-kit-preview.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const P = window.AuthKitPreview;
+  const fill = (select, items) => { select.replaceChildren(...items.map(([value, label]) => new Option(label, value))); };
+  fill($('screen'), P.screens.map((s) => [s.id, s.label]));
+  fill($('family'), P.families.map((f) => [f, f]));
+  fill($('cardStyle'), P.cardStyles.map((c) => [c, c]));
+  $('backdrop').append(...P.backdrops.filter((b) => b.offered).map((b) => new Option(b.label, b.id)));
+  const states = () => fill($('state'), P.screens.find((s) => s.id === $('screen').value).states.map((st) => [st.id, st.label]));
+  states();
+
+  const log = (line) => { $('log').textContent = `${line}\n${$('log').textContent === 'Actions appear here.' ? '' : $('log').textContent}`; };
+  const spec = () => ({
+    screen: $('screen').value, state: $('state').value, family: $('family').value, cardStyle: $('cardStyle').value,
+    theme: $('theme').value, device: $('device').value, accountCreation: $('accountCreation').value, remembered: $('remembered').checked,
+    ground: !$('backdrop').value,
+    onAction: (name, info) => {
+      log(`${name} → ${info.next ? info.next.screen + (info.next.state ? '/' + info.next.state : '') : '(stays)'}  ${JSON.stringify(info.values)}`);
+      // Follow the flow where the next screen is one the preview draws.
+      if (info.next && !info.next.screen.startsWith('@')) {
+        $('screen').value = info.next.screen; states(); $('state').value = info.next.state || ''; draw();
+      }
+    },
+  });
+
+  const card = P.render($('scene'), spec());
+  let backdrop = null;
+  function draw() {
+    card.update(spec());
+    $('scene').style.background = card.ground;
+    const style = $('backdrop').value;
+    if (!style && backdrop) { backdrop.destroy(); backdrop = null; }
+    else if (style && !backdrop) backdrop = P.renderBackdrop($('scene'), { style, seed: 'k3f9x2ab', family: $('family').value, theme: $('theme').value });
+    else if (style) backdrop.update({ style, family: $('family').value, theme: $('theme').value });
+  }
+  $('screen').addEventListener('change', () => { states(); draw(); });
+  for (const id of ['state', 'family', 'cardStyle', 'theme', 'device', 'accountCreation', 'backdrop', 'remembered']) $(id).addEventListener('change', draw);
+  draw();
+</script>
+</body>
+</html>

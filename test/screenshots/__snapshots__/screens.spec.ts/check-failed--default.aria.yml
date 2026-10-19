@@ -1,0 +1,6 @@
+- heading "Sign in to Example Reports" [level=1]
+- status:
+  - paragraph: We couldn’t check how you sign in. Try again. If it keeps happening, email help@example.org.
+- button "Try again"
+- status
+- paragraph: This site is managed by the NC Office of State Budget and Management

@@ -16,6 +16,7 @@ import {
   useState,
 } from 'react';
 import { type AuthTheme, themeCssVariables } from '../themes/index.js';
+import { tagged, useDriver } from './driver.js';
 import { Icon, type IconName } from './icons.js';
 import { type AuthErrorContext, type MessageWords, describeAuthError } from './messages.js';
 import { CONTACT, type Rich, SHARED, SIGN_IN } from './copy.js';
@@ -204,7 +205,7 @@ export function Button({
   ...props
 }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> & { variant?: ButtonVariant; classNames: AuthKitClassNames | undefined }) {
   const name: AuthKitSlot = variant === 'primary' ? 'button' : variant === 'secondary' ? 'secondaryButton' : 'linkButton';
-  return <button type={type} {...slot(classNames, name)} {...props} />;
+  return <button type={type} {...slot(classNames, name)} {...tagged(props.onClick)} {...props} />;
 }
 
 export function Actions(props: { classNames: AuthKitClassNames | undefined; children: ReactNode }) {
@@ -241,11 +242,13 @@ export function ErrorSummary(props: {
   id?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { held } = useDriver();
   const items = props.items ?? [];
   const key = props.error ?? items.map((i) => i.message).join('|');
   useEffect(() => {
-    if (key) ref.current?.focus();
-  }, [key]);
+    // A held screen (preview mode) moves no focus by itself: it's drawn among other things on a page.
+    if (key && !held) ref.current?.focus();
+  }, [key, held]);
   const link = (message: string, fieldId: string) => (
     <a
       href={`#${fieldId}`}
@@ -329,7 +332,7 @@ export function AltLinks(props: { links: readonly AltLink[]; classNames: AuthKit
     <ul {...slot(props.classNames, 'alts')}>
       {props.links.map((l) => (
         <li key={l.label}>
-          <button type="button" disabled={l.disabled} onClick={l.onClick} {...slot(props.classNames, 'linkButton')}>
+          <button type="button" disabled={l.disabled} onClick={l.onClick} {...tagged(l.onClick)} {...slot(props.classNames, 'linkButton')}>
             <Icon name={l.icon} />
             <span>{l.label}</span>
             <Icon name="chevron" />
@@ -345,7 +348,7 @@ export function Who(props: { lead: string; email: string; onChange: () => void; 
   return (
     <p {...slot(props.classNames, 'who')}>
       {props.lead} <strong>{props.email}</strong> <span aria-hidden="true">·</span>{' '}
-      <button type="button" disabled={props.disabled} onClick={props.onChange} {...slot(props.classNames, 'linkButton')}>
+      <button type="button" disabled={props.disabled} onClick={props.onChange} {...tagged(props.onChange)} {...slot(props.classNames, 'linkButton')}>
         {SIGN_IN.change}
         <span data-auth-kit-sr="">{SHARED.changeEmailSr}</span>
       </button>
@@ -366,11 +369,12 @@ export function Steps(props: { steps: readonly Rich[]; classNames: AuthKitClassN
 
 /** The help screens' contact box: who to write to, who looks after the site, and "Never send a password or code." */
 export function ContactBox(props: { lead: string; address: string; lines: readonly string[]; classNames: AuthKitClassNames | undefined }) {
+  const mail = useDriver().act('email-help');
   return (
     <div {...slot(props.classNames, 'contact')}>
       <p>
         <strong>{props.lead}</strong> {CONTACT.email}{' '}
-        <a href={`mailto:${props.address}`} {...slot(props.classNames, 'link')}>
+        <a href={`mailto:${props.address}`} onClick={mail} {...tagged(mail)} {...slot(props.classNames, 'link')}>
           {props.address}
         </a>
         .
@@ -446,13 +450,13 @@ export function Card(props: {
           <div {...slot(props.classNames, 'bottom')}>
             {b.access}
             {b.trouble ? (
-              <button type="button" onClick={b.trouble} {...slot(props.classNames, 'linkButton')}>
+              <button type="button" onClick={b.trouble} {...tagged(b.trouble)} {...slot(props.classNames, 'linkButton')}>
                 <Icon name="help" />
                 {SIGN_IN.trouble}
               </button>
             ) : null}
             {b.back ? (
-              <button type="button" onClick={b.back.onClick} {...slot(props.classNames, 'linkButton')}>
+              <button type="button" onClick={b.back.onClick} {...tagged(b.back.onClick)} {...slot(props.classNames, 'linkButton')}>
                 <Icon name="back" />
                 {b.back.label}
               </button>
@@ -464,7 +468,7 @@ export function Card(props: {
       </div>
       {props.troubleBelow ? (
         <p {...slot(props.classNames, 'below')}>
-          <button type="button" onClick={props.troubleBelow} {...slot(props.classNames, 'linkButton')}>
+          <button type="button" onClick={props.troubleBelow} {...tagged(props.troubleBelow)} {...slot(props.classNames, 'linkButton')}>
             <Icon name="help" />
             {SIGN_IN.trouble}
           </button>
@@ -527,10 +531,11 @@ export interface Feedback {
 
 /**
  * Busy, error, and status state for one component. `run` clears the last error, marks the
- * component busy, and turns a thrown error into a plain message.
+ * component busy, and turns a thrown error into a plain message. `initial`: where a held screen
+ * (preview mode) starts; a live screen starts empty.
  */
-export function useFeedback() {
-  const [state, setState] = useState<Feedback>({ error: null, status: null, field: null, busy: false });
+export function useFeedback(initial?: Partial<Feedback>) {
+  const [state, setState] = useState<Feedback>(() => ({ error: null, status: null, field: null, busy: false, ...initial }));
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;

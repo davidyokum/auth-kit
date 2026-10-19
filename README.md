@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.9-alpha.3`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.10-alpha`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -29,6 +29,7 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/backdrops` | Seeded, generative art behind the sign-in card (fourteen styles, among them County Survey, River Basins, Star Chart, Yokum magnetic, and the AI Survey and Pulse dot fields, and a painted-image slot; each loads on first use; subjects rotate per visit), in each family's palette, with the contrast check for the card in front of it, variations, defaults, and the lock check ([ADR 0021](docs/decisions/0021-backdrops.md)). Framework-free | **Implemented** |
 | `auth-kit/backdrops/react` | `<Backdrop style seed family>`: the client component that sits behind the card | **Implemented** |
 | `auth-kit/backdrops/picker` | The backdrop picker page (nine variations behind the site's real card; "Use this one"). **Dev only; never in a build** | **Implemented** |
+| `auth-kit/preview` | Preview mode ([below](#13-preview-mode-auth-kitpreview-and-auth-kit-previewjs)): the real sign-in screens held at any screen and state with sample data, inert; for design tools, documentation, and screenshot tests. Also a standalone release file, `auth-kit-preview.js`. **Never in a site's build** | **Implemented** |
 
 ## Install
 
@@ -830,6 +831,124 @@ One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/
 - **The help route:** the site helps only with the person's account on this site; for their email or app, the help screens point to the theme's IT desk, and for a device that isn't working, to its device desk (`devDesk`: the agency's or UNC's IT help desk; on personal sites, the device maker's support). OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal and public (open sign-up) sites say "the {Site} team", and an open sign-up site leaves out the Teams line, automatically (register E4c).
 - **The help address** is one role-based mailbox by default (the family's, or the site's own in site config, e.g. Project Portal → `portal@osbm.nc.gov`), and it's required: OSBM and UNC ship none, the personal family's default is `help@yokum.app` (register F11), and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, the owner warnings, and the digest refuse a missing or placeholder (`apps-help@replace-me.invalid`) address. A person's own address (`first.last@…`) is refused unless the site acknowledges it on purpose, never by default: `{ address, personal: true }` (register E4c; `helpSettingProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner and every Super admin are alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The override follows the same rule (a person's own address needs its "on purpose" box, stored as `personal: true`) and stays on the configured address's domain or the family's own (`theme.help.domains`: nc.gov, unc.edu, yokum.app, subdomains included; `createSignInHelp({ theme, allowedDomains })` for a help desk elsewhere), and must be a plain mailbox (letters, digits, dots, plus, hyphen, underscore). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
 
+### 13. Preview mode: `auth-kit/preview` and `auth-kit-preview.js`
+
+The real sign-in card, held at any screen and state with sample data, and inert ([ADR 0025](docs/decisions/0025-preview-mode.md)): for the Sign-in Studio, the primer's walkthrough, and screenshot tests. Never for a site's sign-in page: it carries a marker `auth-kit check-prod-build` fails on, and nothing else in the package imports it.
+
+**Inert:** no Amplify or Cognito calls, no network, no storage writes, no credentials, no clipboard, no navigation. Every click or submit calls `onAction(name, info)` and changes nothing; typing in a field works (it's the card's own state). The components and words are `auth-kit/client`'s own, held by a driver ([ADR 0025](docs/decisions/0025-preview-mode.md)); the errors come from the same `describeAuthError`.
+
+**A page with no build step** uses the standalone file each [GitHub Release](https://github.com/davidyokum/auth-kit/releases) carries beside the tarball, attested with it (`gh attestation verify auth-kit-preview.js --repo davidyokum/auth-kit`). It's one classic script with React and ReactDOM inside; it adds the card's CSS to the page itself.
+
+```html
+<!doctype html>
+<meta charset="utf-8">
+<div id="card"></div>
+<script src="auth-kit-preview.js"></script>
+<script>
+  const card = AuthKitPreview.render(document.getElementById('card'), {
+    screen: 'password', state: 'wrong', family: 'osbm', cardStyle: 'porcelain', ground: true,
+    onAction: (name, info) => {
+      console.log(name, info.next, info.values);
+      if (info.next && !info.next.screen.startsWith('@')) card.update({ ...info.next, family: 'osbm', cardStyle: 'porcelain', ground: true });
+    },
+  });
+  // A backdrop behind it (loads auth-kit-preview-backdrops.js from beside the script, once):
+  AuthKitPreview.renderBackdrop(document.getElementById('card'), { style: 'contours', seed: 'k3f9x2ab', family: 'osbm', still: true });
+</script>
+```
+
+[`docs/preview/index.html`](docs/preview/index.html) is a fuller example: every screen, state, family, style, page, device, and backdrop, with an action log (`npm run demo:preview` builds `release/` and serves it on `http://127.0.0.1:4173/docs/preview/`).
+
+**`window.AuthKitPreview`**
+
+| Member | What it is |
+|---|---|
+| `version` | The auth-kit version, e.g. `0.1.10-alpha` |
+| `screens` | Every screen: `{ id, label, group, component, states: [{ id, label, error }] }`, in flow order; a screen's first state is its default |
+| `actions` | Every action name `onAction` reports (below) |
+| `families`, `cardStyles` | `['osbm', 'unc', 'personal']`, `['quiet', 'monogram', 'frosted', 'plain', 'porcelain']` |
+| `widths` | The card's width: `{ desktop: 380, phone: 343 }` |
+| `backdrops` | The backdrop styles: `{ id, label, description, versions, offered }` |
+| `render(host, spec)` | Draws a card into `host` (appended). Throws `PreviewSpecError`, naming what's allowed, for a spec it can't draw. Returns a handle: |
+| `  .el`, `.card` | The stage (the box the card is drawn in) and the card (`[data-backdrop-card]`) |
+| `  .spec`, `.ground`, `.heading` | The spec as drawn (defaults filled in), the page color behind the card, the heading's words |
+| `  .rect(within?)` | The card's box relative to `within` (default `host`): `{ x, y, width, height }` |
+| `  .update(spec)` | Draws another spec in the same place (a whole spec; what it leaves out takes its default) |
+| `  .actions()` | Every control on the screen: `{ name, label, next }` |
+| `  .focus()` | Moves focus as the live card does when a screen opens (the error summary, else the heading) |
+| `  .destroy()` | Removes it |
+| `renderBackdrop(host, options)` | A backdrop behind `host`'s content: `{ style, seed, styleVersion?, family?, theme?, still?, interactive?, subject?, siteName?, image?, card? }` → `{ el, ready, error, update(options), destroy() }`. A subject `tour` (which keeps its place in localStorage) draws the subject of the day instead |
+| `backdropsUrl` | Where the backdrop styles file loads from (beside the script by default); set it when the script is inlined |
+| `stylesheet` | The CSS `render` adds (the card's, the backdrop's, the stage's) |
+
+**The spec** (every field optional)
+
+| Field | Values | Default |
+|---|---|---|
+| `screen`, `state` | A screen ID and one of its states (below) | `email`, its first state |
+| `family` | `osbm`, `unc`, `personal` | `personal` |
+| `theme` | `light`, `dark`: the page the card sits on (auth-kit's card is light either way, ADR 0021) | `light` |
+| `cardStyle`, `cardEdge` | `quiet`, `monogram`, `frosted`, `plain`, `porcelain`; `defined`, `soft` | `quiet`, `defined` |
+| `accountCreation` | `invite`, `request`, `domains`, `open`, or a setting `{ mode, domains, requestsAlso }`; sign-up screens use `domains` unless it's `open` | `invite` |
+| `inviteLine` | `link` ("Need access?"), `sentence` | `link` |
+| `remembered` | This browser remembers a passkey for the address (register A5a): Continue opens the passkey prompt | `false` |
+| `site` | `{ name, domain }`: the site's name, and the address domain of the sample person and of `domains` sign-up | `Example Reports`, `example.org` |
+| `help` | `{ address, owner }` | the family's help mailbox (or `help@{domain}`); `Jordan Lee` in families that name owners |
+| `sampleUser` | `{ email, badEmail }`: the address typed, and the one the `invalid` state shows | `ada@{domain}`, `ada@example` |
+| `device` | `desktop`, `phone` (a 375px screen with 16px margins: a 343px card, the phone padding) | `desktop` |
+| `emailHint`, `passkeysEnabled`, `emailCodeEnabled`, `troubleLink`, `headingLevel` | As `SignIn`'s props | the family's, `true`, `true`, `inside`, `1` |
+| `qrCode` | A stand-in QR code on "Add an authenticator app" (it encodes nothing; sites pass their own `renderQrCode`) | `true` |
+| `botNote` | Open sign-up's "Protected against automated sign-ups." | `true` |
+| `ground`, `font` | Paint the page color behind the card; the stage's font (the card inherits it) | `false`, the system UI font |
+| `onAction(name, info)` | Called for every click or submit. `info`: `{ screen, state, next, label, values }`; `next` is where the live card goes when that succeeds (`{ screen, state? }`, or `@signed-in`, `@link`, `@mail`; `null` when it stays); `values` has what's typed, never a password | none |
+| `onEffect(name)` | Called if a screen reached an effect the preview refuses; it never should (tests watch it) | none |
+
+**Screens and states** (27 screens, 52 states; the Sign-in Studio's IDs plus the card's other views)
+
+| Screen | Heading | States (first is the default) |
+|---|---|---|
+| `email` | Sign in | `''` As it first shows; `typed` Address typed; `reauth` Confirm it’s you (step-up); `empty` Empty email; `invalid` Badly formed email; `throttled` Too many attempts; `offline` Can’t reach the service |
+| `choose` | How do you want to sign in? | `''` The three ways in |
+| `passkey` | Use your passkey | `''` Waiting for the passkey; `cancelled` Passkey cancelled |
+| `password` | Enter your password | `''` As it first shows; `wrong` Wrong password |
+| `totp` | Enter your authenticator code | `''` As it first shows; `wrong` Wrong authenticator code |
+| `email-code` | Check your email | `''` Code sent; `resent` After a resend; `wrong` Wrong emailed code; `expired` Session expired |
+| `new-password` | Choose a new password (temporary password) | `''` As it first shows |
+| `mfa-setup` | Add an authenticator app (asked during sign-in) | `''` Setup key shown |
+| `enroll-authenticator` | Add an authenticator app (after a password sign-in) | `''` Setup key shown |
+| `offer-passkey` | Create a passkey on this device? | `''` The one-time offer |
+| `finishing` | Signing you in | `''` One moment |
+| `check-failed` | Couldn’t check how you sign in | `''` Try again |
+| `first-credential` | Choose how you’ll sign in next time | `''` The two ways |
+| `create-passkey` | Create a passkey | `''` Waiting for the device; `failed` Couldn’t create a passkey |
+| `create-password` | Create a password | `''` As it first shows; `too-short` Password too short |
+| `totp-setup` | Add an authenticator app | `''` Setup key shown |
+| `done` | You’re set up | `passkey` Passkey route; `password` Password route; `new-account` New account (sign-up) |
+| `access-help` | Need access? | `''` Who to ask |
+| `request-access` | Request access | `''` As it first shows; `missing` Fields missing; `sent` Request sent |
+| `sign-up` | Create your account | `''` As it first shows; `not-allowed` Address not on the list |
+| `sign-up-code` | Check your email (sign-up) | `''` Code sent |
+| `sign-up-name` | Your name | `create-account` “Create account”; `finish` “Finish” |
+| `trouble` | Trouble signing in? | `''` What’s happening? |
+| `help` | Help | `passkey` Can’t use your passkey; `password` Forgot your password; `totp` Lost your authenticator app; `code` Didn’t get a code; `email` Can’t get into your email; `else` Something else |
+| `reset-code` | Reset code | `''` Code sent |
+| `reset-password` | Choose a new password | `''` As it first shows |
+| `signed-out` | You’re signed out everywhere | `''` After “Sign out everywhere” |
+
+**Actions** (stable names): `ask-for-access-instead`, `back`, `back-to-sign-in`, `change-email`, `continue`, `continue-to-site`, `copy-setup-key`, `create-account`, `create-passkey`, `different-email`, `email-help`, `forgot-password`, `help-code`, `help-else`, `help-email`, `help-passkey`, `help-password`, `help-totp`, `lost-authenticator`, `need-access`, `not-now`, `open-setup-link`, `privacy-notice`, `request-access`, `resend-code`, `resend-reset-code`, `send-email-code`, `send-request`, `send-reset-code`, `sign-in`, `sign-in-again`, `start-again`, `submit-authenticator-code`, `submit-code`, `submit-name`, `submit-new-password`, `submit-password`, `submit-reset-code`, `submit-totp`, `terms`, `trouble`, `try-again`, `use-passkey`, `use-password`.
+
+**In a React app** (a design tool, documentation): `import { AuthKitPreview } from 'auth-kit/preview'` and render `<AuthKitPreview spec={…} />`; `previewBackdrop`, `PREVIEW_SCREENS`, `PREVIEW_ACTIONS`, `resolvePreviewSpec`, and `nextAfter` are exported too. It needs `react` and `aws-amplify` installed, as `auth-kit/client` does (the preview never calls Amplify).
+
+**Screenshot tests** (`test/screenshots`, Playwright against the standalone file, in CI's `screenshot tests` job): every screen and state × family × card style × light/dark page × desktop/phone, checked for unstyled controls, small targets, and overflow, with a computed-style baseline per family; every control clicked in a real browser, inert; an accessibility snapshot and an image of every screen. Run them in the Playwright container, where the baselines were taken:
+
+```sh
+npm run build:preview
+docker run --rm --platform linux/amd64 -v "$PWD":/work -v auth-kit-linux-modules:/work/node_modules -w /work \
+  mcr.microsoft.com/playwright:v1.63.0-noble bash -c 'npm ci --ignore-scripts && npx playwright test'
+```
+
+Add `--update-snapshots` after a deliberate change, and review the images and `styles-*.json` diffs.
+
 ## Status codes
 
 | Status | Meaning | Error class |
@@ -1021,14 +1140,16 @@ Still to check on a live pool (each needs a real person or a deploy approved by 
 
 ```sh
 npm ci
-npm run check   # typecheck, lint, test, build
+npm run check            # typecheck, lint, test, build
+npm run build:preview    # release/auth-kit-preview.js and the backdrop styles file
+npm run test:screenshots # in the Playwright container: see section 13
 ```
 
 Tests make no AWS calls: tokens come from a local test issuer, Cognito is faked, and the preset is checked by CDK synthesis and assertions. Agents: read [AGENTS.md](AGENTS.md).
 
 ## Decisions
 
-Decisions are recorded as ADRs here, in [docs/decisions](docs/decisions): what was decided, why, and what it costs. The newest are [0023](docs/decisions/0023-account-creation.md) (account creation) and [0024](docs/decisions/0024-sign-in-copy-and-family-themes.md) (sign-in copy, families as themes, the card edge, the help route, and emails).
+Decisions are recorded as ADRs here, in [docs/decisions](docs/decisions): what was decided, why, and what it costs. The newest are [0024](docs/decisions/0024-sign-in-copy-and-family-themes.md) (sign-in copy, families as themes, the card edge, the help route, and emails) and [0025](docs/decisions/0025-preview-mode.md) (preview mode: the real card at any screen, inert).
 
 ## License
 

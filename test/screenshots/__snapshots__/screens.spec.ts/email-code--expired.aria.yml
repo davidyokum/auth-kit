@@ -1,0 +1,8 @@
+- alert:
+  - paragraph: /That took longer than \d+ minutes, so we stopped the sign-in to keep your account safe\. Start again\./
+- heading "Check your email" [level=1]
+- paragraph: /If ada@example\.org has an account here, we’ve emailed it an 8-digit code\. It works for \d+ minutes\./
+- button "Start again"
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

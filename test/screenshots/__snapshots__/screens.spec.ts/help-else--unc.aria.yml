@@ -1,0 +1,13 @@
+- heading "Something else?" [level=1]
+- paragraph: Email us and say what’s happening, and what you see on the screen. We can help with your Example Reports account, but not with your email, device, or apps.
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@example.org":
+    - /url: mailto:help@example.org
+  - text: .
+- paragraph: Jordan Lee looks after Example Reports.
+- paragraph: Never send a password or code.
+- status
+- button "Back"
+- paragraph: This site is managed by UNC-Chapel Hill

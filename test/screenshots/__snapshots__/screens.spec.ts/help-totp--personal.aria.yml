@@ -1,0 +1,16 @@
+- heading "Lost your authenticator app?" [level=1]
+- paragraph: Codes can’t be emailed to accounts that use an authenticator app, so the Example Reports team has to reset it on your Example Reports account. Then you can set up a new one.
+- list:
+  - listitem: Email help@yokum.app from the address you sign in with, and say you’ve lost your authenticator app.
+  - listitem: The Example Reports team will confirm it’s you by email, then reset it on your account.
+  - listitem: Sign in with your password, then set up a new authenticator app, or a passkey instead.
+- paragraph: We can reset your Example Reports account, but we can’t help with the app itself. For that, try the app’s own help, or your email provider, or your IT help desk if your organization runs your email. Saved a passkey? You can still sign in with it.
+- paragraph:
+  - strong: Need help with your Example Reports account?
+  - text: Email
+  - link "help@yokum.app":
+    - /url: mailto:help@yokum.app
+  - text: .
+- paragraph: Never send a password or code.
+- status
+- button "Back"

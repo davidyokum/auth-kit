@@ -6,18 +6,26 @@
  * site style wins. Colors come from the theme's CSS custom properties (`--ak-*`, set on the card by
  * `SignIn`, `SignUp`, `RequestAccess`; `themeCssVariables`), with the OSBM core as the fallback.
  * Add it to a global stylesheet, or render it with your CSP nonce: `<style nonce={nonce}>{authKitStyles}</style>`.
+ *
+ * The phone layout applies under 480px, and wherever an ancestor carries `data-auth-kit-device="phone"`
+ * (a preview drawing a phone on a wide page, ADR 0025): the same declarations either way.
  */
+/** The phone layout's rules, scoped: `''` for the media query, an ancestor selector for a forced phone. */
+const phoneRules = (scope: string) =>
+  `:where(${scope}[data-auth-kit] [data-auth-kit-slot="card"]) { padding: var(--ak-card-padding-phone, 28px 22px 20px); }
+:where(${scope}[data-auth-kit-style="plain"])::before { position: absolute; left: -100vw; right: -100vw; width: auto; transform: none; top: -80px; bottom: -100vh; background: linear-gradient(180deg, transparent 0, var(--ak-ground, #f3f4f6) 56px); }`;
+
 export const authKitStyles = `
 :where([data-auth-kit]) { display: grid; gap: 1rem; max-width: 30rem; }
 :where([data-auth-kit="sign-in"], [data-auth-kit="sign-up"], [data-auth-kit="request-access"], [data-auth-kit="signed-out"]) { display: block; width: 100%; max-width: var(--ak-card-width, 380px); margin-inline: auto; }
 :where([data-auth-kit] [data-auth-kit-slot="card"]) { position: relative; display: grid; gap: 1rem; box-sizing: border-box; padding: var(--ak-card-padding, 36px 32px 24px); background: var(--ak-card-bg, var(--ak-surface, #fff)); color: var(--ak-text, #3c434b); border: 1px solid var(--ak-edge, #4a5f73); border-radius: var(--ak-card-radius, 12px); box-shadow: var(--ak-card-shadow, 0 1px 2px rgba(9, 41, 64, 0.05), 0 16px 36px -16px rgba(9, 41, 64, 0.22)); font-size: 1rem; line-height: 1.5; }
-@media (max-width: 480px) { :where([data-auth-kit] [data-auth-kit-slot="card"]) { padding: var(--ak-card-padding-phone, 28px 22px 20px); } }
 :where([data-auth-kit] [data-auth-kit-slot="monogram"]) { width: 44px; height: 44px; border-radius: 11px; display: grid; place-items: center; background: var(--ak-mono, #092940); color: var(--ak-mono-ink, #fff); font-weight: 700; font-size: 17px; letter-spacing: 0.05em; line-height: 1; margin-bottom: 6px; }
 :where([data-auth-kit-style="frosted"] [data-auth-kit-slot="card"]) { -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5); }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { :where([data-auth-kit-style="frosted"] [data-auth-kit-slot="card"]) { background: var(--ak-card-solid, #fff); } }
 :where([data-auth-kit-style="plain"]) { position: relative; isolation: isolate; }
 :where([data-auth-kit-style="plain"])::before { content: ""; position: fixed; z-index: -1; top: 0; bottom: 0; left: 50%; width: calc(var(--ak-card-width, 380px) + 184px); transform: translateX(-50%); pointer-events: none; background: linear-gradient(90deg, transparent 0, var(--ak-ground, #f3f4f6) 56px, var(--ak-ground, #f3f4f6) calc(100% - 56px), transparent 100%); }
-@media (max-width: 480px) { :where([data-auth-kit-style="plain"])::before { position: absolute; left: -100vw; right: -100vw; width: auto; transform: none; top: -80px; bottom: -100vh; background: linear-gradient(180deg, transparent 0, var(--ak-ground, #f3f4f6) 56px); } }
+@media (max-width: 480px) { ${phoneRules('')} }
+${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit-style="plain"] [data-auth-kit-slot="card"]) { background: transparent; border-color: transparent; box-shadow: none; }
 :where([data-auth-kit-style="porcelain"] [data-auth-kit-slot="alts"]) { background: var(--ak-well, transparent); border-radius: 14px; padding: 2px 16px; }
 :where([data-auth-kit-style="porcelain"] [data-auth-kit-slot="bottom"]) { border-top-color: transparent; padding-top: 6px; }

@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
-import { type AuthenticatorEnrollment, enrollAuthenticator, fetchAccountEmail } from './api.js';
+import type { AuthenticatorEnrollment } from './api.js';
 import { ERRORS, FIRST_VISIT, SHARED, SIGN_IN, STATUS } from './copy.js';
+import { tagged, useDriver } from './driver.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, normalizeCode } from './ladder.js';
 import { describeAuthError } from './messages.js';
@@ -45,15 +46,20 @@ export interface AuthenticatorSetupProps extends StyleProps {
  */
 export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
   const { classNames, issuer, enrollment, deviceName } = props;
+  const driver = useDriver();
+  const init = driver.initial('authenticator-setup');
   const rootRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
   const uid = useId();
-  const fb = useFeedback();
+  const fb = useFeedback(init?.feedback);
   const [account, setAccount] = useState(props.accountName);
-  const [started, setStarted] = useState<AuthenticatorEnrollment | null>(null);
+  // A held setup (preview mode) shows its key at once, as if `setUpTOTP` had answered; its code is never checked.
+  const [started, setStarted] = useState<AuthenticatorEnrollment | null>(() =>
+    init && !enrollment ? { secret: init.secret, otpauthUri: buildOtpauthUri({ secret: init.secret, issuer }), verify: () => new Promise<void>(() => undefined) } : null,
+  );
   const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(init?.code ?? '');
   // One setup per attempt, even when React runs effects twice in development: a second
   // AssociateSoftwareToken would replace the key on screen.
   const pending = useRef<{ attempt: number; promise: Promise<AuthenticatorEnrollment> } | null>(null);
@@ -64,8 +70,9 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
       setAccount(props.accountName);
       return;
     }
+    if (driver.held) return;
     let active = true;
-    fetchAccountEmail().then(
+    driver.fetchAccountEmail().then(
       (email) => {
         if (active && email) setAccount(email);
       },
@@ -76,13 +83,14 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     return () => {
       active = false;
     };
-  }, [props.accountName]);
+  }, [props.accountName, driver]);
 
   useEffect(() => {
-    if (enrollment) return;
+    // A held setup already shows its key: no AssociateSoftwareToken.
+    if (enrollment || driver.held) return;
     let active = true;
     if (pending.current?.attempt !== attempt) {
-      pending.current = { attempt, promise: enrollAuthenticator({ issuer, ...(deviceName !== undefined && { deviceName }) }) };
+      pending.current = { attempt, promise: driver.enrollAuthenticator({ issuer, ...(deviceName !== undefined && { deviceName }) }) };
     }
     pending.current.promise.then(
       (result) => {
@@ -99,7 +107,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     return () => {
       active = false;
     };
-  }, [attempt, enrollment, issuer, deviceName, set]);
+  }, [attempt, enrollment, issuer, deviceName, set, driver]);
 
   const secret = enrollment?.secret ?? started?.secret ?? null;
   const verify = enrollment?.verify ?? started?.verify ?? null;
@@ -113,12 +121,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
 
   function copy() {
     if (!secret) return;
-    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-    if (!clipboard) {
-      set({ error: FIRST_VISIT.copyFailed });
-      return;
-    }
-    clipboard.writeText(secret.replace(/\s/g, '')).then(
+    driver.writeClipboard(secret.replace(/\s/g, '')).then(
       () => set({ status: FIRST_VISIT.copied, error: null }),
       () => set({ error: FIRST_VISIT.copyFailed }),
     );
@@ -146,6 +149,10 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
 
   const qr = props.renderQrCode && uri ? props.renderQrCode(uri) : null;
   const codeId = `${uid}-code`;
+  const retryNow = driver.act('try-again', retry);
+  const copyNow = driver.act('copy-setup-key', copy);
+  const submitNow = driver.act('submit-authenticator-code', (e: FormEvent) => void submit(e));
+  const openLink = driver.act('open-setup-link');
   return (
     <div ref={rootRef} data-auth-kit="authenticator-setup" {...slot(classNames, 'root', props.className)}>
       <ErrorSummary error={fb.error} fieldId={fb.field === 'code' ? codeId : undefined} classNames={classNames} />
@@ -156,7 +163,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
       <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? STATUS.preparingSetupKey : null)} />
       {loadFailed ? (
         <Actions classNames={classNames}>
-          <Button classNames={classNames} onClick={retry}>
+          <Button classNames={classNames} onClick={retryNow}>
             {SIGN_IN.tryAgain}
           </Button>
           {props.onCancel ? (
@@ -167,21 +174,21 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
         </Actions>
       ) : null}
       {secret && uri ? (
-        <form noValidate onSubmit={(e) => void submit(e)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate onSubmit={submitNow} {...tagged(submitNow)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
           {qr ? <div {...slot(classNames, 'content')}>{qr}</div> : null}
           {qr ? <Text classNames={classNames}>{FIRST_VISIT.cantScan}</Text> : null}
           <p {...slot(classNames, 'text')}>
             <code aria-label={FIRST_VISIT.setupKeyLabel} {...slot(classNames, 'code')}>
               {formatSetupKey(secret)}
             </code>{' '}
-            <Button variant="secondary" classNames={classNames} onClick={copy}>
+            <Button variant="secondary" classNames={classNames} onClick={copyNow}>
               <Icon name="copy" />
               {FIRST_VISIT.copy}
               <span data-auth-kit-sr="">{SHARED.setupKeySr}</span>
             </Button>
           </p>
           <p {...slot(classNames, 'small')}>
-            <a href={uri} {...slot(classNames, 'link')}>
+            <a href={uri} onClick={openLink} {...tagged(openLink)} {...slot(classNames, 'link')}>
               {FIRST_VISIT.openSetupLink}
             </a>
           </p>

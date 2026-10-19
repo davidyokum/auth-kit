@@ -38,11 +38,14 @@ jobs:
       - run: npm run build
       - name: Every subpath loads from the build
         run: |
-          for s in amplify amplify/pre-sign-up amplify/custom-message server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk accounts resources resources/ui themes backdrops backdrops/react backdrops/picker; do
+          for s in amplify amplify/pre-sign-up amplify/custom-message server proxy testing testing/matrix-server client admin dev dev/menu ribbon admin/ui admin/cdk accounts resources resources/ui themes backdrops backdrops/react backdrops/picker preview; do
             node --input-type=module -e "await import('auth-kit/$s')"
           done
       - name: The auth-kit command runs from the build
         run: node dist/bin/auth-kit.js help
+      # Preview mode's standalone files (ADR 0025): built, size-checked, and checked for Amplify, the marker, and notices.
+      - name: The standalone preview builds
+        run: npm run build:preview
       - name: Built-package checks (no dev code reachable from what ships; 'use client' kept)
         run: npx vitest run test/dev/dist.test.ts
         env:
@@ -59,12 +62,43 @@ jobs:
         env:
           AUTH_KIT_E2E: '1'
 
+  # Preview mode's screenshot tests (ADR 0025), in the Playwright container so images match the committed
+  # baselines pixel for pixel: the whole matrix's checks and computed styles, every control inert in a real
+  # browser, accessibility snapshots of every screen, and the baseline images. The image tag must match
+  # package.json's @playwright/test (test/package/ci.test.ts checks).
+  screenshots:
+    name: screenshot tests (preview mode)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --user 1001
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: npm ci --ignore-scripts
+      - run: npm run build:preview
+      - run: npx playwright test
+        env:
+          CI: '1'
+      - name: Keep the report and the differing images when a test fails
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshot-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+
   # Releases (ADR 0012): a v* tag builds the package once, here, from the tagged commit, packs it,
   # attests its provenance, and attaches the tarball to a GitHub Release. Sites install that tarball
   # by URL; their lockfile pins its sha512, so nobody builds auth-kit or installs its dev toolchain.
+  # Preview mode's standalone files (ADR 0025) are built from the same commit and attached beside the
+  # tarball, under the same attestation; they're never inside it.
   release:
     name: release tarball
-    needs: check
+    needs: [check, screenshots]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -88,16 +122,21 @@ jobs:
             exit 1
           fi
       - run: npm run build
+      - run: npm run build:preview
       - name: Pack
         run: |
           npm pack --ignore-scripts
-          sha256sum auth-kit-*.tgz > SHA256SUMS
+          cp release/auth-kit-preview.js release/auth-kit-preview-backdrops.js .
+          sha256sum auth-kit-*.tgz auth-kit-preview.js auth-kit-preview-backdrops.js > SHA256SUMS
           cat SHA256SUMS
       - name: The tarball holds every export
         run: node scripts/check-tarball.mjs auth-kit-*.tgz
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: auth-kit-*.tgz
+          subject-path: |
+            auth-kit-*.tgz
+            auth-kit-preview.js
+            auth-kit-preview-backdrops.js
       - name: Publish the GitHub Release (never overwrites an existing one)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -110,5 +149,5 @@ jobs:
           fi
           prerelease=""
           case "$version" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" auth-kit-*.tgz SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" auth-kit-*.tgz auth-kit-preview.js auth-kit-preview-backdrops.js SHA256SUMS \
             --verify-tag $prerelease --title "auth-kit $GITHUB_REF_NAME" --notes-file notes.md

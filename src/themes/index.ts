@@ -664,7 +664,8 @@ export function cardStyleVariables(theme: AuthTheme): Record<`--ak-${string}`, s
         '--ak-card-bg': 'transparent',
         '--ak-card-solid': theme.palette.page,
         '--ak-card-shadow': 'none',
-        '--ak-card-radius': '0',
+        // A length, not a bare 0: the choice rows' corners are calc(card radius − 2px), floored at 10px.
+        '--ak-card-radius': '0px',
         '--ak-option-border': mixHex(ink, W, 0.9),
         '--ak-status': sh(0.05),
       });

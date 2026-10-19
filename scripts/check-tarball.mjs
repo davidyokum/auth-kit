@@ -1,5 +1,5 @@
 // Checks a packed release tarball (ADR 0012): every subpath export's and bin's files are inside, nothing from
-// src/ or test/ leaked in, the package runs no lifecycle scripts on install, and the OpenStreetMap-derived
+// src/ or test/ leaked in, the standalone preview isn't in it (ADR 0025), the package runs no lifecycle scripts on install, and the OpenStreetMap-derived
 // data carries its ODbL notice.
 // Usage: node scripts/check-tarball.mjs auth-kit-<version>.tgz
 import { execFileSync } from 'node:child_process';
@@ -40,6 +40,8 @@ for (const file of files) {
   // Source maps would embed src/; dated reviews would read as current in every site's node_modules.
   if (file.endsWith('.map')) problems.push(`${file}: no source maps in the package (they embed src/)`);
   if (/^docs\/reviews\//.test(file)) problems.push(`${file}: dated reviews stay in the repo, not the package`);
+  // Preview mode's standalone files are GitHub Release assets beside the tarball, never inside it (ADR 0025).
+  if (/^release\//.test(file) || /(^|\/)auth-kit-preview[^/]*\.js$/.test(file)) problems.push(`${file}: the standalone preview is a release asset, not part of the package`);
 }
 for (const hook of ['preinstall', 'install', 'postinstall', 'prepare', 'prepack', 'postpack']) {
   if (pkg.scripts?.[hook]) problems.push(`package.json has a "${hook}" script; installs must run nothing`);

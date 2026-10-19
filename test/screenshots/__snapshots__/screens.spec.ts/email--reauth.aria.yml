@@ -1,0 +1,15 @@
+- heading "Confirm it’s you" [level=1]
+- paragraph: For your security, sign in again to continue.
+- text: Email address
+- textbox "Email address":
+  - /placeholder: name@osbm.nc.gov
+  - text: ada@example.org
+- button "Continue"
+- list:
+  - listitem:
+    - button "Use a password instead"
+  - listitem:
+    - button "Email me a code instead"
+- status
+- button "Trouble signing in?"
+- paragraph: This site is managed by the NC Office of State Budget and Management

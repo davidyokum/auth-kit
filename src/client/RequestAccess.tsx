@@ -1,8 +1,8 @@
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import { CODE_LIFETIME_POLICY } from '../shared/policy.js';
-import { postAccountForm, takeHandedOffEmail } from './account-creation-client.js';
 import { type CopyContext, ERRORS, REQUEST, SHARED, SIGN_IN, STATUS } from './copy.js';
+import { type HeldProblem, tagged, useDriver } from './driver.js';
 import { checkedHref, hrefOr } from './href.js';
 import type { SignInHelp } from './SignIn.js';
 import { Actions, Button, Card, ErrorSummary, Field, Glyph, Heading, type HeadingLevel, StatusRegion, type StyleProps, Text, slot, useFeedback, useFocusOnViewChange } from './ui.js';
@@ -25,7 +25,7 @@ export interface RequestAccessProps extends StyleProps {
   fetch?: typeof fetch;
 }
 
-type Problem = { message: string; field: 'name' | 'email' | 'reason' };
+type Problem = HeldProblem;
 
 /**
  * "Request access to {Site}" (REPORT §3.1a, Card Studio v4; register D3, ADR 0023): name, email, and
@@ -34,6 +34,8 @@ type Problem = { message: string; field: 'name' | 'email' | 'reason' };
  */
 export function RequestAccess(props: RequestAccessProps) {
   const { classNames, siteName } = props;
+  const driver = useDriver();
+  const init = driver.initial('request-access');
   const theme = useMemo(() => resolveTheme(props.theme), [props.theme]);
   const c: CopyContext = { siteName, theme, codeLifetimeMinutes: CODE_LIFETIME_POLICY.defaultMinutes, helpAddress: props.help.address, ...(props.help.owner !== undefined && { ownerName: props.help.owner }) };
   const hint = props.emailHint?.trim() || theme.emailHint;
@@ -41,23 +43,23 @@ export function RequestAccess(props: RequestAccessProps) {
   const uid = useId();
   const ids = { name: `${uid}-name`, email: `${uid}-email`, reason: `${uid}-reason` };
   const rootRef = useRef<HTMLDivElement>(null);
-  const fb = useFeedback();
-  const [sent, setSent] = useState(false);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [reason, setReason] = useState('');
-  const [problems, setProblems] = useState<Problem[]>([]);
+  const fb = useFeedback(init?.feedback);
+  const [sent, setSent] = useState(init?.sent ?? false);
+  const [name, setName] = useState(init?.name ?? '');
+  const [email, setEmail] = useState(init?.email ?? '');
+  const [reason, setReason] = useState(init?.reason ?? '');
+  const [problems, setProblems] = useState<Problem[]>(() => [...(init?.problems ?? [])]);
   useFocusOnViewChange(rootRef, sent ? 'sent' : 'form');
-  const navigate = (path: string) => (props.navigate ?? ((p: string) => window.location.assign(p)))(path);
+  const navigate = (path: string) => (props.navigate ?? driver.navigate)(path);
   const signInHref = hrefOr('signInHref', props.signInHref, '/sign-in');
   // An empty string means no notice, as before.
   const privacyNoticeUrl = props.privacyNoticeUrl ? checkedHref('privacyNoticeUrl', props.privacyNoticeUrl, '/privacy') : undefined;
 
   // "Ask for access instead" on the sign-up screen hands the typed address over (never in the URL).
   useEffect(() => {
-    const handed = takeHandedOffEmail();
+    const handed = driver.takeHandedOffEmail();
     if (handed) setEmail((e) => e || handed);
-  }, []);
+  }, [driver]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -71,7 +73,7 @@ export function RequestAccess(props: RequestAccessProps) {
     fb.set({ error: null });
     if (found.length > 0) return;
     fb.set({ busy: true, status: STATUS.sendingRequest });
-    const outcome = await postAccountForm(
+    const outcome = await driver.postAccountForm(
       props.endpoint ?? '/api/auth/request-access',
       { name: name.trim(), email: typed, ...(reason.trim() && { reason: reason.trim() }) },
       { ...(props.fetch !== undefined && { fetch: props.fetch }), helpAddress: props.help.address, networkMessage: REQUEST.couldntSend },
@@ -87,6 +89,9 @@ export function RequestAccess(props: RequestAccessProps) {
   }
 
   const errorOf = (field: Problem['field']) => problems.find((p) => p.field === field)?.message ?? null;
+  const backToSignIn = driver.act('back-to-sign-in', () => navigate(signInHref));
+  const send = driver.act('send-request', (e: FormEvent) => void submit(e));
+  const privacyLink = driver.act('privacy-notice');
   const heading = (text: string) => (
     <Heading level={level} classNames={classNames}>
       {text}
@@ -99,7 +104,7 @@ export function RequestAccess(props: RequestAccessProps) {
       siteName={siteName}
       view={sent ? 'sent' : 'form'}
       theme={theme}
-      bottom={sent ? {} : { back: { label: SIGN_IN.backToSignIn, onClick: () => navigate(signInHref) } }}
+      bottom={sent ? {} : { back: { label: SIGN_IN.backToSignIn, onClick: backToSignIn } }}
       rootRef={rootRef}
       {...(props.className !== undefined && { className: props.className })}
       classNames={classNames}
@@ -110,13 +115,13 @@ export function RequestAccess(props: RequestAccessProps) {
           {heading(REQUEST.sentHeading)}
           <Text classNames={classNames}>{REQUEST.sentSub}</Text>
           <Actions classNames={classNames}>
-            <Button classNames={classNames} onClick={() => navigate(signInHref)}>
+            <Button classNames={classNames} onClick={backToSignIn}>
               {SIGN_IN.backToSignIn}
             </Button>
           </Actions>
         </div>
       ) : (
-        <form noValidate onSubmit={(e) => void submit(e)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
+        <form noValidate onSubmit={send} {...tagged(send)} aria-busy={fb.busy || undefined} {...slot(classNames, 'form')}>
           <ErrorSummary error={fb.error} items={problems.map((p) => ({ message: p.message, fieldId: ids[p.field] }))} classNames={classNames} />
           {heading(REQUEST.heading(c))}
           <Text classNames={classNames}>{REQUEST.sub(c)}</Text>
@@ -163,7 +168,7 @@ export function RequestAccess(props: RequestAccessProps) {
           {privacyNoticeUrl ? (
             <p {...slot(classNames, 'small')}>
               {REQUEST.privacy[0]}
-              <a href={privacyNoticeUrl} {...slot(classNames, 'link')}>
+              <a href={privacyNoticeUrl} onClick={privacyLink} {...tagged(privacyLink)} {...slot(classNames, 'link')}>
                 {REQUEST.privacy[1]}
               </a>
             </p>
