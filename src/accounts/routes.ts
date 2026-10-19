@@ -81,6 +81,8 @@ export interface AccountCreationRoutesConfig {
    * Refuse sign-ups that didn't pass the WAF challenge (no `aws-waf-token` cookie), with the same
    * answer for every address. Default `true` in `domains` and `open` modes, where the challenge is
    * required (register D3, ADR 0023); pass `false` only for local development, which has no WAF in front.
+   * `false` throws on a production server (`NODE_ENV=production`, every `next build` output), and is
+   * reported once through `onError` when the routes are created.
    */
   requireWafToken?: boolean;
   /** Every answer takes at least this long. Default 800 ms (`ACCOUNT_CREATION_POLICY`). */
@@ -216,6 +218,18 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
     }
   };
   const site = async () => ({ siteName: config.siteName, theme, signInUrl: signInUrl.toString(), helpEmail: await helpAddressOf(config.help) });
+  if (allowsSelfSignUp(settings) && config.requireWafToken === false) {
+    // L4: the token check is how a site notices its web ACL isn't associated. Off is for local
+    // development, which has no WAF in front, so a production server (every `next build` output,
+    // Amplify's included; `process.env.NODE_ENV` is written literally so the build fixes it) refuses it.
+    // The auth matrix's server mode runs under `next dev`, so it never meets this.
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'auth-kit: requireWafToken: false is for local development only, and this is a production server (NODE_ENV=production). Sign-up needs the WAF challenge (register D3): remove requireWafToken, associate the site web ACL (createSiteWebAcl) with the app, and load AWS WAF’s script on the sign-up page.',
+      );
+    }
+    report(new Error('requireWafToken: false: sign-up runs without the WAF challenge. Local development only (it throws under NODE_ENV=production).'), 'sign-up: WAF token check off');
+  }
 
   function badEmail(raw: unknown): Extract<AccountCreationBody, { ok: false }> {
     const empty = typeof raw !== 'string' || raw.trim() === '';
