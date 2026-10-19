@@ -1,6 +1,6 @@
 /**
  * Auth-matrix tests (03 §2, Assurance): anonymous, member, and admin against every route, including
- * data routes, plus a second member against every route that takes a record ID.
+ * data routes, plus a second member against every route that takes an item ID.
  *
  * Each case runs twice:
  * - **with proxy**: the request goes through the whole app, as a browser's would;
@@ -49,7 +49,7 @@ import {
 import { type AppRouteInput, type CompiledRoute, compileAppRoute, resolveAppRoute } from './routes.js';
 
 export const REQUIRED_PERSONAS = ['anonymous', 'member', 'admin'] as const;
-/** The persona used for the second-member check on record routes. */
+/** The persona used for the second-member check on item routes. */
 export const SECOND_MEMBER = 'otherMember';
 /**
  * A freshly signed-up Member (register D4, ADR 0023): an account the sign-up route made a moment ago,
@@ -91,7 +91,9 @@ export interface MatrixRoute {
   body?: unknown;
   /** Extra headers for this route (merged under the persona's). */
   headers?: Record<string, string>;
-  /** Treat as a record route even without placeholders (e.g. `?id=` routes), or opt out. */
+  /** Treat as an item route (one that takes an item's ID) even without placeholders (e.g. `?id=` routes), or opt out. */
+  itemRoute?: boolean;
+  /** @deprecated The old name for `itemRoute`. */
   recordRoute?: boolean;
   /** Expected status per persona; an array allows any of several (e.g. `[302, 307]`). */
   expect: Expectations;
@@ -102,8 +104,8 @@ export interface MatrixRoute {
    */
   expectWithoutProxy?: Expectations;
   /**
-   * The standard answers 404, not 403, to someone who can't see a record. Set this only for a route
-   * that deliberately confirms the record exists.
+   * The standard answers 404, not 403, to someone who can't see an item. Set this only for a route
+   * that deliberately confirms the item exists.
    */
   allowForbiddenForSecondMember?: boolean;
   /** `false` for a row asserting that a path does NOT exist: every persona must expect 404. */
@@ -131,7 +133,7 @@ export interface AuthMatrixOptions {
   handlerRequest?: (request: Request) => Promise<Response>;
   /** Default `http://localhost`. */
   baseUrl?: string;
-  /** Placeholder values shared by all routes (the member's own record IDs). */
+  /** Placeholder values shared by all routes (the member's own item IDs). */
   params?: Record<string, string>;
   /**
    * The site lets people create their own account (`accountCreation` mode `domains` or `open`): the
@@ -175,7 +177,7 @@ export interface MatrixResult extends MatrixCase {
 const PARAM = /:([A-Za-z_][A-Za-z0-9_]*)/g;
 
 function isRecordRoute(route: MatrixRoute): boolean {
-  return route.recordRoute ?? /:[A-Za-z_]/.test(route.path);
+  return route.itemRoute ?? route.recordRoute ?? /:[A-Za-z_]/.test(route.path);
 }
 
 function fill(path: string, params: Record<string, string>, label: string): string {
@@ -191,7 +193,7 @@ const asList = (value: number | readonly number[] | undefined): readonly number[
 
 /**
  * Validates the matrix against the standard and expands it into one case per route, persona, and
- * pass. Throws, listing every problem, if a route skips a required persona, a record route skips the
+ * pass. Throws, listing every problem, if a route skips a required persona, an item route skips the
  * second member or expects 403 where the standard says 404, a row expects nobody to succeed, a row
  * matches none of `appRoutes`, or an app route has no row.
  */
@@ -247,7 +249,7 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
       ] as const) {
         if (asList(expectations?.[SECOND_MEMBER]).includes(403)) {
           problems.push(
-            `${label}: ${field} gives a second member 403; the standard says 404, so the route doesn't confirm the record exists.`,
+            `${label}: ${field} gives a second member 403; the standard says 404, so the route doesn't confirm the item exists.`,
           );
         }
       }

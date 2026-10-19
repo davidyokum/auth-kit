@@ -332,7 +332,7 @@ describe('authMatrixCases: completeness rules', () => {
       authMatrixCases({
         personas,
         appRoutes,
-        routes: [{ path: '/api/x', recordRoute: true, expect: { anonymous: 401, member: 200, admin: 200 } }],
+        routes: [{ path: '/api/x', itemRoute: true, expect: { anonymous: 401, member: 200, admin: 200 } }],
       }),
     ).toThrow(/otherMember/);
   });

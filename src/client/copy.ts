@@ -380,7 +380,7 @@ export const MY_ACCOUNT = {
   noEmail: 'No email address on this account.',
 
   passkeysHeading: 'Passkeys',
-  passkeysIntro: 'Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.',
+  passkeysIntro: 'Sign in with your face, fingerprint, or device PIN. Passkeys saved in a password manager work too. Nobody else can see or remove these.',
   loadingPasskeys: 'Loading your passkeys…',
   noPasskeys: 'No passkeys yet.',
   /** A passkey with no name of its own. */

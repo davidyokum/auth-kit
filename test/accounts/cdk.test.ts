@@ -534,7 +534,7 @@ describe('accountCreationAppPolicy and siteSettingsAppPolicy (plain JSON, for ro
   const REQUESTS = 'arn:aws:dynamodb:us-east-1:ACCOUNT:table/access-requests';
 
   it('a sign-up site: the sign-up and self-service Cognito calls on the pool, once each, and UpdateItem on the rate table', () => {
-    const policy = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, selfSignUp: true });
+    const policy = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accountCreation: { mode: 'open' } });
     expect(policy.Version).toBe('2012-10-17');
     expect(policy.Statement).toEqual([
       { Sid: 'AccountCreationRateLimits', Effect: 'Allow', Action: ['dynamodb:UpdateItem'], Resource: RATE },
@@ -555,13 +555,13 @@ describe('accountCreationAppPolicy and siteSettingsAppPolicy (plain JSON, for ro
     );
     expect(cognitoActions).toHaveLength(new Set(cognitoActions).size);
     // A sign-up site that also takes requests (domains + requestsAlso) adds the request table, nothing more on the pool.
-    const both = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accessRequestTableArn: REQUESTS, selfSignUp: true });
+    const both = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accessRequestTableArn: REQUESTS, accountCreation: { mode: 'open' } });
     expect(new Set(both.Statement.find((s) => s.Sid === 'AccountCreationCognito')!.Action)).toEqual(new Set(cognitoActions));
     expect(both.Statement.find((s) => s.Sid === 'AccessRequests')).toEqual({ Sid: 'AccessRequests', Effect: 'Allow', Action: ['dynamodb:Query', 'dynamodb:GetItem', 'dynamodb:PutItem'], Resource: REQUESTS });
   });
 
   it('a request-only site: only ListUsers on the pool, plus the request table’s calls (and the rate counters)', () => {
-    const policy = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accessRequestTableArn: REQUESTS, selfSignUp: false });
+    const policy = accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accessRequestTableArn: REQUESTS, accountCreation: { mode: 'request' } });
     expect(policy.Statement).toEqual([
       { Sid: 'AccountCreationRateLimits', Effect: 'Allow', Action: ['dynamodb:UpdateItem'], Resource: RATE },
       { Sid: 'AccountCreationCognito', Effect: 'Allow', Action: ['cognito-idp:ListUsers'], Resource: POOL },
@@ -575,13 +575,21 @@ describe('accountCreationAppPolicy and siteSettingsAppPolicy (plain JSON, for ro
     const policy = accountCreationAppPolicy({
       userPoolArn: POOL,
       rateLimitTableArn: RATE,
-      selfSignUp: true,
+      accountCreation: { mode: 'open' },
       sesResourceArns: ['arn:aws:ses:us-east-1:ACCOUNT:identity/example.org'],
     });
     expect(policy.Statement.at(-1)).toEqual({ Sid: 'AccountCreationEmail', Effect: 'Allow', Action: ['ses:SendEmail'], Resource: ['arn:aws:ses:us-east-1:ACCOUNT:identity/example.org'] });
-    expect(accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, selfSignUp: false, sesResourceArns: [] }).Statement).toEqual([
+    expect(accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accountCreation: { mode: 'invite' }, notices: false, sesResourceArns: [] }).Statement).toEqual([
       { Sid: 'AccountCreationRateLimits', Effect: 'Allow', Action: ['dynamodb:UpdateItem'], Resource: RATE },
     ]);
+    // The notice route (on by default, register A10) reads the account's own address.
+    expect(accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, accountCreation: { mode: 'invite' } }).Statement).toContainEqual({
+      Sid: 'AccountCreationCognito',
+      Effect: 'Allow',
+      Action: ['cognito-idp:ListUsers'],
+      Resource: POOL,
+    });
+    expect(() => accountCreationAppPolicy({ userPoolArn: POOL, rateLimitTableArn: RATE, selfSignUp: true } as never)).toThrow(/takes accountCreation/);
   });
 
   it('siteSettingsAppPolicy: GetItem, PutItem, DeleteItem on the settings table only', () => {
