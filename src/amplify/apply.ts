@@ -13,6 +13,7 @@ import { UNVERIFIED_SWEEP_MARK, isUnverifiedSweep } from './sweep-mark.js';
 import { CUSTOM_MESSAGE_GATE_ENV } from './custom-message.js';
 import { type AuthStandardOptions, AuthStandardConfigError, normalizeOptions, webAclArnRegion } from './options.js';
 import { associateAuthWebAcl, createAuthWebAcl } from './waf.js';
+import { encodeSenderName } from '../themes/index.js';
 
 /** How the pool is rate limited. */
 export interface AppliedWaf {
@@ -229,9 +230,12 @@ function environmentFor(
  * The pool's From header: `Name <address>`, with the name in double quotes when it holds an RFC 5322
  * special such as parentheses. Unquoted, `Example Site (NC OSBM)` would be read as the name
  * "Example Site" plus a comment, and mail clients may drop the comment. The options check refuses
- * `"`, a backslash, `<`, `>`, and line breaks, so quoting needs no escapes.
+ * `"`, a backslash, `<`, `>`, and line breaks, so quoting needs no escapes. A name with characters
+ * outside ASCII is written as RFC 2047 encoded-words instead (never quoted), as SES requires.
  */
 export function formatSender(name: string, address: string): string {
+  // A name outside ASCII ("Café Reports"): RFC 2047 encoded-words, which SES (Cognito sends through it) requires.
+  if (/[^\x20-\x7e]/.test(name)) return `${encodeSenderName(name)} <${address}>`;
   return /[()<>[\]:;@\\,.]/.test(name) ? `"${name}" <${address}>` : `${name} <${address}>`;
 }
 

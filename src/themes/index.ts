@@ -366,12 +366,99 @@ export function senderAddressProblems(address: string | null | undefined, theme?
   return [];
 }
 
-/** Why a display name isn't the family's sender name ("{Site} (NC OSBM)", "{Site} (UNC)", "{Site}"), or `[]`. */
+// ---- Non-ASCII display names (RFC 2047) ------------------------------------------------------------
+// SES (and Cognito, which sends through it) takes a display name with characters outside ASCII only as
+// MIME encoded-words, `=?UTF-8?B?…?=` (RFC 2047). So the kit writes such a name encoded wherever a sender
+// goes to SES, and compares names decoded and NFC-normalized, whichever form a site wrote.
+
+const NON_ASCII = /[^\x20-\x7e]/;
+/** An encoded-word is at most 75 characters: `=?UTF-8?B?` + base64 + `?=` leaves 63, so 45 bytes. */
+const ENCODED_WORD_BYTES = 45;
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+/**
+ * A display name as SES needs it: unchanged when it's printable ASCII, otherwise RFC 2047 encoded-words
+ * (`=?UTF-8?B?…?=`, each at most 75 characters, never splitting a character). Never quote the result.
+ */
+export function encodeSenderName(name: string): string {
+  if (!NON_ASCII.test(name)) return name;
+  const encoder = new TextEncoder();
+  const words: string[] = [];
+  let chunk: number[] = [];
+  for (const char of name.normalize('NFC')) {
+    const bytes = encoder.encode(char);
+    if (chunk.length + bytes.length > ENCODED_WORD_BYTES) {
+      words.push(`=?UTF-8?B?${base64(Uint8Array.from(chunk))}?=`);
+      chunk = [];
+    }
+    chunk.push(...bytes);
+  }
+  if (chunk.length > 0) words.push(`=?UTF-8?B?${base64(Uint8Array.from(chunk))}?=`);
+  return words.join(' ');
+}
+
+const ENCODED_WORD = /=\?([^?\s]+)\?([bBqQ])\?([^?\s]*)\?=/g;
+
+function decodeWord(charset: string, encoding: string, text: string): string | null {
+  try {
+    let bytes: Uint8Array;
+    if (encoding.toUpperCase() === 'B') {
+      const binary = atob(text);
+      bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    } else {
+      const out: number[] = [];
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i]!;
+        if (c === '_') out.push(0x20);
+        else if (c === '=' && /^[0-9a-fA-F]{2}$/.test(text.slice(i + 1, i + 3))) {
+          out.push(parseInt(text.slice(i + 1, i + 3), 16));
+          i += 2;
+        } else out.push(c.charCodeAt(0));
+      }
+      bytes = Uint8Array.from(out);
+    }
+    return new TextDecoder(charset.split('*')[0]!.toLowerCase(), { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A display name with its RFC 2047 encoded-words decoded (B or Q, any charset the platform knows;
+ * whitespace between two encoded-words dropped, RFC 2047 §6.2), NFC-normalized. A word that can't be
+ * decoded stays as written.
+ */
+export function decodeSenderName(name: string): string {
+  if (!name.includes('=?')) return name.normalize('NFC');
+  let out = '';
+  let last = 0;
+  let previousWasWord = false;
+  for (const m of name.matchAll(ENCODED_WORD)) {
+    const between = name.slice(last, m.index);
+    const decoded = decodeWord(m[1]!, m[2]!, m[3]!);
+    out += previousWasWord && decoded !== null && /^\s*$/.test(between) ? '' : between;
+    out += decoded ?? m[0];
+    previousWasWord = decoded !== null;
+    last = m.index + m[0].length;
+  }
+  return (out + name.slice(last)).normalize('NFC');
+}
+
+/**
+ * Why a display name isn't the family's sender name ("{Site} (NC OSBM)", "{Site} (UNC)", "{Site}"), or
+ * `[]`. The name may be written plainly or as RFC 2047 encoded-words; both sides are compared decoded
+ * and NFC-normalized, so "Café Reports" matches however it's spelled.
+ */
 export function senderNameProblems(name: string, theme: AuthTheme | ThemeFamily, siteName?: string): string[] {
   const t = resolveTheme(theme);
-  const value = name.trim();
+  const value = decodeSenderName(name.trim()).trim();
   if (siteName !== undefined) {
-    const expected = senderDisplayName(siteName.trim(), t);
+    const expected = senderDisplayName(siteName.trim(), t).normalize('NFC');
     return value === expected ? [] : [`The sender's name is "${expected}" (register E4a), not "${value}".`];
   }
   const suffixes = Object.values(FAMILY_THEMES).map((f) => f.senderSuffix).filter((s): s is string => s !== null);
@@ -381,9 +468,21 @@ export function senderNameProblems(name: string, theme: AuthTheme | ThemeFamily,
   return suffixes.some((s) => value.endsWith(`(${s})`)) || value === '' ? [`A personal site's sender name is just the site's name (register E4a), not "${value}".`] : [];
 }
 
-/** `Name <address>`, quoting the name when it has a character that needs it (`(`, `,`, `.`...). */
+/**
+ * `Name <address>` as SES takes it: a name with characters outside ASCII as RFC 2047 encoded-words
+ * (`encodeSenderName`; SES refuses it otherwise), and an ASCII name quoted when it has a character that
+ * needs it (`(`, `,`, `.`...). An already-encoded name is decoded first, so it's never encoded twice.
+ */
 export function formatSenderAddress(name: string, address: string): string {
-  return /[()<>[\]:;@\\,."]/.test(name) ? `"${name.replace(/["\\]/g, '')}" <${address}>` : `${name} <${address}>`;
+  const plain = decodeSenderName(name);
+  if (NON_ASCII.test(plain)) return `${encodeSenderName(plain.replace(/[\r\n]/g, ''))} <${address}>`;
+  return /[()<>[\]:;@\\,."]/.test(plain) ? `"${plain.replace(/["\\]/g, '')}" <${address}>` : `${plain} <${address}>`;
+}
+
+/** A sender as SES's `FromEmailAddress` takes it (`formatSenderAddress` of its name and address), or the bare address. */
+export function sesSender(from: string): string {
+  const { name, address } = parseSender(from);
+  return name === '' ? address : formatSenderAddress(name, address);
 }
 
 /** The name and address in a sender (`"Name" <a@b>`, `Name <a@b>`, or `a@b`). */

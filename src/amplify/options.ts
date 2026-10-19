@@ -14,7 +14,7 @@ import {
   WAF_POLICY,
   codeLifetimeMinutes,
 } from '../shared/policy.js';
-import { type HelpAddressSetting, type ThemeFamily, helpSettingProblems, isThemeFamily, readHelpSetting, senderAddressProblems, senderNameProblems } from '../themes/index.js';
+import { type HelpAddressSetting, type ThemeFamily, decodeSenderName, helpSettingProblems, isThemeFamily, readHelpSetting, senderAddressProblems, senderNameProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
 export class AuthStandardConfigError extends Error {
@@ -395,7 +395,8 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!email) fail('email settings are required: auth email must go through SES from a verified domain.');
   const fromAddress = (email.fromAddress ?? '').trim();
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
-  const fromName = (email.fromName ?? '').trim();
+  // Written plainly or RFC 2047-encoded, kept plain (NFC); the pool's From header encodes it again if it needs to.
+  const fromName = decodeSenderName((email.fromName ?? '').trim()).trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
   if (!isThemeFamily(email.family)) fail("email.family is required: 'osbm', 'unc', or 'personal' (the sender's name carries the family's suffix, register E4a).");
   // With the family: the personal family's sender is its own sign-in@yokum.app (register F11).

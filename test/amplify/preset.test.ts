@@ -128,6 +128,19 @@ describe('Tier 2 pool on a branch', () => {
     expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
 
+  it('a site name outside ASCII: the From header carries it RFC 2047-encoded (SES, which Cognito sends through, requires it)', () => {
+    const ENCODED = '=?UTF-8?B?Q2Fmw6kgUmVwb3J0cyAoTkMgT1NCTSk=?= <sign-in@example.org>';
+    expect(formatSender('Caf\u00e9 Reports (NC OSBM)', 'sign-in@example.org')).toBe(ENCODED);
+    const cafe = { ...BASE, email: { ...BASE.email, fromAddress: 'sign-in@example.org', fromName: 'Caf\u00e9 Reports (NC OSBM)', family: 'osbm' as const } };
+    synth(cafe).template().hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: ENCODED }) });
+    // Given already encoded (or decomposed), it's kept plain once and encoded once: never twice.
+    for (const fromName of ['=?UTF-8?B?Q2Fmw6kgUmVwb3J0cyAoTkMgT1NCTSk=?=', 'Cafe\u0301 Reports (NC OSBM)']) {
+      const o = normalizeOptions({ ...cafe, email: { ...cafe.email, fromName } });
+      expect(o.email.fromName).toBe('Caf\u00e9 Reports (NC OSBM)');
+      expect(formatSender(o.email.fromName, o.email.fromAddress)).toBe(ENCODED);
+    }
+  });
+
   it('keeps an old email until a new one is verified (Amplify keepOriginal)', () => {
     t.hasResourceProperties('AWS::Cognito::UserPool', {
       UserAttributeUpdateSettings: { AttributesRequireVerificationBeforeUpdate: ['email'] },
