@@ -19,11 +19,21 @@ export interface CopyContext {
   helpAddress: string;
   /** The person who looks after the site, named when the family names owners (`theme.help.named`). */
   ownerName?: string;
+  /**
+   * A public site (open sign-up): it never names a person, so it says "the {Site} team" and leaves out
+   * the Teams check, whatever the family (register E4c).
+   */
+  publicSite?: boolean;
+}
+
+/** Whether the screens name the site's owner: families that name owners, on sites that aren't public. */
+export function namesOwner(c: CopyContext): boolean {
+  return c.theme.help.named && !c.publicSite && Boolean(c.ownerName);
 }
 
 /** "Jordan Lee", or "the Example Reports team" (Card Studio's `team`). */
 export function team(c: CopyContext): string {
-  return c.theme.help.named && c.ownerName ? c.ownerName : `the ${c.siteName} team`;
+  return namesOwner(c) ? c.ownerName! : `the ${c.siteName} team`;
 }
 
 /** The same, at the start of a sentence (Card Studio's `Team`). */
@@ -105,11 +115,13 @@ export const SIGN_IN = {
   notNow: 'Not now',
 } as const;
 
-/** The card's account-creation line (Card Studio's ACCESSLINE; register D1). */
+/** The card's account-creation line, one per mode, so the card says which one applies (Card Studio's ACCESSLINE; register D1). */
 export const ACCESS_LINE = {
-  request: 'Need access? Request it.',
-  newHere: 'New here?',
+  newTo: (c: CopyContext) => `New to ${c.siteName}?`,
+  requestAccess: 'Request access',
   createAccount: 'Create an account',
+  /** Sign-up for approved domains: "… with your nc.gov email address." */
+  withDomains: (domains: string) => ` with your ${domains} email address.`,
   inviteOnly: (c: CopyContext) => `New to ${c.siteName}? It’s invite-only.`,
   needAccess: 'Need access?',
   askToBeAdded: 'Ask the person who runs it to add you.',
@@ -256,7 +268,7 @@ export const CONTACT = {
   /** Before the help address: "Email apps-help@…." */
   email: 'Email',
   /** "Jordan Lee looks after Example Reports.", in families that name owners. */
-  looksAfter: (c: CopyContext) => (c.theme.help.named && c.ownerName ? `${c.ownerName} looks after ${c.siteName}.` : null),
+  looksAfter: (c: CopyContext) => (namesOwner(c) ? `${c.ownerName} looks after ${c.siteName}.` : null),
   neverSend: 'Never send a password or code.',
 } as const;
 
@@ -268,7 +280,7 @@ export function contactLines(c: CopyContext, options: { teams?: boolean } = {}):
     address: c.helpAddress,
     lines: [
       ...(named ? [named] : []),
-      ...(options.teams === true && c.theme.help.teamsCheck ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
+      ...(options.teams === true && c.theme.help.teamsCheck && !c.publicSite ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
       CONTACT.neverSend,
     ],
   };
@@ -300,7 +312,8 @@ export const SIGN_UP = {
   codeHeading: 'Check your email',
   codeSub: (c: CopyContext, email: string) => `We’ve emailed ${email}. Enter the 8-digit code from that email. It works for ${minutes(c)} and confirms the address is yours.`,
   codeExisting: 'Already have an account? The email explains how to sign in instead.',
-  verify: 'Verify',
+  /** Continue, not Verify: a step in between (register A6). */
+  codeSubmit: 'Continue',
   codeHelp: 'No email after a minute? Check your junk folder, then send a new code.',
 
   nameHeading: 'Your name',
@@ -367,7 +380,7 @@ export const MY_ACCOUNT = {
   noEmail: 'No email address on this account.',
 
   passkeysHeading: 'Passkeys',
-  passkeysIntro: 'Sign in with Face ID, Touch ID, your device PIN, or your password manager. Nobody else can see or remove these.',
+  passkeysIntro: 'Sign in with your face, fingerprint, or device PIN. Passkeys saved in a password manager work too. Nobody else can see or remove these.',
   loadingPasskeys: 'Loading your passkeys…',
   noPasskeys: 'No passkeys yet.',
   /** A passkey with no name of its own. */
@@ -442,6 +455,9 @@ export const STATUS = {
   authenticatorOn: 'Your authenticator is on.',
   passwordSaved: 'Password saved.',
   passwordChanged: 'Password changed.',
+  /** After a notice the site's route confirmed it sent (register A10). */
+  passkeySavedEmailed: 'Passkey saved. We’ve emailed you a note about this.',
+  passwordChangedEmailed: 'Password changed. We’ve emailed you a note about this.',
   signingOutEverywhere: 'Signing out everywhere…',
 } as const;
 

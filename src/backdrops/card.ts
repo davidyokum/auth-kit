@@ -7,9 +7,12 @@
  */
 import type { BackdropRect } from './types.js';
 
-/** The card's default place when none is given: centered, 440px wide (less on phones), up to 560px tall. */
+/** The card's width, as `SignIn` draws it (register E5: 380px; the `--ak-card-width` default). */
+export const CARD_WIDTH = 380;
+
+/** The card's default place when none is given: centered, 380px wide (less on phones), up to 560px tall. */
 export function defaultCardRect(width: number, height: number): BackdropRect {
-  const w = Math.min(440, Math.max(0, width - 32));
+  const w = Math.min(CARD_WIDTH, Math.max(0, width - 32));
   const h = Math.min(560, Math.max(0, height - 64));
   return { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h };
 }

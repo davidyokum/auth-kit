@@ -49,7 +49,11 @@ export const ADMIN_ROLE_RANK: Readonly<Record<StandardGroup, number>> = {
   owner: 5,
 };
 
-/** Display names, exactly as screens show them (with an en dash). */
+/**
+ * Display names, exactly as screens show them (with an en dash). Where the role is a name (the People
+ * table, badges, the role-change line, Activity) the owner is plain "Owner"; where roles are chosen or
+ * compared it's `OWNER_CHOICE_LABEL` (register C1, 2026-10-19).
+ */
 export const ADMIN_ROLE_LABEL: Readonly<Record<StandardGroup, string>> = {
   owner: 'Owner',
   superadmin: 'Super admin',
@@ -57,6 +61,9 @@ export const ADMIN_ROLE_LABEL: Readonly<Record<StandardGroup, string>> = {
   'admin-content': 'Admin – content only',
   'admin-view': 'Admin – view only',
 };
+
+/** The owner's label where roles are chosen or compared: the role picker and the Compare roles grid (register C1). */
+export const OWNER_CHOICE_LABEL = 'Owner (only one)';
 
 /** The display name for `member` (no admin role). */
 export const MEMBER_LABEL = 'Member';
@@ -268,7 +275,7 @@ export const RESOURCE_POLICY = {
  * What each resource role can and can't do, one line each, in the app's own words: pass its noun
  * ("project") and screens say "this project". Describes the default actions.
  */
-export function resourceRoleDescriptions(noun = 'item'): Readonly<Record<ResourceRole, RoleDescription>> {
+export function resourceRoleDescriptions(noun: string): Readonly<Record<ResourceRole, RoleDescription>> {
   return {
     manager: {
       can: `See and edit this ${noun}, choose who has access to it, and invite someone new to it.`,
@@ -285,8 +292,6 @@ export function resourceRoleDescriptions(noun = 'item'): Readonly<Record<Resourc
   };
 }
 
-/** `resourceRoleDescriptions()` with the generic noun "item". */
-export const RESOURCE_ROLE_DESCRIPTIONS: Readonly<Record<ResourceRole, RoleDescription>> = resourceRoleDescriptions();
 
 /** One row of the combined comparison: a site role or a resource role, and the actions it grants. */
 export interface ResourceAccessMatrixRow {
@@ -349,8 +354,8 @@ export const SESSION_POLICY = {
   refreshTokenMinutesMax: { 2: 30 * 24 * 60, 3: 24 * 60 } as Readonly<Record<AuthTier, number>>,
   /** Cognito's floor for refresh tokens. */
   refreshTokenMinutesMin: 60,
-  /** The sign-in session, which is also an emailed code's lifetime. */
-  authSessionMinutes: 3,
+  /** The sign-in session, which is also an emailed code's lifetime (register A7: 10 minutes). */
+  authSessionMinutes: 10,
   /** Step-up: a risky action needs a sign-in at most this old. */
   stepUpMaxAgeSeconds: 5 * 60,
   /** Admin routes re-read the acting person's status and groups at most this often. */
@@ -369,8 +374,9 @@ export const PASSWORD_POLICY = {
 } as const;
 
 /**
- * How long an emailed code works (register A7, Proposed: 3 or 10 minutes). It's Cognito's sign-in
- * session (`AuthSessionValidity`, 3 to 15 minutes), so one setting drives the pool and every screen and
+ * How long an emailed code works (register A7, decided 2026-10-19: 10 minutes, kinder to state email
+ * screening; the code stays single-use, 8 digits, and rate-limited). It's Cognito's sign-in session
+ * (`AuthSessionValidity`, 3 to 15 minutes), so one setting drives the pool and every screen and
  * email that mentions it: pass the same `codeLifetimeMinutes` to the preset, `SignIn`, `SignUp`, and
  * the custom message trigger.
  */
@@ -435,6 +441,8 @@ export const ACCOUNT_CREATION_POLICY = {
      */
     requestSite: { limit: 100, windowMinutes: 24 * 60 },
     emailChangePerAccount: { limit: 5, windowMinutes: 60 },
+    /** Account-change notices (a passkey added, a password changed) one account may ask for an hour. */
+    noticePerAccount: { limit: 6, windowMinutes: 60 },
     /** Codes sent to one new address an hour, whichever accounts ask (one inbox can't be flooded by many accounts). */
     emailChangePerTarget: { limit: 5, windowMinutes: 60 },
   } satisfies Record<string, RateLimitRule>,

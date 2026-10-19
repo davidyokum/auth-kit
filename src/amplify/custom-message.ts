@@ -39,7 +39,7 @@
 import { SIGN_UP_ORIGIN_ATTRIBUTE, SIGN_UP_ORIGIN_VALUE } from '../shared/account-creation.js';
 import { COGNITO_CODE_PLACEHOLDER, type EmailSite, type RenderedEmail, confirmNewEmailEmail, passwordResetEmail, signInCodeEmail, signUpCodeEmail } from '../shared/emails.js';
 import { codeLifetimeMinutes } from '../shared/policy.js';
-import { type AuthTheme, type ThemeFamily, helpAddressProblems, resolveTheme } from '../themes/index.js';
+import { type AuthTheme, type HelpAddressSetting, type ThemeFamily, helpSettingProblems, readHelpSetting, resolveTheme } from '../themes/index.js';
 
 /** The fields of Cognito's custom message event this handler reads and writes. */
 export interface CustomMessageTriggerEvent {
@@ -54,9 +54,11 @@ export interface CustomMessageTriggerEvent {
   response: { smsMessage?: string | null; emailMessage?: string | null; emailSubject?: string | null };
 }
 
-export interface CustomMessageOptions extends Omit<EmailSite, 'theme'> {
+export interface CustomMessageOptions extends Omit<EmailSite, 'theme' | 'helpEmail'> {
   theme: AuthTheme | ThemeFamily;
-  /** The pool's code lifetime (the preset's `codeLifetimeMinutes`). Default 3. */
+  /** The help address (the footer's "Help:" line): a role-based mailbox, or `{ address, personal: true }` (register E4c). */
+  helpEmail: HelpAddressSetting;
+  /** The pool's code lifetime (the preset's `codeLifetimeMinutes`). Default 10 (register A7). */
   codeLifetimeMinutes?: number;
 }
 
@@ -139,10 +141,10 @@ export function customMessageHandler(options: CustomMessageOptions) {
   } catch {
     throw new Error('auth-kit: customMessageHandler needs signInUrl as an absolute URL.');
   }
-  const helpProblems = helpAddressProblems(options.helpEmail);
+  const helpProblems = helpSettingProblems(options.helpEmail);
   if (helpProblems.length > 0) throw new Error(`auth-kit: customMessageHandler helpEmail: ${helpProblems.join(' ')}`);
   const minutes = codeLifetimeMinutes(options.codeLifetimeMinutes);
-  const site: EmailSite = { ...options, theme: resolveTheme(options.theme) };
+  const site: EmailSite = { ...options, helpEmail: readHelpSetting(options.helpEmail).address, theme: resolveTheme(options.theme) };
 
   return <E extends CustomMessageTriggerEvent>(event: E): Promise<E> => {
     // An email change through Cognito's public API: refuse it, so Cognito fails the call and sends no

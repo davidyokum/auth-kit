@@ -58,6 +58,7 @@ const findSummary = () => screen.findByRole('alert');
 const inlineError = (field: HTMLElement) => document.getElementById(`${field.id}-error`)?.textContent ?? null;
 const submitButtons = () => [...root().querySelectorAll('button[type="submit"]')].map((b) => b.textContent);
 const slotText = (name: string) => root().querySelector(`[data-auth-kit-slot="${name}"]`)?.textContent ?? null;
+const noticeSent = () => vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
 const emailField = () => screen.getByLabelText<HTMLInputElement>('Email address');
 // Buttons with screen-reader-only words ("Change<span> email address</span>"). Browsers keep the
 // span's leading space in the accessible name; jsdom's dom-accessibility-api drops it.
@@ -111,12 +112,15 @@ function unstubPasskeyBrowser() {
 
 // No network from tests: anything that reaches the real fetch (Cognito's endpoint, a route) fails loudly.
 const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reached the network: ${String(input)}`)));
+// The account-change notice route is the site's own (register A10: notices are on by default); here it isn't mounted.
+const guardedFetch = (input: unknown) =>
+  String(input) === '/api/auth-kit/account-notice' ? Promise.resolve(new Response('', { status: 404 })) : noNetwork(input);
 
 beforeEach(() => {
   resetAmplifyMocks();
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
   window.localStorage.clear();
-  vi.stubGlobal('fetch', noNetwork);
+  vi.stubGlobal('fetch', guardedFetch);
 });
 afterEach(() => {
   cleanup();
@@ -249,6 +253,15 @@ describe('the email step', () => {
     }
   });
 
+  it('the email field carries an envelope icon, hidden from screen readers (register A9)', () => {
+    setup();
+    const wrap = emailField().parentElement!;
+    expect(wrap.getAttribute('data-auth-kit-slot')).toBe('inputWrap');
+    const icon = wrap.querySelector('svg[data-auth-kit-icon="mail"]');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(emailField().hasAttribute('data-auth-kit-has-icon')).toBe(true);
+  });
+
   it('the hint shows on every email field, and the format error names it', async () => {
     const { user } = setup({ theme: 'osbm' });
     await user.type(emailField(), 'ada{Enter}');
@@ -299,16 +312,21 @@ describe('the card', () => {
     cleanup();
 
     setup({ accountCreation: { mode: 'request' } });
-    expect(slotText('access')).toBe('Need access? Request it.');
-    expect(screen.getByRole('link', { name: 'Need access? Request it.' }).getAttribute('href')).toBe('/request-access');
+    expect(slotText('access')).toBe('New to Example Reports? Request access');
+    expect(slotText('access')).toBe('New to Example Reports? Request access');
+    expect(screen.getByRole('link', { name: 'Request access' }).getAttribute('href')).toBe('/request-access');
     cleanup();
     setup({ accountCreation: { mode: 'request' }, requestAccessHref: '/ask-for-access' });
-    expect(screen.getByRole('link', { name: 'Need access? Request it.' }).getAttribute('href')).toBe('/ask-for-access');
+    expect(screen.getByRole('link', { name: 'Request access' }).getAttribute('href')).toBe('/ask-for-access');
     cleanup();
 
-    for (const accountCreation of [{ mode: 'domains', domains: ['example.org'] }, { mode: 'open' }] as const) {
+    // One line per mode, so the card says which one applies (register D1).
+    for (const [accountCreation, words] of [
+      [{ mode: 'domains', domains: ['example.org', 'edu'] }, 'New to Example Reports? Create an account with your example.org or .edu email address.'],
+      [{ mode: 'open' }, 'New to Example Reports? Create an account'],
+    ] as const) {
       setup({ accountCreation });
-      expect(slotText('access')).toBe('New here? Create an account');
+      expect(slotText('access')).toBe(words);
       expect(screen.getByRole('link', { name: 'Create an account' }).getAttribute('href')).toBe('/sign-up');
       cleanup();
       setup({ accountCreation, signUpHref: '/join' });
@@ -346,12 +364,15 @@ describe('the card', () => {
     expect(slotText('footer')).toBeNull();
   });
 
-  it('shows the authorized-use line only when the theme turns it on', () => {
+  it('Quiet by default with no monogram; the Monogram style adds the site’s initials above the heading (register E5)', () => {
     setup({ theme: 'osbm' });
-    expect(slotText('notice')).toBeNull();
+    expect(document.querySelector('[data-auth-kit="sign-in"]')?.getAttribute('data-auth-kit-style')).toBe('quiet');
+    expect(slotText('monogram')).toBeNull();
     cleanup();
-    setup({ theme: authTheme('osbm', { showAuthorizedUse: true }) });
-    expect(slotText('notice')).toBe('This is a State of North Carolina system for authorized use.');
+    setup({ theme: authTheme('osbm', { cardStyle: 'monogram' }) });
+    expect(document.querySelector('[data-auth-kit="sign-in"]')?.getAttribute('data-auth-kit-style')).toBe('monogram');
+    expect(slotText('monogram')).toBe('ER');
+    expect(document.querySelector('[data-auth-kit-slot="monogram"]')?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('"Trouble signing in?" sits inside the card by default, and just below it with troubleLink "below"', () => {
@@ -451,12 +472,12 @@ describe('trouble signing in', () => {
   });
 
   it('a help screen’s action asks for the address when it wasn’t typed yet', async () => {
-    const { user } = setup();
+    const { user } = setup({ notices: false });
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.getByText('We’ll email you a code so you can choose a new one.')).toBeTruthy();
-    // Said only where the site sends the notice.
+    // Said only where the site sends the notice (on by default, register A10; this site turned it off).
     expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Send a reset code' }));
     expect(summary().textContent).toBe('Enter your email address');
@@ -473,7 +494,7 @@ describe('trouble signing in', () => {
 
   it('the help screens’ buttons: an emailed code (only where the pool has them) and a new code', async () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
-    const { user } = setup({ codeLifetimeMinutes: 10, securityNotices: true });
+    const { user } = setup({ codeLifetimeMinutes: 10 });
     await enterEmail(user);
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
@@ -695,7 +716,7 @@ describe('password sign-in', () => {
     await heading('Enter your authenticator code');
     await user.type(screen.getByLabelText('6-digit code'), '123456{Enter}');
     await heading('Sign in to Example Reports');
-    expect(summary().textContent).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect(summary().textContent).toBe('That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.');
     expect(emailField().value).toBe('ada@example.org');
   });
 
@@ -806,7 +827,7 @@ describe('emailed code (the backstop) and joining', () => {
     await askForCode(user);
     expect(auth.signIn.mock.calls[0]![0].options.preferredChallenge).toBe('EMAIL_OTP');
     // The typed address, never Cognito's masked one: an unknown address has none (ADR 0018).
-    expect(screen.getByText('If ada@example.org has an account here, we’ve emailed it an 8-digit code. It works for 3 minutes.')).toBeTruthy();
+    expect(screen.getByText('If ada@example.org has an account here, we’ve emailed it an 8-digit code. It works for 10 minutes.')).toBeTruthy();
     expect(document.body.textContent).not.toContain('a***@e***');
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send a new code' }).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Use a different email address' })).toBeTruthy();
@@ -867,7 +888,8 @@ describe('emailed code (the backstop) and joining', () => {
   it('joining with a password: Create a password (15 or more), Add an authenticator app, then You’re set up', async () => {
     auth.signIn.mockResolvedValue(next({ signInStep: 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE' }));
     auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
-    const { user, navigate } = setup({ securityNotices: true }, [FRESH_INVITE]);
+    const notice = noticeSent();
+    const { user, navigate } = setup({ notices: { fetch: notice } }, [FRESH_INVITE]);
     await askForCode(user);
     await user.type(screen.getByLabelText('8-digit code'), '12345678{Enter}');
 
@@ -896,6 +918,8 @@ describe('emailed code (the backstop) and joining', () => {
 
     await heading('You’re set up');
     expect(screen.getByText('Next time, sign in with your password and a code from your authenticator app. We’ve emailed you a note about this.')).toBeTruthy();
+    // The note is said only because the site's notice route answered yes (register A10).
+    expect(notice).toHaveBeenCalledWith('/api/auth-kit/account-notice', expect.objectContaining({ method: 'POST', body: JSON.stringify({ event: 'password-changed' }) }));
     await user.click(screen.getByRole('button', { name: 'Continue to Example Reports' }));
     expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes');
   });
@@ -941,13 +965,13 @@ describe('emailed code (the backstop) and joining', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('the default lifetime is 3 minutes, and an out-of-range one is refused', async () => {
+  it('the default lifetime is 10 minutes, and an out-of-range one is refused', async () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
     auth.confirmSignIn.mockRejectedValue(SESSION_EXPIRED());
     const { user } = setup();
     await askForCode(user);
     await user.type(screen.getByLabelText('8-digit code'), '12345678{Enter}');
-    expect((await findSummary()).textContent).toBe('That took longer than 3 minutes, so we stopped the sign-in to keep your account safe. Start again.');
+    expect((await findSummary()).textContent).toBe('That took longer than 10 minutes, so we stopped the sign-in to keep your account safe. Start again.');
     cleanup();
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {

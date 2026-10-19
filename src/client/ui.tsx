@@ -54,11 +54,12 @@ export type AuthKitSlot =
   | 'steps'
   | 'access'
   | 'footer'
-  | 'notice'
   | 'choice'
   | 'small'
   | 'showButton'
-  | 'glyph';
+  | 'glyph'
+  | 'inputWrap'
+  | 'monogram';
 
 export type AuthKitClassNames = Partial<Record<AuthKitSlot, string>>;
 
@@ -107,14 +108,31 @@ export interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 
   inputRef?: Ref<HTMLInputElement>;
   /** Something after the input on the same row (the password's Show button). */
   after?: ReactNode;
+  /**
+   * An icon inside the field, hidden from screen readers (the label says what it is). Email fields get
+   * the envelope by default (register A9); `false` leaves it out.
+   */
+  icon?: IconName | false;
 }
 
-export function Field({ label, hint, invalid, errorId, error, optional, classNames, inputRef, after, id: idProp, ...input }: FieldProps) {
+export function Field({ label, hint, invalid, errorId, error, optional, classNames, inputRef, after, icon, id: idProp, ...input }: FieldProps) {
   const autoId = useId();
   const id = idProp ?? autoId;
   const hintId = hint ? `${id}-hint` : undefined;
   const inlineId = invalid && error ? `${id}-error` : undefined;
   const describedBy = [hintId, inlineId, invalid ? errorId : undefined].filter(Boolean).join(' ');
+  const iconName = icon === false ? undefined : (icon ?? (input.type === 'email' ? 'mail' : undefined));
+  const field = (
+    <input
+      id={id}
+      ref={inputRef}
+      aria-invalid={invalid ? true : undefined}
+      aria-describedby={describedBy || undefined}
+      data-auth-kit-has-icon={iconName ? '' : undefined}
+      {...slot(classNames, 'input')}
+      {...input}
+    />
+  );
   return (
     <div {...slot(classNames, 'field')}>
       <label htmlFor={id} {...slot(classNames, 'label')}>
@@ -132,14 +150,14 @@ export function Field({ label, hint, invalid, errorId, error, optional, classNam
           {error}
         </p>
       ) : null}
-      <input
-        id={id}
-        ref={inputRef}
-        aria-invalid={invalid ? true : undefined}
-        aria-describedby={describedBy || undefined}
-        {...slot(classNames, 'input')}
-        {...input}
-      />
+      {iconName ? (
+        <span {...slot(classNames, 'inputWrap')}>
+          <Icon name={iconName} />
+          {field}
+        </span>
+      ) : (
+        field
+      )}
       {after}
     </div>
   );
@@ -363,21 +381,29 @@ export interface CardBottom {
   back?: { label: string; onClick: () => void } | null;
   /** Anything else for the foot (sign-up's "Already have an account? Sign in"). */
   extra?: ReactNode;
-  /** The authorized-use line (OSBM, only when the theme turns it on). */
-  notice?: boolean;
+}
+
+/** The site's initials for the Monogram card style: the first letters of its first two words ("Example Reports" → "ER"), skipping small words. */
+export function monogramOf(siteName: string): string {
+  const words = siteName.split(/\s+/).filter((w) => w && !/^(of|the|and|for|to|a|an|&)$/i.test(w));
+  const letters = words.length >= 2 ? words[0]![0]! + words[1]![0]! : (words[0] ?? siteName ?? '?')[0] ?? '?';
+  return letters.toUpperCase();
 }
 
 /**
  * The card: one solid surface on the backdrop, themed (the family's colors and the 3:1 edge as CSS
  * custom properties, `themeCssVariables`), marked `data-backdrop-card` so a backdrop keeps its focal
- * points clear of it. Its foot carries the account-creation line, "Trouble signing in?", the optional
- * authorized-use line, and the family's identity line (E4: identity in the footer, nothing above the
- * heading, no colored line on top). `troubleBelow` puts "Trouble signing in?" under the card instead.
+ * points clear of it. Its foot carries the account-creation line, "Trouble signing in?", and the
+ * family's identity line (E4: identity in the footer, nothing above the heading but the Monogram
+ * style's badge, no colored line on top). `troubleBelow` puts "Trouble signing in?" under the card
+ * instead. The theme's `cardStyle` (register E5) is on the root as `data-auth-kit-style`.
  */
 export function Card(props: {
   name: string;
   view?: string;
   theme: AuthTheme;
+  /** The site's name: the Monogram style's badge. */
+  siteName?: string;
   bottom?: CardBottom;
   troubleBelow?: (() => void) | null;
   rootRef?: Ref<HTMLDivElement>;
@@ -387,11 +413,24 @@ export function Card(props: {
 }) {
   const b = props.bottom ?? {};
   const footer = props.theme.footer;
-  const notice = b.notice === true && props.theme.showAuthorizedUse && props.theme.authorizedUseLine ? props.theme.authorizedUseLine : null;
-  const hasBottom = Boolean(b.access || b.trouble || b.back || b.extra || notice || footer);
+  const hasBottom = Boolean(b.access || b.trouble || b.back || b.extra || footer);
+  const style = props.theme.cardStyle;
   return (
-    <div ref={props.rootRef} data-auth-kit={props.name} data-auth-kit-view={props.view} data-auth-kit-family={props.theme.family} {...slot(props.classNames, 'root', props.className)}>
+    <div
+      ref={props.rootRef}
+      data-auth-kit={props.name}
+      data-auth-kit-view={props.view}
+      data-auth-kit-family={props.theme.family}
+      data-auth-kit-style={style}
+      style={style === 'plain' ? themeCssVariables(props.theme) : undefined}
+      {...slot(props.classNames, 'root', props.className)}
+    >
       <div data-backdrop-card="" style={themeCssVariables(props.theme)} {...slot(props.classNames, 'card')}>
+        {style === 'monogram' && props.siteName ? (
+          <div aria-hidden="true" {...slot(props.classNames, 'monogram')}>
+            {monogramOf(props.siteName)}
+          </div>
+        ) : null}
         {props.children}
         {hasBottom ? (
           <div {...slot(props.classNames, 'bottom')}>
@@ -409,7 +448,6 @@ export function Card(props: {
               </button>
             ) : null}
             {b.extra}
-            {notice ? <p {...slot(props.classNames, 'notice')}>{notice}</p> : null}
             {footer ? <p {...slot(props.classNames, 'footer')}>{footer}</p> : null}
           </div>
         ) : null}

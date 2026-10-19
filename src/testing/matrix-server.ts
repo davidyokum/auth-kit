@@ -36,7 +36,7 @@ import { MATRIX_SERVER_MARKER } from '../dev/marker.js';
 import type { CognitoGateway, LiveUserState, UserAuthFactors } from '../server/cognito.js';
 import { UnauthenticatedError } from '../server/errors.js';
 import type { JwksLike } from '../server/jwks.js';
-import { MATRIX_ENV_FLAG, MATRIX_FIXTURE_ENV } from '../shared/matrix-protocol.js';
+import { MATRIX_ENV_FLAG, MATRIX_FIXTURE_ENV, MATRIX_SERVER_MODE } from '../shared/matrix-protocol.js';
 import { DEFAULT_MATRIX_FACTORS, type MatrixFixture, type MatrixFixtureUser, parseMatrixFixture } from './fixture.js';
 
 export { MATRIX_ENV_FLAG, MATRIX_FIXTURE_ENV } from '../shared/matrix-protocol.js';
@@ -54,6 +54,8 @@ export interface MatrixServerOverrides {
     readonly jwks: JwksLike;
     readonly jwksFetcher: (uri: string) => Promise<JwksLike>;
     readonly cognito: CognitoGateway;
+    /** The matrix server mode's sign: the one place the standard's server rules may be switched off. */
+    readonly matrixServerMode: typeof MATRIX_SERVER_MODE;
   };
   /** `createPeopleActions({ cognito })`: lists the fixture's people and their live groups; refuses every change. */
   readonly peopleCognito: CognitoIdentityProviderClient;
@@ -214,6 +216,7 @@ function build(fixture: MatrixFixture): MatrixServerOverrides {
     serverAuth: Object.freeze({
       jwks: fixture.jwks,
       jwksFetcher: () => Promise.resolve(fixture.jwks),
+      matrixServerMode: MATRIX_SERVER_MODE,
       cognito: scriptedGateway(new Map(fixture.users.map((u) => [u.username, u]))),
     }),
     peopleCognito: readOnlyPeopleClient(fixture.users),

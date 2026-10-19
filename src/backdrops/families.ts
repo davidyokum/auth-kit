@@ -4,7 +4,8 @@
  * From the sign-in design report (passwords-flow design/benchmark/REPORT.md §7.1 "The core" and
  * §7.2 "What varies, per family"). The card is the same everywhere: white, heading ink #092940, body
  * #3C434B, focus ring #3892E1, a 1px border and a soft shadow (the backdrop is never faded around
- * it). Families change the primary button, the 4px rule, links, and the border's tint.
+ * it). Families change the primary button, links, and the border's tint (there's no colored line on top
+ * of the card; register E4).
  *
  * These are brand constants. Changing one changes every site of that family (style versions pin
  * the algorithm, not the brand; ADR 0021), so treat an edit here as a brand decision.
@@ -33,8 +34,8 @@ export const BACKDROP_FAMILIES: Readonly<Record<BackdropFamily, BackdropFamilyCo
     card: Object.freeze({ ...CORE_CARD, link: '#007fae', button: '#13294b', rule: '#4b9cd3', border: '#2c4266' }),
   }),
   personal: Object.freeze({
-    label: 'Yokum Lab',
-    // Yokum Lab ink and indigo on a warm stone page.
+    label: 'Personal',
+    // Ink and indigo on a warm stone page (the personal family; register F11).
     palette: Object.freeze({ page: '#f5f3ef', mist: '#e7e1d6', glow: '#b6c1e8', primary: '#1c326e', secondary: '#4f63ad', ink: '#1c1917' }),
     card: Object.freeze({ ...CORE_CARD, link: '#1c326e', button: '#1c1917', rule: '#1c326e', border: '#57514c' }),
   }),

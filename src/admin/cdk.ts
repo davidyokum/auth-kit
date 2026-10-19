@@ -17,7 +17,7 @@
  * new InviteExpirySweep(admin, 'InviteExpiry', {
  *   userPool: backend.auth.resources.userPool,
  *   auditLog,
- *   ownerWarnings: { siteName: 'Example Reports', from: 'Example Reports <noreply@example.org>', signInUrl: 'https://reports.example.org/sign-in' },
+ *   ownerWarnings: { siteName: 'Example Reports', family: 'osbm', helpEmail: 'apps-help@example.org', from: '"Example Reports (NC OSBM)" <sign-in@example.org>', signInUrl: 'https://reports.example.org/sign-in' },
  * });
  * backend.addOutput({ custom: { auditLogTable: auditLog.tableName } });
  * ```
@@ -63,7 +63,8 @@ import {
 import { ACCESS_REQUEST_TABLE_SCHEMA, RATE_LIMIT_TABLE_SCHEMA, SITE_SETTINGS_TABLE_SCHEMA } from '../accounts/schema.js';
 import { ACCESS_REQUEST_DIGEST_ENV, UNVERIFIED_SWEEP_ENV } from '../accounts/jobs-env.js';
 import { ACCOUNT_CREATION_POLICY } from '../shared/policy.js';
-import { helpAddressProblems, isThemeFamily, type ThemeFamily } from '../themes/index.js';
+import { UNVERIFIED_SWEEP_MARK } from '../amplify/sweep-mark.js';
+import { type HelpAddressSetting, helpSettingProblems, isThemeFamily, readHelpSetting, senderProblems, type ThemeFamily } from '../themes/index.js';
 import { INVITE_EXPIRY_ENV } from './invite-expiry-env.js';
 import { ADMIN_POLICY } from './policy.js';
 
@@ -426,7 +427,15 @@ export function inviteExpiryScheduleMinutes(expression: string): number | undefi
 export interface InviteExpiryOwnerWarnings {
   /** The site's name, as the emails say it. */
   siteName: string;
-  /** The sender, on a verified SES identity: `Example Reports <noreply@example.org>`. */
+  /** The site's family: the sender's suffix and the email's footer (register E4a). */
+  family: ThemeFamily;
+  /** The help address: the email's "Help:" line (a role-based mailbox, or `{ address, personal: true }`; register E4c). */
+  helpEmail: HelpAddressSetting;
+  /**
+   * The sender, on a verified SES identity: the family's display name and the site's reply-able
+   * `sign-in@` mailbox, `"Example Reports (NC OSBM)" <sign-in@reports.example.org>` (`siteSender` from
+   * `auth-kit/themes`). Never `noreply@` (register A10): synthesis fails.
+   */
   from: string;
   /**
    * The SES identity `from` sends through: a domain or the address itself. The function may send only
@@ -451,11 +460,20 @@ function senderAddress(from: string): string | undefined {
 }
 
 /** Checks a sender's settings; returns the SES identity to grant. Tokens are taken as given. `label` names them in errors. */
-function checkOwnerWarnings(w: InviteExpiryOwnerWarnings, label = 'ownerWarnings'): string {
+function checkOwnerWarnings(w: Omit<InviteExpiryOwnerWarnings, 'helpEmail'> & { helpEmail?: HelpAddressSetting }, label = 'ownerWarnings'): string {
   const literal = (v: string | undefined) => v !== undefined && !Token.isUnresolved(v);
   if (literal(w.siteName) && !w.siteName.trim()) throw new Error(`auth-kit: ${label}.siteName is required.`);
+  if (!isThemeFamily(w.family)) throw new Error(`auth-kit: ${label}.family must be osbm, unc, or personal (the sender's suffix and the email's footer, register E4a).`);
   if (literal(w.from) && (/[\r\n]/.test(w.from) || !senderAddress(w.from))) {
-    throw new Error(`auth-kit: ${label}.from "${w.from}" must be a sender, like "Example Reports <noreply@example.org>".`);
+    throw new Error(`auth-kit: ${label}.from "${w.from}" must be a sender, like "Example Reports (NC OSBM)" <sign-in@example.org>.`);
+  }
+  if (literal(w.from) && literal(w.siteName)) {
+    const problems = senderProblems(w.from, { siteName: w.siteName, theme: w.family });
+    if (problems.length > 0) throw new Error(`auth-kit: ${label}.from: ${problems.join(' ')}`);
+  }
+  if (w.helpEmail !== undefined && (typeof w.helpEmail !== 'string' || literal(w.helpEmail))) {
+    const problems = helpSettingProblems(w.helpEmail);
+    if (problems.length > 0) throw new Error(`auth-kit: ${label}.helpEmail: ${problems.join(' ')}`);
   }
   if (literal(w.signInUrl) && !/^https:\/\/[^\s]+$/.test(w.signInUrl!)) throw new Error(`auth-kit: ${label}.signInUrl must be an absolute https URL.`);
   if (literal(w.fallbackEmail) && !EMAIL_RE.test(w.fallbackEmail!)) throw new Error(`auth-kit: ${label}.fallbackEmail "${w.fallbackEmail}" isn't an email address.`);
@@ -567,6 +585,9 @@ export class InviteExpirySweep extends Construct {
         ...(minutes !== undefined && { [INVITE_EXPIRY_ENV.runEveryMinutes]: String(minutes) }),
         ...(warnings && {
           [INVITE_EXPIRY_ENV.siteName]: warnings.siteName,
+          [INVITE_EXPIRY_ENV.family]: warnings.family,
+          [INVITE_EXPIRY_ENV.helpEmail]: readHelpSetting(warnings.helpEmail).address,
+          ...(readHelpSetting(warnings.helpEmail).personal && { [INVITE_EXPIRY_ENV.helpPersonal]: '1' }),
           [INVITE_EXPIRY_ENV.mailFrom]: warnings.from,
           ...(warnings.signInUrl !== undefined && { [INVITE_EXPIRY_ENV.signInUrl]: warnings.signInUrl }),
           ...(warnings.fallbackEmail !== undefined && { [INVITE_EXPIRY_ENV.ownerWarningFallback]: warnings.fallbackEmail }),
@@ -786,6 +807,8 @@ export interface UnverifiedAccountSweepProps {
  * the audit table, its own log group.
  */
 export class UnverifiedAccountSweep extends Construct {
+  /** The mark the preset looks for: a sign-up site's pool must have this sweep (register D3; synthesis fails otherwise). */
+  readonly [UNVERIFIED_SWEEP_MARK]: { readonly userPool: unknown };
   readonly function: lambda.Function;
   readonly role: iam.Role;
   readonly schedule: scheduler.CfnSchedule;
@@ -795,6 +818,7 @@ export class UnverifiedAccountSweep extends Construct {
 
   constructor(scope: Construct, id: string, props: UnverifiedAccountSweepProps) {
     super(scope, id);
+    this[UNVERIFIED_SWEEP_MARK] = { userPool: props.userPool };
     const expression = (props.schedule ?? INVITE_EXPIRY_DEFAULT_SCHEDULE).trim();
     const minutes = inviteExpiryScheduleMinutes(expression);
     if (minutes !== undefined && (minutes < 10 || minutes > 1440)) throw new Error(`auth-kit: schedule "${expression}" must run between every 10 minutes and once a day.`);
@@ -851,9 +875,9 @@ export interface AccessRequestDigestProps {
   /** Absolute https URLs: the sign-in page and the People page. */
   signInUrl: string;
   peopleUrl: string;
-  /** The configured help address (required; a placeholder is refused). */
-  helpEmail: string;
-  /** The sender, on a verified SES identity: `Example Reports (NC OSBM) <sign-in@example.org>`. */
+  /** The configured help address (required; a placeholder is refused; a person's own only as `{ address, personal: true }`, register E4c). */
+  helpEmail: HelpAddressSetting;
+  /** The sender, on a verified SES identity: `"Example Reports (NC OSBM)" <sign-in@example.org>` (never `noreply@`; register A10, E4a). */
   from: string;
   /** The SES identity `from` sends through. Default: `from`'s domain. */
   sesIdentity?: string;
@@ -896,11 +920,10 @@ export class AccessRequestDigest extends Construct {
     for (const [key, url] of [['signInUrl', props.signInUrl], ['peopleUrl', props.peopleUrl]] as const) {
       if (literal(url) && !/^https:\/\/[^\s]+$/.test(url)) throw new Error(`auth-kit: AccessRequestDigest ${key} must be an absolute https URL.`);
     }
-    if (literal(props.helpEmail)) {
-      const problems = helpAddressProblems(props.helpEmail);
-      if (problems.length > 0) throw new Error(`auth-kit: AccessRequestDigest helpEmail: ${problems.join(' ')}`);
-    }
-    const sesIdentity = checkOwnerWarnings({ siteName: props.siteName, from: props.from, ...(props.sesIdentity !== undefined && { sesIdentity: props.sesIdentity }) }, 'AccessRequestDigest');
+    const sesIdentity = checkOwnerWarnings(
+      { siteName: props.siteName, family: props.family, helpEmail: props.helpEmail, from: props.from, ...(props.sesIdentity !== undefined && { sesIdentity: props.sesIdentity }) },
+      'AccessRequestDigest',
+    );
     const job = createScheduledJob(this, {
       bundle: lambdaBundle(ACCESS_REQUEST_DIGEST_BUNDLE_PATH, 'access-request-digest'),
       ...(props.logRetention !== undefined && { logRetention: props.logRetention }),
@@ -921,7 +944,8 @@ export class AccessRequestDigest extends Construct {
         [ACCESS_REQUEST_DIGEST_ENV.family]: props.family,
         [ACCESS_REQUEST_DIGEST_ENV.signInUrl]: props.signInUrl,
         [ACCESS_REQUEST_DIGEST_ENV.peopleUrl]: props.peopleUrl,
-        [ACCESS_REQUEST_DIGEST_ENV.helpEmail]: props.helpEmail,
+        [ACCESS_REQUEST_DIGEST_ENV.helpEmail]: readHelpSetting(props.helpEmail).address,
+        ...(readHelpSetting(props.helpEmail).personal && { [ACCESS_REQUEST_DIGEST_ENV.helpPersonal]: '1' }),
         [ACCESS_REQUEST_DIGEST_ENV.mailFrom]: props.from,
         ...(props.configurationSet !== undefined && { [ACCESS_REQUEST_DIGEST_ENV.mailConfigurationSet]: props.configurationSet }),
         ...(props.recipientGroups !== undefined && { [ACCESS_REQUEST_DIGEST_ENV.recipientGroups]: props.recipientGroups.join(',') }),

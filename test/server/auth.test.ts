@@ -1,3 +1,4 @@
+import { MATRIX_SERVER_MODE } from '../../src/shared/matrix-protocol.js';
 import { describe, expect, it } from 'vitest';
 import {
   AuthUnavailableError,
@@ -166,15 +167,18 @@ describe('requireUser and the authenticator rule', () => {
     expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })), allowFirstCredentialEnrollment: true }))).toBeInstanceOf(MfaEnrollmentRequiredError);
   });
 
-  it('can be switched off, each rule on its own', async () => {
-    const both = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false });
+  it('can be switched off, each rule on its own, only in the matrix server mode (register A1, A2)', async () => {
+    expect(() => harness({ requireFirstCredential: false })).toThrow(/breaks the standard.*matrix's server mode/);
+    expect(() => harness({ requireTotpForPasswordUsers: false })).toThrow(/breaks the standard/);
+    expect(() => harness({ requireFirstCredential: false, matrixServerMode: Symbol('fake') as never })).toThrow(/matrixServerMode comes only from matrixOverrides/);
+    const both = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false, matrixServerMode: MATRIX_SERVER_MODE });
     both.cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
     both.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
     await expect(both.auth.requireUser({ request: bearer(both.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
     await expect(both.auth.requireUser({ request: bearer(both.issuer.mintAccessToken({ sub: 'code-only' })) })).resolves.toBeTruthy();
     expect(both.cognito.calls).toHaveLength(0);
 
-    const totpOff = harness({ requireTotpForPasswordUsers: false });
+    const totpOff = harness({ requireTotpForPasswordUsers: false, matrixServerMode: MATRIX_SERVER_MODE });
     totpOff.cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
     totpOff.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
     await expect(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
@@ -260,7 +264,7 @@ describe('getUser and the authenticator rule (L6)', () => {
   });
 
   it('skips the Cognito call when both rules are switched off', async () => {
-    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false });
+    const { auth, issuer, cognito } = harness({ requireTotpForPasswordUsers: false, requireFirstCredential: false, matrixServerMode: MATRIX_SERVER_MODE });
     cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
     expect(await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) })).not.toBeNull();
     expect(cognito.calls).toHaveLength(0);

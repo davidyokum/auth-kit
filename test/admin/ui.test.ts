@@ -4,7 +4,7 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { ActionResult, ActivityPage, FormAction, PeopleList, PersonRow } from '../../src/admin/index.js';
-import { RESOURCE_ACCESS_NOTE } from '../../src/admin/index.js';
+import { OWNER_CHOICE_LABEL, RESOURCE_ACCESS_NOTE, roleLabel } from '../../src/admin/index.js';
 import {
   ActionResultMessage,
   ActivityLog,
@@ -224,6 +224,12 @@ describe('Compare roles', () => {
     ]);
     expect(html).toContain('Roles below their own');
     expect(renderToStaticMarkup(h(CompareRoles))).toContain('<summary>Compare roles</summary>');
+  });
+
+  it('says "Owner (only one)" where roles are chosen or compared, and plain "Owner" where it names someone (register C1)', () => {
+    expect(OWNER_CHOICE_LABEL).toBe('Owner (only one)');
+    expect(roleLabel('owner')).toBe('Owner');
+    expect(RESOURCE_ACCESS_NOTE).toBeTruthy();
   });
 });
 

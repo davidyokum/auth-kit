@@ -146,5 +146,6 @@ export type ResourceAccessList =
       fetchedAt: string;
     }
   | { state: 'not_found' }
-  | { state: 'unavailable'; reason: string };
+  /** Couldn't load: says why (never an empty list), in the type's own noun. */
+  | { state: 'unavailable'; noun: string; reason: string };
 

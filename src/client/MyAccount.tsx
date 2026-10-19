@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   type PasskeyInfo,
   changePassword,
@@ -14,6 +14,7 @@ import {
 import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
+import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
 import { checkedHref, hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, canRemovePasskey } from './ladder.js';
@@ -61,6 +62,8 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   stepUpHref?: string;
   /** Where a deleted account goes afterwards. Default `/`. A same-site path or an http(s) URL. */
   deletedPath?: string;
+  /** Account-change notices (register A10: on by default; see `SignIn`'s `notices`). `false` for a site that doesn't send them. */
+  notices?: AccountNotices;
 }
 
 /** A value that loads, with the failure kept and explained instead of shown as "none". */
@@ -114,6 +117,7 @@ export function MyAccount(props: MyAccountProps) {
   const errorId = useId();
   const fb = useFeedback();
   const loadFactors = props.loadFactors ?? fetchAuthFactors;
+  const notices = useMemo(() => resolveNotices(props.notices, 'MyAccount'), [props.notices]);
   const [email, reloadEmail] = useLoaded(fetchAccountEmail, 'account');
   const [factors, reloadFactors] = useLoaded(loadFactors, 'account');
   const [passkeys, reloadPasskeys] = useLoaded(() => (passkeysEnabled ? listPasskeys() : Promise.resolve([])), 'account');
@@ -154,6 +158,7 @@ export function MyAccount(props: MyAccountProps) {
     const result = await fb.run(registerPasskey, { context: 'passkey-register', busyStatus: STATUS.waitingForPasskey });
     if (result.ok) {
       fb.set({ status: STATUS.passkeySaved });
+      if (await sendAccountNotice(notices, 'passkey-added')) fb.set({ status: STATUS.passkeySavedEmailed });
       reloadPasskeys();
       reloadFactors();
     }
@@ -322,6 +327,9 @@ export function MyAccount(props: MyAccountProps) {
         onDone={() => {
           setEditing(null);
           fb.set({ status: STATUS.passwordChanged });
+          void sendAccountNotice(notices, 'password-changed').then((emailed) => {
+            if (emailed) fb.set({ status: STATUS.passwordChangedEmailed });
+          });
         }}
         onCancel={() => setEditing(null)}
         {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
@@ -338,6 +346,7 @@ export function MyAccount(props: MyAccountProps) {
         context="set-password"
         onSubmit={({ newPassword }) => setFirstPassword(newPassword)}
         onDone={() => {
+          void sendAccountNotice(notices, 'password-changed');
           reloadFactors();
           reloadTotp();
           // The standard requires the authenticator of every password user; go straight to it.

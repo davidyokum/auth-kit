@@ -78,9 +78,9 @@ export interface AccountCreationRoutesConfig {
    */
   clientIp: (request: Request) => string | undefined;
   /**
-   * `open` mode only: refuse sign-ups that didn't pass the WAF challenge (no `aws-waf-token` cookie),
-   * with the same answer for every address. Default `true` in `open` mode, where the challenge is
-   * required (ADR 0023); pass `false` only for local development, which has no WAF in front.
+   * Refuse sign-ups that didn't pass the WAF challenge (no `aws-waf-token` cookie), with the same
+   * answer for every address. Default `true` in `domains` and `open` modes, where the challenge is
+   * required (register D3, ADR 0023); pass `false` only for local development, which has no WAF in front.
    */
   requireWafToken?: boolean;
   /** Every answer takes at least this long. Default 800 ms (`ACCOUNT_CREATION_POLICY`). */
@@ -186,7 +186,7 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
       'auth-kit: createAccountCreationRoutes needs clientIp. Behind Amplify Hosting, pass forwardedForClientIp() (the last X-Forwarded-For entry, which the proxy appended; the first is written by the client).',
     );
   }
-  const requireWafToken = settings.mode === 'open' && config.requireWafToken !== false;
+  const requireWafToken = allowsSelfSignUp(settings) && config.requireWafToken !== false;
   let signInUrl: URL;
   try {
     signInUrl = new URL(config.signInUrl);
@@ -418,9 +418,9 @@ export function createAccountCreationRoutes(config: AccountCreationRoutesConfig)
       return early(refuse(400, { ok: false, code: 'invalid', error: 'That request is invalid.' }));
     }
     if (route === 'sign-up' && requireWafToken && !hasWafToken(request)) {
-      // Open sign-up must sit behind the WAF challenge (ADR 0023). No token means it didn't: the site's
+      // Sign-up must sit behind the WAF challenge (register D3, ADR 0023). No token means it didn't: the site's
       // web ACL isn't associated, or the page doesn't load AWS WAF's script. The same answer for everyone.
-      report(new Error('sign-up: no aws-waf-token cookie. Open sign-up needs the site web ACL (createSiteWebAcl) associated with the app and AWS WAF’s script on the page.'), 'sign-up: WAF token');
+      report(new Error('sign-up: no aws-waf-token cookie. Sign-up needs the site web ACL (createSiteWebAcl) associated with the app and AWS WAF’s script on the page.'), 'sign-up: WAF token');
       return early(refuse(503, { ok: false, code: 'unavailable', error: 'We couldn’t create your account just now. Try again in a few minutes.' }));
     }
     let ip: string | undefined;

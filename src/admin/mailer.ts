@@ -1,7 +1,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
-import { type RenderedEmail, escapeHtml, inviteEmail } from '../shared/emails.js';
+import { type EmailBlock, type EmailSite, type RenderedEmail, inviteEmail, renderEmail } from '../shared/emails.js';
 import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
-import type { AuthTheme, ThemeFamily } from '../themes/index.js';
+import { type AuthTheme, type ThemeFamily, helpAddressProblems, senderProblems } from '../themes/index.js';
 
 export type { RenderedEmail } from '../shared/emails.js';
 
@@ -115,10 +115,21 @@ export interface SignInHelpChangedAlert {
   context?: { ip?: string; userAgent?: string; requestId?: string };
 }
 
+/**
+ * What an alert needs to look like the site's other emails (register E4a): the family's theme (the
+ * footer's identity sentence) and the help address in effect (the "Help:" line).
+ */
+export interface AlertSite {
+  theme?: AuthTheme | ThemeFamily;
+  helpEmail: string;
+  /** The sign-in page, when the alert links it. */
+  signInUrl?: string;
+}
+
 /** The owner's alert: who changed where help requests go, from what to what, and why. */
-export function renderSignInHelpChangedEmail(alert: SignInHelpChangedAlert): RenderedEmail {
+export function renderSignInHelpChangedEmail(alert: SignInHelpChangedAlert, site?: AlertSite): RenderedEmail {
   const who = alert.changedBy.email ?? alert.changedBy.sub;
-  return rendered(`${alert.siteName}: the sign-in help address changed`, [
+  return rendered(alert.siteName, site, `${alert.siteName}: the sign-in help address changed`, [
     alert.reverted
       ? `${who} set the sign-in help address for ${alert.siteName} back to the site's configured address, ${alert.to} (it was ${alert.from}).`
       : `${who} changed the sign-in help address for ${alert.siteName} from ${alert.from} to ${alert.to}.`,
@@ -145,12 +156,21 @@ function contextLines(context: SuperadminGrantAlert['context']): string[] {
   ];
 }
 
-function rendered(subject: string, lines: string[]): RenderedEmail {
-  return {
-    subject,
-    text: lines.join('\n'),
-    html: lines.map((l) => (l === '' ? '' : `<p>${escapeHtml(l)}</p>`)).filter(Boolean).join('\n'),
-  };
+/**
+ * An alert in the shared layout (register E4a: no letterhead; the footer's identity sentence and the
+ * help line, like every other email). Each line is a paragraph; a run of lines without a blank one
+ * between them stays one paragraph per line. `link` is written out as a link wherever it appears.
+ */
+function rendered(siteName: string, site: AlertSite | undefined, subject: string, lines: string[], link?: string): RenderedEmail {
+  const blocks: EmailBlock[] = lines
+    .filter((l) => l !== '')
+    .map((l) => {
+      if (link === undefined || !l.includes(link)) return { kind: 'paragraph', parts: [l] };
+      const at = l.indexOf(link);
+      return { kind: 'paragraph', parts: [l.slice(0, at), { link }, l.slice(at + link.length)].filter((part) => part !== '') };
+    });
+  const emailSite: EmailSite = { siteName, signInUrl: site?.signInUrl ?? '', helpEmail: site?.helpEmail ?? '', ...(site?.theme !== undefined && { theme: site.theme }) };
+  return renderEmail({ site: emailSite, subject, preheader: lines.find((l) => l !== '') ?? subject, blocks });
 }
 
 /**
@@ -182,54 +202,46 @@ export interface OwnerInviteWarningNotifier {
  * The default last-owner warning. The owner's copy says why the invite is still open and where to
  * sign in; the fallback copy says whose invite it is and how to resolve it.
  */
-export function renderOwnerInviteWarningEmail(warning: OwnerInviteWarning): RenderedEmail {
+export function renderOwnerInviteWarningEmail(warning: OwnerInviteWarning, site?: AlertSite): RenderedEmail {
   const sent = longDate(warning.invitedAt);
   const expired = longDate(warning.expiredAt);
-  const site = warning.siteName;
+  const name = warning.siteName;
   let subject: string;
   let lines: string[];
   if (warning.to.kind === 'owner') {
-    subject = `Your owner invite to ${site} hasn't been used`;
+    subject = `Your owner invite to ${name} hasn't been used`;
     lines = [
       warning.owner.name ? `Hi ${warning.owner.name},` : 'Hello,',
       '',
-      `You were invited as an owner of ${site} on ${sent} (UTC), and the invite hasn't been used. Invites expire after 7 days (yours on ${expired}), but you're the site's only owner, so yours was left open.`,
+      `You were invited as an owner of ${name} on ${sent} (UTC), and the invite hasn't been used. Invites expire after 7 days (yours on ${expired}), but you're the site's only owner, so yours was left open.`,
       '',
       warning.signInUrl
         ? `Sign in at ${warning.signInUrl} with this email address to keep your owner access.`
-        : `Sign in to ${site} with this email address to keep your owner access.`,
+        : `Sign in to ${name} with this email address to keep your owner access.`,
       '',
-      `Until then, the invite is a live owner account for whoever can sign in with this address. If you weren't expecting it, tell whoever runs ${site}.`,
+      `Until then, the invite is a live owner account for whoever can sign in with this address. If you weren't expecting it, tell whoever runs ${name}.`,
     ];
   } else {
     const whom = warning.owner.name ? `${warning.owner.name} (${warning.owner.email})` : warning.owner.email;
-    subject = `${site}: the owner invite for ${warning.owner.email} hasn't been used`;
+    subject = `${name}: the owner invite for ${warning.owner.email} hasn't been used`;
     lines = [
-      `The owner invite for ${whom} on ${site}, sent ${sent} (UTC), hasn't been used. Invites expire after 7 days (this one on ${expired}), but this is the site's only owner, so the invite-expiry job left it enabled and warned them.`,
+      `The owner invite for ${whom} on ${name}, sent ${sent} (UTC), hasn't been used. Invites expire after 7 days (this one on ${expired}), but this is the site's only owner, so the invite-expiry job left it enabled and warned them.`,
       '',
       'Until they sign in, it is a live owner account for whoever controls that inbox.',
       'If the address is wrong, give the owner role to the right person through the break-glass path (the Cognito console): the next run then disables this invite. A site has exactly one owner, and only a signed-in owner can transfer it.',
       '',
-      `You get this because you're the fallback contact for ${site}'s owner warnings.`,
+      `You get this because you're the fallback contact for ${name}'s owner warnings.`,
     ];
   }
-  const url = warning.signInUrl !== undefined ? escapeHtml(warning.signInUrl) : undefined;
-  const html = lines
-    .filter((l) => l !== '')
-    .map((l) => {
-      const escaped = escapeHtml(l);
-      // A function replacement, so a `$` in the URL is never read as a replacement pattern.
-      return url !== undefined && warning.to.kind === 'owner' ? `<p>${escaped.replace(url, () => `<a href="${url}">${url}</a>`)}</p>` : `<p>${escaped}</p>`;
-    })
-    .join('\n');
-  return { subject, text: lines.join('\n'), html };
+  return rendered(warning.siteName, site, subject, lines, warning.to.kind === 'owner' ? warning.signInUrl : undefined);
 }
 
+
 /** The default Super admin grant alert: who, whom, when, from where, why, and what to do if it's unexpected. */
-export function renderSuperadminGrantEmail(alert: SuperadminGrantAlert): RenderedEmail {
+export function renderSuperadminGrantEmail(alert: SuperadminGrantAlert, site?: AlertSite): RenderedEmail {
   const who = alert.grantedBy.email ?? alert.grantedBy.sub;
   const whom = alert.grantedTo.name ? `${alert.grantedTo.name} (${alert.grantedTo.email})` : alert.grantedTo.email;
-  return rendered(`${alert.siteName}: ${alert.grantedTo.email} is now a Super admin`, [
+  return rendered(alert.siteName, site, `${alert.siteName}: ${alert.grantedTo.email} is now a Super admin`, [
     `${who} made ${whom} a Super admin of ${alert.siteName}${alert.via === 'invite' ? ' by inviting them as one' : ''}.`,
     '',
     `When: ${when(alert.at)}`,
@@ -242,10 +254,10 @@ export function renderSuperadminGrantEmail(alert: SuperadminGrantAlert): Rendere
 }
 
 /** The default ownership transfer alert, sent to the previous and the new owner. */
-export function renderOwnershipTransferEmail(alert: OwnershipTransferAlert): RenderedEmail {
+export function renderOwnershipTransferEmail(alert: OwnershipTransferAlert, site?: AlertSite): RenderedEmail {
   const from = alert.previousOwner.name ? `${alert.previousOwner.name} (${alert.previousOwner.email})` : alert.previousOwner.email;
   const to = alert.newOwner.name ? `${alert.newOwner.name} (${alert.newOwner.email})` : alert.newOwner.email;
-  return rendered(`${alert.siteName}: ${alert.newOwner.email} is now the owner`, [
+  return rendered(alert.siteName, site, `${alert.siteName}: ${alert.newOwner.email} is now the owner`, [
     `${from} transferred ownership of ${alert.siteName} to ${to}.`,
     '',
     `When: ${when(alert.at)}`,
@@ -281,12 +293,12 @@ export interface ResourceInviteNotifier {
 }
 
 /** The default alert: who invited whom, to what, with which role, and what to do if it's unexpected. */
-export function renderResourceInviteAlertEmail(alert: ResourceInviteAlert): RenderedEmail {
+export function renderResourceInviteAlertEmail(alert: ResourceInviteAlert, site?: AlertSite): RenderedEmail {
   const who = alert.invitedBy.email ?? alert.invitedBy.sub;
   const whom = alert.invited.name ? `${alert.invited.name} (${alert.invited.email})` : alert.invited.email;
   // Named by its name, never its ID; without a name, by its noun (the Activity page shows which one).
   const what = alert.item.name ? `the ${alert.item.noun} “${alert.item.name}”` : `a ${alert.item.noun} whose name couldn’t be read`;
-  return rendered(`${alert.siteName}: ${who} invited ${alert.invited.email}`, [
+  return rendered(alert.siteName, site, `${alert.siteName}: ${who} invited ${alert.invited.email}`, [
     `${who} invited ${whom} to ${alert.siteName}, as ${RESOURCE_ROLE_LABEL[alert.role]} of ${what}.`,
     '',
     `When: ${when(alert.at)}`,
@@ -298,8 +310,18 @@ export function renderResourceInviteAlertEmail(alert: ResourceInviteAlert): Rend
 }
 
 export interface SesInviteMailerOptions {
-  /** A verified SES identity, e.g. `Example Reports <noreply@example.org>`. */
+  /**
+   * The sender, on a verified SES identity: the family's display name and the site's reply-able
+   * `sign-in@` mailbox, e.g. `"Example Reports (NC OSBM)" <sign-in@reports.example.org>` (`siteSender`
+   * from `auth-kit/themes`). Never `noreply@` (register A10, E4a); anything else throws.
+   */
   from: string;
+  /**
+   * The site, so every email it sends looks like the rest (register E4a): its name, family or theme
+   * (the footer's identity sentence and the sender's suffix), and the help address in effect (the
+   * "Help:" line): a plain address, or `createSignInHelp` from `auth-kit/accounts`.
+   */
+  site: { siteName: string; theme: AuthTheme | ThemeFamily; help: string | { effective(): Promise<{ address: string }> }; signInUrl?: string };
   region?: string;
   client?: SESv2Client;
   configurationSet?: string;
@@ -307,15 +329,15 @@ export interface SesInviteMailerOptions {
   /** Your own invite template. Default `renderInviteEmail`. */
   render?: (input: InviteEmail) => RenderedEmail;
   /** Your own Super admin grant alert. Default `renderSuperadminGrantEmail`. */
-  renderSuperadminGrant?: (alert: SuperadminGrantAlert) => RenderedEmail;
+  renderSuperadminGrant?: (alert: SuperadminGrantAlert, site: AlertSite) => RenderedEmail;
   /** Your own ownership transfer alert. Default `renderOwnershipTransferEmail`. */
-  renderOwnershipTransfer?: (alert: OwnershipTransferAlert) => RenderedEmail;
+  renderOwnershipTransfer?: (alert: OwnershipTransferAlert, site: AlertSite) => RenderedEmail;
   /** Your own last-owner warning template. Default `renderOwnerInviteWarningEmail`. */
-  renderOwnerInviteWarning?: (warning: OwnerInviteWarning) => RenderedEmail;
+  renderOwnerInviteWarning?: (warning: OwnerInviteWarning, site: AlertSite) => RenderedEmail;
   /** Your own alert for a Manager's invite to one item. Default `renderResourceInviteAlertEmail`. */
-  renderResourceInvite?: (alert: ResourceInviteAlert) => RenderedEmail;
+  renderResourceInvite?: (alert: ResourceInviteAlert, site: AlertSite) => RenderedEmail;
   /** Your own alert for a changed sign-in help address. Default `renderSignInHelpChangedEmail`. */
-  renderSignInHelpChanged?: (alert: SignInHelpChangedAlert) => RenderedEmail;
+  renderSignInHelpChanged?: (alert: SignInHelpChangedAlert, site: AlertSite) => RenderedEmail;
 }
 
 /** Sends an already-rendered email (the account-creation and self-service emails). Throw to report a failure. */
@@ -335,6 +357,19 @@ export function createSesInviteMailer(
   options: SesInviteMailerOptions,
 ): InviteMailer & Required<OwnerAlertNotifier> & OwnerInviteWarningNotifier & ResourceInviteNotifier & EmailSender {
   if (!options.from) throw new Error('auth-kit: createSesInviteMailer needs a from address.');
+  if (!options.site?.siteName?.trim()) throw new Error('auth-kit: createSesInviteMailer needs site: { siteName, theme, help } (register E4a: every email carries the footer).');
+  const fromProblems = senderProblems(options.from, { siteName: options.site.siteName, theme: options.site.theme });
+  if (fromProblems.length > 0) throw new Error(`auth-kit: createSesInviteMailer from: ${fromProblems.join(' ')}`);
+  if (typeof options.site.help === 'string') {
+    const helpProblems = helpAddressProblems(options.site.help, { personal: true });
+    if (helpProblems.length > 0) throw new Error(`auth-kit: createSesInviteMailer site.help: ${helpProblems.join(' ')}`);
+  }
+  const siteHelp = options.site.help;
+  const alertSite = async (): Promise<AlertSite> => ({
+    theme: options.site.theme,
+    helpEmail: typeof siteHelp === 'string' ? siteHelp : (await siteHelp.effective().catch(() => null))?.address ?? '',
+    ...(options.site.signInUrl !== undefined && { signInUrl: options.site.signInUrl }),
+  });
   let client = options.client;
   const ses = (): SESv2Client => (client ??= new SESv2Client(options.region ? { region: options.region } : {}));
   const render = options.render ?? renderInviteEmail;
@@ -366,22 +401,22 @@ export function createSesInviteMailer(
     async superadminGranted(alert) {
       const to = [...new Set(alert.owners.map((o) => o.email).filter(Boolean))];
       if (to.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
-      await send(to, renderGrant(alert));
+      await send(to, renderGrant(alert, await alertSite()));
     },
     async ownershipTransferred(alert) {
       const to = [...new Set([alert.previousOwner.email, alert.newOwner.email].filter(Boolean))];
       if (to.length < 2) throw new Error('auth-kit: the ownership alert needs both the previous and the new owner’s email address.');
-      await send(to, renderTransfer(alert));
+      await send(to, renderTransfer(alert, await alertSite()));
     },
     async ownerInviteUnused(warning) {
       if (!warning.to.email) throw new Error('auth-kit: the owner warning has no address to go to.');
-      await send([warning.to.email], renderWarning(warning));
+      await send([warning.to.email], renderWarning(warning, await alertSite()));
     },
     async signInHelpChanged(alert) {
       const owners = alert.owners.map((o) => o.email).filter(Boolean);
       if (owners.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');
       const to = [...new Set([...owners, ...(alert.superAdmins ?? []).map((s) => s.email).filter(Boolean)])];
-      await send(to, renderHelpChanged(alert));
+      await send(to, renderHelpChanged(alert, await alertSite()));
     },
     async sendEmail(message) {
       const to = [...new Set(message.to.filter(Boolean))];
@@ -391,7 +426,7 @@ export function createSesInviteMailer(
     async resourceInviteSent(alert) {
       const to = [...new Set(alert.recipients.map((r) => r.email).filter(Boolean))];
       if (to.length === 0) throw new Error('auth-kit: the site has no admin who manages people with an email address to alert.');
-      await send(to, renderResourceInvite(alert));
+      await send(to, renderResourceInvite(alert, await alertSite()));
     },
   };
 }

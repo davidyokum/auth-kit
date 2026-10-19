@@ -87,7 +87,7 @@ describe('the screens refuse a javascript: link prop and render a normal one', (
     expect(screen.getByRole('link', { name: 'Create an account' }).getAttribute('href')).toBe('/join');
     cleanup();
     signIn({ accountCreation: { mode: 'request' }, requestAccessHref: 'https://example.org/ask' });
-    expect(screen.getByRole('link', { name: 'Need access? Request it.' }).getAttribute('href')).toBe('https://example.org/ask');
+    expect(screen.getByRole('link', { name: 'Request access' }).getAttribute('href')).toBe('https://example.org/ask');
   });
 
   it('SignUp: privacyNoticeUrl, termsUrl, signInHref, and requestAccessHref', () => {

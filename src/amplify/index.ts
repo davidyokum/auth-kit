@@ -10,7 +10,9 @@
  *   project: 'reports-portal',
  *   owner: 'reports-team',
  *   tier: 2,
- *   email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports' },
+ *   // The site's reply-able sign-in@ mailbox and the family's sender name (register A10, E4a).
+ *   email: { fromAddress: 'sign-in@reports.example.org', fromName: 'Example Reports (NC OSBM)', family: 'osbm', replyTo: 'apps-help@example.org' },
+ *   waf: { webAclArn: '<the account’s shared web ACL>' }, // register F7
  *   passkeys: { relyingPartyId: 'reports.example.org' }, // once the final domain is live
  * } satisfies AuthStandardOptions;
  *

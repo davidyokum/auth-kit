@@ -51,6 +51,8 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'SIGN_IN.resetCodeSub': () => [[EMAIL]],
   'SIGN_IN.checkFailed': (c) => [[c]],
   'ACCESS_LINE.inviteOnly': (c) => [[c]],
+  'ACCESS_LINE.newTo': (c) => [[c]],
+  'ACCESS_LINE.withDomains': () => [['nc.gov'], ['example.org or .edu']],
   'FIRST_VISIT.donePasskey': (c) => [[c]],
   'FIRST_VISIT.continueTo': (c) => [[c]],
   'ACCESS_HELP.heading': (c) => [[c]],
@@ -136,12 +138,14 @@ function copyTexts(): Text[] {
     out.push(
       { where: 'access line (invite, sentence)', text: `${copy.ACCESS_LINE.inviteOnly(c)} ${copy.ACCESS_LINE.askToBeAdded}` },
       { where: 'access line (invite, link)', text: `${copy.ACCESS_LINE.inviteOnly(c)} ${copy.ACCESS_LINE.needAccess}` },
-      { where: 'access line (domains, open)', text: `${copy.ACCESS_LINE.newHere} ${copy.ACCESS_LINE.createAccount}` },
+      { where: 'access line (request)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.requestAccess}` },
+      { where: 'access line (domains)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.createAccount}${copy.ACCESS_LINE.withDomains('nc.gov')}` },
+      { where: 'access line (open)', text: `${copy.ACCESS_LINE.newTo(c)} ${copy.ACCESS_LINE.createAccount}` },
     );
   }
   for (const family of THEME_FAMILIES) {
     const theme = authTheme(family);
-    for (const text of [theme.footer, theme.authorizedUseLine, theme.help.verify, theme.help.itDesk, theme.help.devDesk]) if (text) out.push({ where: `theme(${family})`, text });
+    for (const text of [theme.footer, theme.help.verify, theme.help.itDesk, theme.help.devDesk]) if (text) out.push({ where: `theme(${family})`, text });
   }
   for (const [domains, requestsAlso] of [[['example.org'], false], [['example.org', 'edu'], true], [['example.org', 'example.net', 'edu'], true]] as const) {
     out.push({ where: 'notOnListMessage', text: notOnListMessage(SITE, domains, requestsAlso) });
@@ -217,6 +221,8 @@ function emailTexts(): { texts: Text[]; rendered: Set<string> } {
       ],
       ['emailChangedEmail', emails.emailChangedEmail(site, { newEmail: 'new@example.org', at })],
       ['emailChangedEmail', emails.emailChangedEmail(site, { newEmail: 'new@example.org', at, byAdmin: OWNER })],
+      ['passkeyAddedEmail', emails.passkeyAddedEmail(site, { at })],
+      ['passwordChangedEmail', emails.passwordChangedEmail(site, { at })],
       ['accountDeletedEmail', emails.accountDeletedEmail(site, { email: EMAIL, at, comeBack: 'sign-up' })],
       ['accountDeletedEmail', emails.accountDeletedEmail(site, { email: EMAIL, at, byAdmin: OWNER, items: 'Your reports stay with the team.', comeBack: 'invite' })],
     ];
@@ -428,8 +434,8 @@ describe('Card Studio v4’s words', () => {
   });
 
   it('the access lines', () => {
-    expect(copy.ACCESS_LINE.request).toBe('Need access? Request it.');
-    expect(`${copy.ACCESS_LINE.newHere} ${copy.ACCESS_LINE.createAccount}`).toBe('New here? Create an account');
+    expect(`${copy.ACCESS_LINE.newTo(personal)} ${copy.ACCESS_LINE.requestAccess}`).toBe('New to Example Reports? Request access');
+    expect(`${copy.ACCESS_LINE.newTo(personal)} ${copy.ACCESS_LINE.createAccount}${copy.ACCESS_LINE.withDomains('nc.gov')}`).toBe('New to Example Reports? Create an account with your nc.gov email address.');
     expect(copy.ACCESS_LINE.inviteOnly(personal)).toBe('New to Example Reports? It’s invite-only.');
     expect(copy.ACCESS_LINE.askToBeAdded).toBe('Ask the person who runs it to add you.');
     expect(copy.ACCESS_LINE.needAccess).toBe('Need access?');
@@ -507,7 +513,7 @@ describe('Card Studio v4’s words', () => {
   it('sign-up, request access, and signed out', () => {
     expect(copy.SIGN_UP.heading).toBe('Create your account');
     expect(copy.SIGN_UP.codeSub(personal, EMAIL)).toBe('We’ve emailed ada@example.org. Enter the 8-digit code from that email. It works for 3 minutes and confirms the address is yours.');
-    expect(copy.SIGN_UP.verify).toBe('Verify');
+    expect(copy.SIGN_UP.codeSubmit).toBe('Continue'); // register A6: Continue on a step in between
     expect(copy.SIGN_UP.nameHeading).toBe('Your name');
     expect(copy.SIGN_UP.doneSub(personal)).toBe('Your account starts as a member of Example Reports. The Example Reports team can give you more access if you need it.');
     expect(copy.SIGN_UP.doneSub(osbm)).toBe('Your account starts as a member of Example Reports. Jordan Lee can give you more access if you need it.');

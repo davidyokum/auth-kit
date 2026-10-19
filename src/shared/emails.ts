@@ -521,3 +521,37 @@ export function accountDeletedEmail(site: EmailSite, input: { email: string; at:
     ],
   });
 }
+
+// ---- Account-change notices (register A10: on by default) ---------------------------------------
+
+/** "A passkey was added to your {Site} account", to the account's address (REPORT §5.2f). */
+export function passkeyAddedEmail(site: EmailSite, input: { at: Date }): RenderedEmail {
+  return renderEmail({
+    site,
+    subject: `A passkey was added to your ${site.siteName} account`,
+    preheader: 'Not you? Reply right away.',
+    blocks: [
+      { kind: 'heading', text: 'A passkey was added' },
+      p(`A new passkey was added to your ${site.siteName} account on ${clockDateTime(input.at, site)}. It can sign in to your account from now on.`),
+      p('If this was you, you don’t need to do anything.'),
+      p(`If it wasn’t, reply to this email or contact ${site.helpEmail} right away, and we’ll lock the account while we check. You can also remove passkeys under My account.`),
+      { kind: 'safe', domain: siteDomain(site), siteName: site.siteName },
+    ],
+  });
+}
+
+/** "The password for your {Site} account changed", to the account's address (REPORT §5.2f). */
+export function passwordChangedEmail(site: EmailSite, input: { at: Date }): RenderedEmail {
+  return renderEmail({
+    site,
+    subject: `The password for your ${site.siteName} account changed`,
+    preheader: 'Not you? Reply right away.',
+    blocks: [
+      { kind: 'heading', text: 'Your password was changed' },
+      p(`The password for your ${site.siteName} account changed on ${clockDateTime(input.at, site)}.`),
+      p('If this was you, you don’t need to do anything.'),
+      p(`If it wasn’t, reply to this email or contact ${site.helpEmail} right away, and we’ll lock the account while we check.`),
+      { kind: 'safe', domain: siteDomain(site), siteName: site.siteName },
+    ],
+  });
+}

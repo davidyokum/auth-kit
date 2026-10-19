@@ -14,7 +14,7 @@ Two facts about `@aws-amplify/backend` 1.25 (checked in its source):
 - `standardAuthProps(options)` returns props for the app's own `defineAuth` call in `amplify/auth/resource.ts`.
 - `applyAuthStandard(backend.auth, options)` in `amplify/backend.ts` sets the rest directly on the L1 `CfnUserPool` and `CfnUserPoolClient`. Typed L1 properties are used where they exist so Amplify's lazily computed outputs (password policy, MFA) reflect them; `WebAuthnFactorConfiguration` is a raw property override so it works on every `aws-cdk-lib` version Amplify accepts.
 - Both take the same options object; `applyAuthStandard` checks that the standard groups exist (props built elsewhere fail loudly) and refuses to run twice on one pool.
-- For self-signup, a synthesis-time validation fails unless a preSignUp trigger is attached.
+- In `accountCreation` domains mode, synthesis fails unless the preSignUp trigger is attached ([0023](0023-account-creation.md)); on every sign-up site (domains, open) it also fails without the site web ACL and the unverified-account sweep (register D3).
 
 ## Consequences
 

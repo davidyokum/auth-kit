@@ -15,12 +15,14 @@ The first ladder was `superadmin` (shown as Owner), `admin`, `editor`, `viewer`,
 
 | Label (exact, on screens) | Group | Capabilities (`STANDARD_CAPABILITIES`) |
 |---|---|---|
-| Owner (only one) | `owner` | everything below, plus `owner.private` (owner-only pages) and `owner.transfer` (Transfer ownership) |
+| Owner (only one)¹ | `owner` | everything below, plus `owner.private` (owner-only pages) and `owner.transfer` (Transfer ownership) |
 | Super admin | `superadmin` | everything below, plus `settings.security`, `data.export`, `data.delete` |
 | Admin – content & people | `admin-content-people` | everything below, plus `people.manage`, `roles.manage` (roles below their own) |
 | Admin – content only | `admin-content` | everything below, plus `content.edit`, `content.publish` (any content, site-wide) |
 | Admin – view only | `admin-view` | `content.read`, `people.read`, `audit.read`: see everything in the admin area, change nothing |
 | Member | (no group) | none; access to items comes from resource roles |
+
+¹ **Amended 2026-10-19 (register C1):** "Owner (only one)" is the label where roles are chosen or compared: the role picker's owner note and the Compare roles grid (`OWNER_CHOICE_LABEL`). Where the role is a name (the People table, badges, the role-change line, Activity), it's plain "Owner" (`ADMIN_ROLE_LABEL.owner`).
 
 The labels use an en dash. Each role has a one-line "can" and "can't" (`ROLE_DESCRIPTIONS`), and `ROLE_MATRIX` is the comparison UIs show ("View everything", "Edit any content", "Manage people", "Security, exports, deletion", "Owner-only pages"), built from the capability map so it can't drift from what the server enforces.
 
