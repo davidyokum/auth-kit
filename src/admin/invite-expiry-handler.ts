@@ -14,6 +14,7 @@ import { redactAddresses } from './redact.js';
 import type { InviteMode } from './guardrails.js';
 import { INVITE_EXPIRY_ENV } from './invite-expiry-env.js';
 import { createSesInviteMailer } from './mailer.js';
+import { type ThemeFamily, helpAddressProblems, isThemeFamily, senderProblems } from '../themes/index.js';
 import { type InviteExpirySweepOptions, type SweepResult, type SweepSkip, createInviteExpirySweep, regionOfUserPool } from './sweep.js';
 
 
@@ -29,6 +30,8 @@ export interface InviteExpiryConfig {
   /** How a skipped last owner is warned (SES). Absent: a skip that needed a warning fails the run. */
   ownerWarnings?: {
     siteName: string;
+    family: ThemeFamily;
+    helpEmail: string;
     from: string;
     signInUrl?: string;
     fallbackEmail?: string;
@@ -64,18 +67,30 @@ export function inviteExpiryConfig(env: Readonly<Record<string, string | undefin
     return v === undefined || v === '' ? undefined : v;
   };
   const siteName = value(INVITE_EXPIRY_ENV.siteName);
+  const family = value(INVITE_EXPIRY_ENV.family);
+  const helpEmail = value(INVITE_EXPIRY_ENV.helpEmail);
+  const helpPersonal = value(INVITE_EXPIRY_ENV.helpPersonal) === '1';
   const from = value(INVITE_EXPIRY_ENV.mailFrom);
   const signInUrl = value(INVITE_EXPIRY_ENV.signInUrl);
   const fallbackEmail = value(INVITE_EXPIRY_ENV.ownerWarningFallback);
   const configurationSet = value(INVITE_EXPIRY_ENV.mailConfigurationSet);
   let ownerWarnings: InviteExpiryConfig['ownerWarnings'];
-  if ([siteName, from, signInUrl, fallbackEmail, configurationSet].some((v) => v !== undefined)) {
+  if ([siteName, from, signInUrl, fallbackEmail, configurationSet, family, helpEmail].some((v) => v !== undefined)) {
     if (!siteName) problems.push(`${INVITE_EXPIRY_ENV.siteName} is required with the owner-warning settings`);
-    if (!from || !from.includes('@') || /[\r\n]/.test(from)) problems.push(`${INVITE_EXPIRY_ENV.mailFrom} must be a sender address (\`Site <noreply@example.org>\`)`);
+    if (!isThemeFamily(family)) problems.push(`${INVITE_EXPIRY_ENV.family} must be osbm, unc, or personal`);
+    if (!from || !from.includes('@') || /[\r\n]/.test(from)) problems.push(`${INVITE_EXPIRY_ENV.mailFrom} must be a sender address (\`"Site (NC OSBM)" <sign-in@example.org>\`)`);
+    else if (isThemeFamily(family)) {
+      const senderIssues = senderProblems(from ?? '', { siteName: siteName ?? '', theme: family });
+      if (senderIssues.length > 0) problems.push(`${INVITE_EXPIRY_ENV.mailFrom} must be the site's sender (${senderIssues.join(' ')})`);
+    }
+    const helpIssues = helpAddressProblems(helpEmail, { personal: helpPersonal });
+    if (helpIssues.length > 0) problems.push(`${INVITE_EXPIRY_ENV.helpEmail} must be the help mailbox (${helpIssues.join(' ')})`);
     if (signInUrl !== undefined && !/^https:\/\/[^\s]+$/.test(signInUrl)) problems.push(`${INVITE_EXPIRY_ENV.signInUrl} must be an https URL`);
     if (fallbackEmail !== undefined && !EMAIL_RE.test(fallbackEmail)) problems.push(`${INVITE_EXPIRY_ENV.ownerWarningFallback} must be an email address`);
     ownerWarnings = {
       siteName: siteName ?? '',
+      family: (isThemeFamily(family) ? family : 'personal') as ThemeFamily,
+      helpEmail: helpEmail ?? '',
       from: from ?? '',
       ...(signInUrl !== undefined && { signInUrl }),
       ...(fallbackEmail !== undefined && { fallbackEmail }),
@@ -133,6 +148,7 @@ export function createInviteExpiryHandler(options: InviteExpiryHandlerOptions = 
           ownerWarnings: {
             notifier: createSesInviteMailer({
               from: warnings.from,
+              site: { siteName: warnings.siteName, theme: warnings.family, help: warnings.helpEmail, ...(warnings.signInUrl !== undefined && { signInUrl: warnings.signInUrl }) },
               ...(warnings.configurationSet !== undefined && { configurationSet: warnings.configurationSet }),
             }),
             siteName: warnings.siteName,

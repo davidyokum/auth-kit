@@ -20,7 +20,7 @@ const BASE: AuthStandardOptions = {
   project: 'example-reports',
   owner: 'reports-team',
   tier: 2,
-  email: { fromAddress: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' },
+  email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'personal', replyTo: 'help@example.org' },
   passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
 };
@@ -101,7 +101,7 @@ describe('Tier 2 pool on a branch', () => {
       AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
       EmailConfiguration: {
         EmailSendingAccount: 'DEVELOPER',
-        From: 'Example Reports <noreply@example.org>',
+        From: 'Example Reports <sign-in@example.org>',
         ReplyToEmailAddress: 'help@example.org',
         SourceArn: {
           'Fn::Join': ['', ['arn:', { Ref: 'AWS::Partition' }, ':ses:', { Ref: 'AWS::Region' }, ':', { Ref: 'AWS::AccountId' }, ':identity/example.org']],
@@ -115,8 +115,8 @@ describe('Tier 2 pool on a branch', () => {
     expect(formatSender('Example Site (NC OSBM)', 'sign-in@example.org')).toBe('"Example Site (NC OSBM)" <sign-in@example.org>');
     expect(formatSender('Example Site (UNC)', 'sign-in@example.org')).toBe('"Example Site (UNC)" <sign-in@example.org>');
     expect(formatSender('Reports, Example', 'a@example.org')).toBe('"Reports, Example" <a@example.org>');
-    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)' } }).template();
-    quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <noreply@example.org>' }) });
+    const quoted = synth({ ...BASE, email: { ...BASE.email, fromName: 'Example Site (UNC)', family: 'unc' } }).template();
+    quoted.hasResourceProperties('AWS::Cognito::UserPool', { EmailConfiguration: Match.objectLike({ From: '"Example Site (UNC)" <sign-in@example.org>' }) });
     expect(() => normalizeOptions({ ...BASE, email: { ...BASE.email, fromName: 'Back\\slash' } })).toThrow(/fromName/);
   });
 
@@ -703,9 +703,9 @@ describe('option validation', () => {
     ['missing project', { project: '' }, /project is required/],
     ['missing owner', { owner: ' ' }, /owner is required/],
     ['bad from address', { email: { fromAddress: 'not-an-address', fromName: 'X', replyTo: 'help@example.org' } }, /fromAddress/],
-    ['from name with brackets', { email: { fromAddress: 'a@example.org', fromName: 'X <y>' } }, /fromName/],
-    ['SES domain mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
-    ['SES address mismatch', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
+    ['from name with brackets', { email: { fromAddress: 'sign-in@example.org', fromName: 'X <y>', family: 'personal' } as never }, /fromName/],
+    ['SES domain mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'other.org' } }, /isn't on the SES identity/],
+    ['SES address mismatch', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'b@example.org' } }, /address identity/],
     ['RP ID with scheme', { passkeys: { relyingPartyId: 'https://reports.example.org' } }, /bare host name/],
     ['RP ID with port', { passkeys: { relyingPartyId: 'reports.example.org:443' } }, /bare host name/],
     ['RP ID public suffix', { passkeys: { relyingPartyId: 'amplifyapp.com' } }, /public suffix/],
@@ -723,9 +723,13 @@ describe('option validation', () => {
     ['Tier 3 refresh above a day', { tier: 3, refreshTokenMinutes: 2000 }, /ceiling/],
     ['Tier 3 without threat protection', { tier: 3, threatProtection: 'off' }, /sign-in event logs/],
     ['environment named sandbox', { environment: 'sandbox' }, /reserved/],
-    ['no help address', { email: { fromAddress: 'a@example.org', fromName: 'X' } as never }, /needs a help address/],
-    ['a placeholder help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
-    ['a personal help address', { email: { fromAddress: 'a@example.org', fromName: 'X', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['no help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal' } as never }, /needs a help address/],
+    ['a placeholder help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'apps-help@replace-me.invalid' } }, /placeholder/],
+    ['a personal help address', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', family: 'personal', replyTo: 'jordan.lee@example.org' } }, /role-based mailbox/],
+    ['a noreply@ sender (register A10)', { email: { fromAddress: 'noreply@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /never noreply@/],
+    ['a sender other than sign-in@', { email: { fromAddress: 'auth@example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org' } }, /sign-in@example.org/],
+    ['an OSBM sender without the suffix (register E4a)', { email: { fromAddress: 'sign-in@example.org', fromName: 'Example Reports', family: 'osbm', replyTo: 'help@example.org' } }, /\(NC OSBM\)/],
+    ['a sender without a family', { email: { fromAddress: 'sign-in@example.org', fromName: 'X', replyTo: 'help@example.org' } as never }, /email.family is required/],
     ['the removed selfSignUp', { selfSignUp: { allowedEmailDomains: ['example.edu'] } }, /selfSignUp was removed/],
     ['an admin pool with sign-up', { adminPool: true, accountCreation: { mode: 'open' } }, /admin pool is invite only/],
     ['an empty domain list', { accountCreation: { mode: 'domains', domains: [] } }, /at least one domain/],
@@ -749,6 +753,10 @@ describe('option validation', () => {
     ['a malformed web ACL ARN', { waf: { webAclArn: 'arn:aws:wafv2:us-east-1:acct:regional/webacl/x/y' } }, /isn't a REGIONAL web ACL ARN/],
     ['a CloudFront (global) web ACL', { waf: { webAclArn: `arn:aws:wafv2:us-east-1:${'1'.repeat(12)}:global/webacl/x/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee` } }, /REGIONAL/],
   ];
+  it('takes a person’s own help address only with the site’s acknowledgement (register E4c)', () => {
+    const o = normalizeOptions({ ...BASE, email: { ...BASE.email, replyTo: { address: 'Jordan.Lee@example.org', personal: true } } });
+    expect(o.email.replyTo).toBe('jordan.lee@example.org');
+  });
   it.each(bad)('rejects %s', (_label, change, message) => {
     expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(AuthStandardConfigError);
     expect(() => normalizeOptions({ ...BASE, ...change })).toThrow(message);
@@ -757,7 +765,7 @@ describe('option validation', () => {
   it('defaults the SES identity to the sending domain and allows a subdomain sender', () => {
     expect(normalizeOptions(BASE).email.sesIdentity).toBe('example.org');
     expect(
-      normalizeOptions({ ...BASE, email: { fromAddress: 'a@mail.example.org', fromName: 'X', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
+      normalizeOptions({ ...BASE, email: { fromAddress: 'sign-in@mail.example.org', fromName: 'X', family: 'personal', replyTo: 'help@example.org', sesIdentity: 'example.org' } }).email.sesIdentity,
     ).toBe('example.org');
   });
 });
@@ -774,7 +782,7 @@ describe('standardAuthProps', () => {
       multifactor: { mode: 'OPTIONAL', totp: true },
       accountRecovery: 'EMAIL_ONLY',
       groups: ['owner', 'superadmin', 'admin-content-people', 'admin-content', 'admin-view', 'reviewer'],
-      senders: { email: { fromEmail: 'noreply@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
+      senders: { email: { fromEmail: 'sign-in@example.org', fromName: 'Example Reports', replyTo: 'help@example.org' } },
     });
   });
 

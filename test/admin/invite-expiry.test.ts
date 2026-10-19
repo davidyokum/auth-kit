@@ -25,7 +25,9 @@ const ENV = {
 
 const WARNING_ENV = {
   [INVITE_EXPIRY_ENV.siteName]: 'Example Reports',
-  [INVITE_EXPIRY_ENV.mailFrom]: 'Example Reports <noreply@example.org>',
+  [INVITE_EXPIRY_ENV.family]: 'personal',
+  [INVITE_EXPIRY_ENV.helpEmail]: 'help@example.org',
+  [INVITE_EXPIRY_ENV.mailFrom]: 'Example Reports <sign-in@example.org>',
   [INVITE_EXPIRY_ENV.signInUrl]: 'https://reports.example.org/sign-in',
   [INVITE_EXPIRY_ENV.ownerWarningFallback]: 'ops@example.org',
 };
@@ -63,7 +65,9 @@ describe('the environment', () => {
       runEveryMinutes: 60,
       ownerWarnings: {
         siteName: 'Example Reports',
-        from: 'Example Reports <noreply@example.org>',
+        family: 'personal',
+        helpEmail: 'help@example.org',
+        from: 'Example Reports <sign-in@example.org>',
         signInUrl: 'https://reports.example.org/sign-in',
         fallbackEmail: 'ops@example.org',
         configurationSet: 'auth',

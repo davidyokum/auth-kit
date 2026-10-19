@@ -414,7 +414,7 @@ describe('AccessRequestDigest', () => {
         },
       },
     });
-    digest({ withSettings: true, configurationSet: 'auth', recipientGroups: ['owner', 'people-managers'], family: 'unc' }).template.hasResourceProperties('AWS::Lambda::Function', {
+    digest({ withSettings: true, configurationSet: 'auth', recipientGroups: ['owner', 'people-managers'], family: 'unc', from: '"Example Reports (UNC)" <sign-in@mail.example.org>' }).template.hasResourceProperties('AWS::Lambda::Function', {
       Environment: {
         Variables: Match.objectLike({
           AUTH_KIT_SETTINGS_TABLE: { Ref: Match.stringLikeRegexp('^SettingsTable') },

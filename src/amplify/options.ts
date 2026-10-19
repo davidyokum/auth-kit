@@ -14,7 +14,7 @@ import {
   WAF_POLICY,
   codeLifetimeMinutes,
 } from '../shared/policy.js';
-import { helpAddressProblems } from '../themes/index.js';
+import { type HelpAddressSetting, type ThemeFamily, helpSettingProblems, isThemeFamily, readHelpSetting, senderAddressProblems, senderNameProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
 export class AuthStandardConfigError extends Error {
@@ -25,17 +25,24 @@ export class AuthStandardConfigError extends Error {
 }
 
 export interface AuthEmailOptions {
-  /** Address auth email comes from, e.g. `noreply@example.org`. Its domain must be verified in SES. */
+  /**
+   * Address auth email comes from: the site's reply-able `sign-in@` mailbox, e.g. `sign-in@reports.example.org`
+   * (personal sites: `sign-in@yokum.app`). Never `noreply@` (register A10; synthesis fails). Its domain
+   * must be verified in SES.
+   */
   fromAddress: string;
-  /** Display name, e.g. `Example Reports (NC OSBM)` (`senderDisplayName` from `auth-kit/themes`). */
+  /** Display name: `senderDisplayName(siteName, family)` from `auth-kit/themes`, e.g. `Example Reports (NC OSBM)` (register E4a; checked against `family`). */
   fromName: string;
+  /** The site's family: the sender's name must carry its suffix ("(NC OSBM)", "(UNC)", none on personal sites; register E4a). */
+  family: ThemeFamily;
   /**
    * The site's help address: the family's role-based help mailbox (`theme.help.address`, or the
    * site's override). Required (ADR 0024): it's the Reply-To on every auth email Cognito sends, and
    * the address the help screens and email footers name. Synthesis fails while it's missing, a
-   * placeholder (`apps-help@replace-me.invalid`), or a person's own address.
+   * placeholder (`apps-help@replace-me.invalid`), or a person's own address the site hasn't
+   * acknowledged (`{ address, personal: true }`, register E4c).
    */
-  replyTo: string;
+  replyTo: HelpAddressSetting;
   /**
    * The verified SES identity that authorizes `fromAddress`: a domain (the default is `fromAddress`'s
    * domain) or the address itself. Amplify's typed `senders.email` can only point at an address
@@ -209,7 +216,7 @@ export interface NormalizedAuthStandardOptions {
   owner: string;
   tier: AuthTier;
   adminPool: boolean;
-  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'replyTo'>> &
+  email: Required<Pick<AuthEmailOptions, 'fromAddress' | 'fromName' | 'sesIdentity' | 'family'>> & { replyTo: string } &
     Pick<AuthEmailOptions, 'configurationSet' | 'verification' | 'invitation'>;
   passkeys: Required<PasskeyOptions> | null;
   groups: string[];
@@ -378,11 +385,17 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (!email) fail('email settings are required: auth email must go through SES from a verified domain.');
   const fromAddress = (email.fromAddress ?? '').trim();
   if (!EMAIL_RE.test(fromAddress)) fail(`email.fromAddress is not a valid address: "${email.fromAddress}".`);
+  const senderProblems = senderAddressProblems(fromAddress);
+  if (senderProblems.length > 0) fail(`email.fromAddress: ${senderProblems.join(' ')}`);
   const fromName = (email.fromName ?? '').trim();
   if (!fromName || /[<>"\\\r\n]/.test(fromName)) fail('email.fromName is required and may not contain < > " \\ or line breaks.');
-  const helpProblems = helpAddressProblems(email.replyTo);
+  if (!isThemeFamily(email.family)) fail("email.family is required: 'osbm', 'unc', or 'personal' (the sender's name carries the family's suffix, register E4a).");
+  const nameProblems = senderNameProblems(fromName, email.family);
+  if (nameProblems.length > 0) fail(`email.fromName: ${nameProblems.join(' ')}`);
+  const helpProblems = helpSettingProblems(email.replyTo);
   if (helpProblems.length > 0) fail(`email.replyTo is the site's help address (the Reply-To on auth emails, and the address the help screens name). ${helpProblems.join(' ')}`);
-  if (!EMAIL_RE.test(email.replyTo.trim())) fail(`email.replyTo is not a valid address: "${email.replyTo}".`);
+  const replyTo = readHelpSetting(email.replyTo).address;
+  if (!EMAIL_RE.test(replyTo)) fail(`email.replyTo is not a valid address: "${replyTo}".`);
   const sesIdentity = (email.sesIdentity ?? domainOf(fromAddress)).trim().toLowerCase();
   if (sesIdentity.includes('@')) {
     if (sesIdentity !== fromAddress.toLowerCase()) {
@@ -488,7 +501,8 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
       fromAddress,
       fromName,
       sesIdentity,
-      replyTo: email.replyTo.trim().toLowerCase(),
+      replyTo,
+      family: email.family,
       ...(email.configurationSet !== undefined && { configurationSet: email.configurationSet }),
       ...(email.verification !== undefined && { verification: email.verification }),
       ...(email.invitation !== undefined && { invitation: email.invitation }),

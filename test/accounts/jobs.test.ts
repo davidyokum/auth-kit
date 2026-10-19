@@ -585,6 +585,7 @@ describe('the access-request digest handler', () => {
       signInUrl: 'AUTH_KIT_SIGN_IN_URL',
       peopleUrl: 'AUTH_KIT_PEOPLE_URL',
       helpEmail: 'AUTH_KIT_HELP_EMAIL',
+      helpPersonal: 'AUTH_KIT_HELP_PERSONAL',
       mailFrom: 'AUTH_KIT_MAIL_FROM',
       mailConfigurationSet: 'AUTH_KIT_MAIL_CONFIGURATION_SET',
       recipientGroups: 'AUTH_KIT_RECIPIENT_GROUPS',
@@ -603,12 +604,13 @@ describe('the access-request digest handler', () => {
       accessRequestDigestConfig({
         ...ENV,
         AUTH_KIT_FAMILY: undefined,
+        AUTH_KIT_MAIL_FROM: 'Example Reports <sign-in@example.org>',
         AUTH_KIT_SETTINGS_TABLE: 'site-data-SiteSettingsTable-EXAMPLE',
         AUTH_KIT_MAIL_CONFIGURATION_SET: 'auth',
-        AUTH_KIT_RECIPIENT_GROUPS: ' owner, editors ,, ',
+        AUTH_KIT_RECIPIENT_GROUPS: ' owner, people-managers ,, ',
         AUTH_KIT_SITE_NAME: '  Example Reports  ',
       }),
-    ).toMatchObject({ family: 'personal', settingsTable: 'site-data-SiteSettingsTable-EXAMPLE', mailConfigurationSet: 'auth', recipientGroups: ['owner', 'editors'], siteName: 'Example Reports' });
+    ).toMatchObject({ family: 'personal', settingsTable: 'site-data-SiteSettingsTable-EXAMPLE', mailConfigurationSet: 'auth', recipientGroups: ['owner', 'people-managers'], siteName: 'Example Reports' });
     expect(accessRequestDigestConfig({ ...ENV, AUTH_KIT_RECIPIENT_GROUPS: ' , ' })).not.toHaveProperty('recipientGroups');
   });
 

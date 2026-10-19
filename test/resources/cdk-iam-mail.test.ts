@@ -136,13 +136,13 @@ describe('the admins’ alert for a Manager’s invite', () => {
     const ses = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const mock = mockClient(ses);
     mock.on(SendEmailCommand).resolves({});
-    const mailer = createSesInviteMailer({ from: 'Example Reports <noreply@example.org>', client: ses });
+    const mailer = createSesInviteMailer({ from: 'Example Reports <sign-in@example.org>', site: { siteName: 'Example Reports', theme: 'personal', help: 'help@example.org' }, client: ses });
     await mailer.resourceInviteSent(ALERT);
     const input = mock.commandCalls(SendEmailCommand)[0]!.args[0].input;
     expect(input.Destination?.ToAddresses).toEqual(['owner@example.org', 'admin@example.org']);
     expect(input.Content?.Simple?.Subject?.Data).toBe('Example Reports: ann@example.org invited new@example.com');
     await expect(mailer.resourceInviteSent({ ...ALERT, recipients: [] })).rejects.toThrow(/no admin who manages people/);
-    const custom = createSesInviteMailer({ from: 'x@example.org', client: ses, renderResourceInvite: () => ({ subject: 'S', text: 'T', html: 'H' }) });
+    const custom = createSesInviteMailer({ from: 'Example Reports <sign-in@example.org>', site: { siteName: 'Example Reports', theme: 'personal', help: 'help@example.org' }, client: ses, renderResourceInvite: () => ({ subject: 'S', text: 'T', html: 'H' }) });
     await custom.resourceInviteSent(ALERT);
     expect(mock.commandCalls(SendEmailCommand).at(-1)!.args[0].input.Content?.Simple?.Subject?.Data).toBe('S');
   });

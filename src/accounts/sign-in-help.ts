@@ -25,7 +25,7 @@ import { OWNER_GROUP } from '../shared/policy.js';
 
 /** The Super admin group (the standard roles' second rank). */
 const SUPERADMIN_GROUP = 'superadmin';
-import { type AuthTheme, type ThemeFamily, helpAddressProblems, resolveTheme } from '../themes/index.js';
+import { type AuthTheme, type HelpAddressSetting, type ThemeFamily, helpAddressProblems, helpSettingProblems, readHelpSetting, resolveTheme } from '../themes/index.js';
 import { emailDomain, emailDomainAllowed } from '../shared/account-creation.js';
 import { SITE_SETTING } from './schema.js';
 import { SettingConflictError, type SiteSettingsStore, type StoredSetting } from './stores.js';
@@ -49,7 +49,7 @@ export type SignInHelpView =
   | {
       state: 'ok';
       configured: string;
-      override: { address: string; updatedAt: string; updatedBy: { sub: string; email?: string }; reason?: string } | null;
+      override: { address: string; personal?: true; updatedAt: string; updatedBy: { sub: string; email?: string }; reason?: string } | null;
       effective: EffectiveSignInHelp;
       /** Pass back with a change, so two Super admins can't overwrite each other unseen. */
       version: number;
@@ -57,8 +57,11 @@ export type SignInHelpView =
   | { state: 'unavailable'; configured: string; reason: string };
 
 export interface SignInHelpOptions {
-  /** The configured help address: the family's mailbox, or the site's override in its config. Required. */
-  configured: string;
+  /**
+   * The configured help address: the family's mailbox, or the site's own in its config. Required. A
+   * person's own address only with the site's acknowledgement: `{ address, personal: true }` (register E4c).
+   */
+  configured: HelpAddressSetting;
   /**
    * The site's family or theme: its email domains (`theme.help.domains`, subdomains included) are
    * where a Super admin may point the help address, besides the configured address's own domain.
@@ -81,8 +84,11 @@ export interface SignInHelp {
   readonly store: SiteSettingsStore | null;
   /** Where an override may point: the configured address's domain, the family's, and `allowedDomains`. */
   readonly allowedDomains: readonly string[];
-  /** Why an address can't be the override (a malformed or placeholder address, or a domain off the list), or `[]`. */
-  overrideProblems(address: string): string[];
+  /**
+   * Why an address can't be the override (a malformed or placeholder address, a domain off the list, or
+   * a person's own address without `personal: true`, the same rule as the configured one), or `[]`.
+   */
+  overrideProblems(address: string, options?: { personal?: boolean }): string[];
   /** For the sign-in page, the help screens, and emails: never throws, falls back to the configured address. */
   effective(): Promise<EffectiveSignInHelp>;
   /** For the Settings page: the override as stored (uncached), or why it couldn't be read. */
@@ -93,13 +99,15 @@ export interface SignInHelp {
 
 interface StoredHelp {
   address: string;
+  /** The Super admin acknowledged a person's own address (register E4c). */
+  personal?: true;
   reason?: string;
 }
 
 function storedHelp(setting: StoredSetting | null): StoredHelp | null {
   const value = setting?.value as Partial<StoredHelp> | undefined;
   if (!value || typeof value.address !== 'string') return null;
-  return { address: value.address, ...(typeof value.reason === 'string' && { reason: value.reason }) };
+  return { address: value.address, ...(value.personal === true && { personal: true as const }), ...(typeof value.reason === 'string' && { reason: value.reason }) };
 }
 
 /**
@@ -107,16 +115,16 @@ function storedHelp(setting: StoredSetting | null): StoredHelp | null {
  * as the preset checks `email.replyTo`): a server that starts with a placeholder fails loudly.
  */
 export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
-  const problems = helpAddressProblems(options.configured);
+  const problems = helpSettingProblems(options.configured);
   if (problems.length > 0) throw new Error(`auth-kit: createSignInHelp: ${problems.join(' ')}`);
-  const configured = options.configured.trim().toLowerCase();
+  const configured = readHelpSetting(options.configured).address;
   const allowedDomains = Object.freeze(
     [...new Set([emailDomain(configured), ...resolveTheme(options.theme).help.domains, ...(options.allowedDomains ?? [])].map((d) => d.trim().toLowerCase().replace(/^[@.]/, '')).filter((d) => d !== ''))],
   );
   // A Super admin's override (or a value someone wrote straight into the table) stays on these domains:
   // a hijacked session can't point every help screen and Reply-To at an outside mailbox.
-  const overrideProblems = (address: string): string[] => {
-    const problems = helpAddressProblems(address);
+  const overrideProblems = (address: string, check: { personal?: boolean } = {}): string[] => {
+    const problems = helpAddressProblems(address, { personal: check.personal === true });
     if (problems.length > 0) return problems;
     return emailDomainAllowed(address.trim().toLowerCase(), allowedDomains)
       ? []
@@ -138,7 +146,7 @@ export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
       let value = fallback;
       try {
         const help = storedHelp(await options.store.get(SITE_SETTING.signInHelp));
-        if (help && overrideProblems(help.address).length === 0) value = { address: help.address, source: 'override' };
+        if (help && overrideProblems(help.address, { personal: help.personal === true }).length === 0) value = { address: help.address, source: 'override' };
       } catch (error) {
         options.onError?.(error);
         // Not cached: the next request tries the store again.
@@ -152,11 +160,11 @@ export function createSignInHelp(options: SignInHelpOptions): SignInHelp {
       try {
         const setting = await options.store.get(SITE_SETTING.signInHelp);
         const help = storedHelp(setting);
-        const usable = help !== null && overrideProblems(help.address).length === 0;
+        const usable = help !== null && overrideProblems(help.address, { personal: help.personal === true }).length === 0;
         return {
           state: 'ok',
           configured,
-          override: help && setting ? { address: help.address, updatedAt: setting.updatedAt, updatedBy: setting.updatedBy, ...(help.reason !== undefined && { reason: help.reason }) } : null,
+          override: help && setting ? { address: help.address, ...(help.personal === true && { personal: true as const }), updatedAt: setting.updatedAt, updatedBy: setting.updatedBy, ...(help.reason !== undefined && { reason: help.reason }) } : null,
           effective: usable ? { address: help.address, source: 'override' } : fallback,
           version: setting?.version ?? 0,
         };
@@ -191,8 +199,12 @@ export interface SignInHelpActionsConfig<G extends string = string, C extends st
 export interface SignInHelpActions {
   /** The Settings page's view. Needs `settings.security`. */
   get(): Promise<SignInHelpView | { state: 'forbidden'; reason: string }>;
-  /** Overrides the help address. `settings.security`, a recent sign-in, and a reason. */
-  set(input: { address: unknown; reason: unknown; version: unknown }): Promise<ActionResult>;
+  /**
+   * Overrides the help address. `settings.security`, a recent sign-in, and a reason. A person's own
+   * address needs `personal: true` (the form's "This is a person's own address, on purpose" box;
+   * register E4c), the same rule as the configured address.
+   */
+  set(input: { address: unknown; reason: unknown; version: unknown; personal?: unknown }): Promise<ActionResult>;
   /** Goes back to the configured address. The same checks. */
   clear(input: { reason: unknown; version: unknown }): Promise<ActionResult>;
   readonly forms: { set: FormAction; clear: FormAction };
@@ -242,6 +254,7 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
     const who = await acting();
     if ('ok' in who) return who;
     let address: string | undefined, reason: string, version: number;
+    let personal = false;
     try {
       const raw = record(input);
       reason = text(raw.reason, 'Reason', ADMIN_POLICY.reasonMaxLength) ?? '';
@@ -249,7 +262,8 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
       version = parseVersion(raw.version);
       if (mode === 'set') {
         address = (text(raw.address, 'Help address', 254) ?? '').toLowerCase();
-        const problems = help.overrideProblems(address);
+        personal = raw.personal === true || raw.personal === 'true' || raw.personal === 'on';
+        const problems = help.overrideProblems(address, { personal });
         if (problems.length > 0) throw new InputError(problems.join(' '));
       }
     } catch (error) {
@@ -287,7 +301,7 @@ export function createSignInHelpActions<G extends string, C extends string>(conf
         let written: StoredSetting | null = null;
         if (mode === 'set') {
           written = await steps.call('DynamoDB PutItem sign-in help', () =>
-            store.put(SITE_SETTING.signInHelp, { value: { address: to, reason }, expectedVersion: version, by: who.actor, now: new Date(now()) }),
+            store.put(SITE_SETTING.signInHelp, { value: { address: to, ...(personal && { personal: true }), reason }, expectedVersion: version, by: who.actor, now: new Date(now()) }),
           );
         } else {
           await steps.call('DynamoDB DeleteItem sign-in help', () => store.remove(SITE_SETTING.signInHelp, version));
