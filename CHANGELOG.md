@@ -2,9 +2,9 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
-## [0.1.9-alpha] - Unreleased
+## [0.1.9-alpha] - 2026-10-19
 
-auth-kit brought fully in line with the passwords-flow decisions register as answered on 2026-10-19 (A6, A7, A10, B1, C1, C5, D1, D3, E4a, E4c, E4d, E5, F7, F11). Pre-release. Breaking: see Migration.
+auth-kit brought fully in line with the passwords-flow decisions register as answered on 2026-10-19 (A6, A7, A9, A10, B1, C1, C5, D1, D3, E3, E4a, E4c, E4d, E5, E6, E7, F7, F11): the sign-in, email, and account rules ([#22](https://github.com/davidyokum/auth-kit/pull/22)) and the backdrops (six new styles, subject rotation, a still frame on slow devices, each style loaded on first use). Pre-release. Breaking: see Migration.
 
 ### Security
 
@@ -21,7 +21,7 @@ auth-kit brought fully in line with the passwords-flow decisions register as ans
 - `auth-kit/themes`: `cardStyle` (`'quiet'` default, `'monogram'`, `'frosted'`, `'plain'`, `'porcelain'`; register E5, matching Card Studio's directions), `CARD_STYLES`, `cardStyleVariables`; `HelpAddressSetting`, `readHelpSetting`, `helpSettingProblems`; `senderAddressProblems`, `senderNameProblems`, `senderProblems`, `parseSender`, `formatSenderAddress`, `siteSender`, `SENDER_LOCAL_PART`; `theme.senderAddress` and `theme.help.personal`.
 - `auth-kit/accounts`: `createAccountNoticeRoute`, `ACCOUNT_NOTICE_PATH` (`/api/auth-kit/account-notice`), `ACCOUNT_NOTICE_EVENTS`. `auth-kit/admin`: `passkeyAddedEmail`, `passwordChangedEmail`, `OWNER_CHOICE_LABEL`, `ACCOUNT_NOTICE_COGNITO_ACTIONS`.
 - `auth-kit/client`: the `notices` prop on `SignIn`, `SignUp`, and `MyAccount` (on by default; `false` turns it off), `sendAccountNotice`, `monogramOf`; the envelope icon in every email field (A9; `Field`'s `icon`); the Monogram badge.
-- `auth-kit/backdrops`: `CARD_WIDTH` (380).
+- `auth-kit/backdrops`: six styles (register E7): `yokum-magnetic` (Yokum Lab's sign-in: filings, a falling title, the magnet), `ai-survey-dots` and `pulse-dots` (the survey dot fields), and the blueprint family `county-survey` (NC's 100 counties), `river-basins` (the 17 basins), and `star-chart` (40 constellations, 88 optional), drawn with a frozen plotter core. Subject rotation (E3): `subject: { rotation: 'tour' | 'random' | 'day' | 'fixed', key, set }`, `pickSubject`, `stats().subject`; the tour lives in this browser's `localStorage` only. A still frame on slow devices (E6): Save-Data, `deviceMemory` of 2 GB or less, or frames over `frameBudgetMs`; `stillOnSlowDevices`, `stats().stillReason`. `siteName` reaches styles. `settlesAt`: a finished drawing rests until the pointer or a tap. `lazyVersion` and `loadBackdropStyle`: each style loads on first use, in its own chunk. `CARD_WIDTH` (380).
 - `auth-kit/amplify`: `waf.ownWebAcl`; `email.family`; `UNVERIFIED_SWEEP_MARK` (on `UnverifiedAccountSweep`).
 - `auth-kit/testing`: `itemRoute` (`recordRoute` stays as an alias).
 
@@ -38,6 +38,8 @@ auth-kit brought fully in line with the passwords-flow decisions register as ans
 - **Resource screens always use the type's noun** (C5): `noun` is required on `ResourceAccessTable`, `ResourceRolesSummary`, and `resourceRoleDescriptions`, and a failed access list carries it.
 - **My account's passkey line** (E4d): "Sign in with your face, fingerprint, or device PIN. Passkeys saved in a password manager work too."
 - `accountCreationAppPolicy` takes `accountCreation` (the preset's setting) instead of `selfSignUp`, and grants the notice route's read.
+- **`drawBackdropStill` is async** (it loads the style's code first).
+- ADR 0021 amended (E3, E6, E7): play optional and never part of signing in, a still frame on slow devices, no sound unless switched on, subject rotation, lazy loading, the new styles; `THIRD_PARTY_NOTICES.md` adds d3-celestial (BSD-3-Clause), the Yale Bright Star Catalogue, OpenStreetMap (ODbL 1.0), and the Census and USGS sources.
 - Docs: B1 ("no role overrides in the browser") in ADR 0009 and the localhost guide; ADRs 0002, 0006, 0013, 0020, 0023, and 0024 amended; "record" → "item" in the matrix docs; "Editor" → "Admin – content only" in the View as examples; the stale "owner line" and "4px rule" comments.
 
 ### Removed
@@ -57,6 +59,7 @@ auth-kit brought fully in line with the passwords-flow decisions register as ans
 7. **Resources.** Pass `noun` to `ResourceAccessTable` and `ResourceRolesSummary`; use `resourceRoleDescriptions(noun)` instead of `RESOURCE_ROLE_DESCRIPTIONS`.
 8. **Server.** Remove `requireFirstCredential: false` and `requireTotpForPasswordUsers: false` from `createServerAuth` (they throw outside the matrix server mode).
 9. **Code lifetime.** Sites that passed `codeLifetimeMinutes: 3` keep 3 minutes; the rest get 10. Pass the same value to the preset, the screens, and the custom message trigger.
+10. **Backdrops.** `await drawBackdropStill(…)` (it returns a promise now). A site on County Survey, River Basins, or Star Chart may set `subject` (a tour by default); one on Yokum magnetic passes `siteName`. Under a strict CSP nothing changes: the style chunks are same-origin scripts from the site's own bundle. Locked backdrops draw exactly as before.
 
 ## [0.1.8-alpha.1] - 2026-10-19
 

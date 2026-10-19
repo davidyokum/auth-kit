@@ -1563,8 +1563,11 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
   });
 
   /* ---------- the ink layer, plotted progressively ---------- */
+  // The paper is painted into the ink layer first, so a frame is one copy of one layer (a full-size
+  // copy per layer is most of a frame's cost on a 2x display).
   const ink: Layer = setup.createLayer(W, H);
   const inkx = ink.ctx;
+  inkx.drawImage(bg.canvas, 0, 0, W, H);
   inkx.lineCap = 'round';
   inkx.lineJoin = 'round';
   inkx.save();
@@ -1662,7 +1665,8 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
   }
 
   function resetInk(): void {
-    inkx.clearRect(0, 0, W, H);
+    // Back to bare paper (the card's area never takes ink, so the clip leaves it as it is).
+    inkx.drawImage(bg.canvas, 0, 0, W, H);
     V = 0;
     kIdx = 0;
     for (let i = 0; i < notes.length; i++) (notes[i] as InkSlot).baked = false;
@@ -2106,7 +2110,6 @@ export function createSheet<L extends SheetLook>(setup: StyleSetup, rng: Rng, CO
       ctx.save();
       ctx.globalAlpha = 1;
       bakeNotes(t);
-      ctx.drawImage(bg.canvas, 0, 0, W, H);
       ctx.drawImage(ink.canvas, 0, 0, W, H);
       drawRev(ctx);
       let pa = 0;
