@@ -13,14 +13,14 @@ Shared login and authorization for David Yokum's websites. Every site runs on AW
 | `auth-kit/amplify/custom-message` | Cognito's custom message trigger: its code emails (sign-in code, the first code of a sign-up, password reset, new address) in the standard's words and the family's theme ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) | **Implemented** |
 | `auth-kit/server` | `verifyAccessToken`, `getUser`, `requireUser`, `requireGroup`, `requireCan`, live group re-reads, step-up, `requireResourceRole` (resource roles; 404 for anyone who can't see the item), `safeRedirect`, cookie and origin helpers, 401/403/404/503 conventions | **Implemented** |
 | `auth-kit/proxy` | `withAuthProxy()` for `proxy.ts`: default-deny, verifies tokens, explicit public routes, optional server-side refresh, request and response headers (a nonce CSP) | **Implemented** |
-| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, a second member on record routes, and a freshly signed-up Member on sign-up sites), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
+| `auth-kit/testing` | Auth-matrix tests (anonymous, member, admin, a second member on item routes, and a freshly signed-up Member on sign-up sites), `startMatrixServer` (the app under `next dev` with no AWS), a local test token issuer, cookie personas, a fake Cognito, `AWS_BLOCKED_ENV` | **Implemented** |
 | `auth-kit/testing/matrix-server` | The matrix server mode the app swaps in while the matrix runs (test issuer's keys, scripted Cognito, read-only People, in-memory audit log). **Dev only, behind an alias; never in a build** | **Implemented** |
 | `auth-kit/client` | The sign-in card in the approved words (email first; passkey, password + TOTP, emailed code; "Trouble signing in?" and its help screens), the required first-credential choice, sign-up, request access, the authenticator gate, My account (with change email and delete my account on sign-up sites) | **Implemented** (phase 2) |
 | `auth-kit/admin` | The People page actions (including Transfer ownership) and an append-only audit log, on the site-wide roles ([below](#site-wide-roles)) | **Implemented** (phase 2) |
 | `auth-kit/admin/ui` | People table, invite form, role picker (each role's can/can't, "Compare roles"), role-change and Transfer ownership dialogs, Activity log, the "Pending requests" tab and badge, Settings → "Sign-in help" (React client components) | **Implemented** (phase 2) |
 | `auth-kit/admin/cdk` | `AuditLogTable`: the audit log's DynamoDB table (deletion protection, PITR, deny-edits policy, tamper alerts); `InviteExpirySweep`: the hourly schedule that disables invites unused for 7 days (never the owner's); `ResourceAccessTable`: the resource roles' membership table; `AccessRequestTable`, `RateLimitTable`, `UnverifiedAccountSweep`, `AccessRequestDigest`: account creation; `SiteSettingsTable`: settings such as a Super admin's help address | **Implemented** (phase 2) |
 | `auth-kit/accounts` | Account creation ([below](#11-account-creation-auth-kitaccounts)): the sign-up route (a self-invite) and the request-access route, with the same answer for every address and rate limits; members' own email change and delete on sign-up sites; the sign-in help address and its Super admin override; the stores and the scheduled jobs | **Implemented** |
-| `auth-kit/themes` | The families as themes ([below](#12-families-as-themes-and-the-help-address-auth-kitthemes)): accent colors, sender name, footer identity line, email hint, help route, the computed 3:1 card edge. Pure | **Implemented** |
+| `auth-kit/themes` | The families as themes ([below](#12-families-as-themes-and-the-help-address-auth-kitthemes)): accent colors, sender name and the `sign-in@` sender check, footer identity line, email hint, help route, the computed 3:1 card edge, and the five card styles (Quiet by default). Pure | **Implemented** |
 | `auth-kit/resources` | Resource roles ([below](#10-resource-roles-auth-kitresources)): Manager, Contributor, Reader on one item, combined with the site role; the membership store; audited access changes, a Manager's invite with an alert to the admins, item creation with its first Manager, the disable hook | **Implemented** |
 | `auth-kit/resources/ui` | "Who has access to this {noun}": role chips, add, invite, remove, leave, the last-Manager messages; the resource roles summary for the site role picker (React client components) | **Implemented** |
 | `auth-kit/dev` | The localhost kit ([guide](docs/localhost.md)): personas and seeding, gated "Sign in as…", the loopback and sandbox checks, `withDevKit`, the production-build and route checks. **Dev only; never in a build** | **Implemented** (phase 2) |
@@ -57,8 +57,9 @@ export const authOptions = {
   owner: 'reports-team',
   tier: 2,
   email: {
-    fromAddress: 'sign-in@example.org',
+    fromAddress: 'sign-in@example.org', // the site's reply-able sign-in@ mailbox, never noreply@ (register A10)
     fromName: 'Example Reports (NC OSBM)', // senderDisplayName(site, family) from auth-kit/themes
+    family: 'osbm', // the sender's name must carry the family's suffix (register E4a)
     // The help address: the family's role-based mailbox, or the site's own. Required (synthesis fails
     // while it's missing or a placeholder); it's the Reply-To on Cognito's auth emails.
     replyTo: 'apps-help@replace-me.invalid',
@@ -66,6 +67,8 @@ export const authOptions = {
   // Switch passkeys on once the final custom domain is live:
   // passkeys: { relyingPartyId: 'reports.example.org' },
   appRoles: ['reviewer'],
+  // The account's shared web ACL (register F7; section "WAF"), or waf: { ownWebAcl: true } for a site alone in its account:
+  waf: { webAclArn: 'arn:aws:wafv2:us-east-1:<account-id>:regional/webacl/auth-kit-shared-user-pools/<id>' },
   // How accounts get created (invite only by default; section 11), and how long an emailed code works:
   // accountCreation: { mode: 'domains', domains: ['example.org'], requestsAlso: true },
   // codeLifetimeMinutes: 10, // the default (register A7)
@@ -348,7 +351,7 @@ What it checks ([ADR 0014](docs/decisions/0014-matrix-without-proxy.md)):
 
 - **Each route's own guard.** Every case runs through the proxy and again with the proxy stepped aside, so a route that leans on the proxy for its 401 fails. The proxy steps aside only for the matrix's requests, only outside production builds, only with `AUTH_KIT_MATRIX=1`, and only on a localhost URL (a production build compiles the switch out); without the flag, those cases fail and say why. In-process tests pass `handlerRequest` instead.
 - **Coverage.** Every route in `appRoutes` needs a row, and every row must match an app route, so a mistyped path fails instead of passing on a 404.
-- **The standard's rules.** Every route needs anonymous, member, and admin; record routes need the second member, who gets 404; at least one persona must succeed on each row (`exists: false` marks a row asserting a path is gone).
+- **The standard's rules.** Every route needs anonymous, member, and admin; item routes (ones that take an item's ID; `itemRoute`) need the second member, who gets 404; at least one persona must succeed on each row (`exists: false` marks a row asserting a path is gone).
 
 What it can't see: server actions aren't in the build manifest, so give them rows of your own; and it verifies responses for the personas you give it. To run your own server instead, `matrixFixture({ issuer, personas })` returns the tokens and the fixture and `matrixServerEnv()` the environment.
 
@@ -410,25 +413,26 @@ return (
 
 The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true })` and renders `<AuthenticatorSetup issuer="…" onDone={…} />` from a small client component (function props such as `onDone`, `navigate`, `loadFactors`, and `renderQrCode` can't cross from a server component).
 
-**The first credential is enforced on the server.** An account with neither a passkey nor a password (an invitee or a sign-up who closed the tab at "Choose how you'll sign in next time") gets 403 `first_credential_required` from `requireUser` and `getUser` returns `null` (register A1). Add the chooser page the guard sends them to: `/account/sign-in-method` (`firstCredentialPath` to change it) calls `pages.requireUser({ allowFirstCredentialEnrollment: true })` and renders `<ChooseFirstCredential issuer="…" passkeysEnabled={…} onDone={…} />`. `requireFirstCredential: false` in `createServerAuth` turns the rule off.
+**The first credential is enforced on the server.** An account with neither a passkey nor a password (an invitee or a sign-up who closed the tab at "Choose how you'll sign in next time") gets 403 `first_credential_required` from `requireUser` and `getUser` returns `null` (register A1). Add the chooser page the guard sends them to: `/account/sign-in-method` (`firstCredentialPath` to change it) calls `pages.requireUser({ allowFirstCredentialEnrollment: true })` and renders `<ChooseFirstCredential issuer="…" passkeysEnabled={…} onDone={…} />`. The rule can't be switched off on a site: `requireFirstCredential: false` (like `requireTotpForPasswordUsers: false`) is accepted only in the auth matrix's server mode, and `createServerAuth` throws anywhere else (registers A1, A2).
 
 | Export | What it does |
 |---|---|
-| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" (or, with passkeys off, "Enter your password" with "for {email} · Change"); "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button. Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes`, `emailHint`, `securityNotices`, `signUpHref`, `requestAccessHref` (paths or http(s) URLs only; anything else throws), `passkey` (`{ relyingPartyId, timeoutMs }`: the pool's, so the decoy prompt matches the real one). Redirects through `safeRedirect`; `reauth` for step-up. |
-| `SignUp` | "Create your account" ([section 11](#11-account-creation-auth-kitaccounts)): the address (and the domain list), the privacy notice (`privacyNoticeUrl`, required), the sign-up route, the emailed code ("Verify"), "Your name", the required first credential, "You're set up" as a Member. |
+| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" (or, with passkeys off, "Enter your password" with "for {email} · Change"); "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button (register A6, decided: these words aren't options). Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes` (default 10), `emailHint`, `notices` (account-change notices, on by default; `false` turns them off), `signUpHref`, `requestAccessHref` (paths or http(s) URLs only; anything else throws), `passkey` (`{ relyingPartyId, timeoutMs }`: the pool's, so the decoy prompt matches the real one). Redirects through `safeRedirect`; `reauth` for step-up. |
+| `SignUp` | "Create your account" ([section 11](#11-account-creation-auth-kitaccounts)): the address (and the domain list), the privacy notice (`privacyNoticeUrl`, required), the sign-up route, the emailed code ("Continue", register A6), "Your name", the required first credential, "You're set up" as a Member. |
 | `RequestAccess` | "Request access to {Site}": name, email, an optional reason, then "Request sent", the same for every address. |
 | `SignedOutEverywhere` | "You're signed out everywhere", where My account's sign-out lands. |
 | `ChooseFirstCredential` | "Choose how you'll sign in next time" (required, no "Not now"): "Create a passkey", or "Create a password" (15+ characters, Show) followed by "Add an authenticator app", which isn't optional. |
 | `AuthenticatorSetup` | "Add an authenticator app": an optional QR code (`renderQrCode`, so the package stays dependency-free), the setup key with Copy, a same-device setup link, then one code. |
 | `TOTPEnrollmentGate` | Shows only setup to a password user without an authenticator. Its children are always server-rendered (hidden until the check passes), so it never changes the page's status. Use it inside a page, after the page's guard, with `serverChecked`. Without `serverChecked`, if the check can't run, the app stays hidden and the reason is shown with a retry. |
-| `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. On sign-up sites (`selfService`, the server actions from `createSelfServiceActions`): change email (a code to the new address) and delete my account. |
+| `MyAccount` | Email; passkeys (list, add, remove; never the last way in); authenticator (set up, replace); password (change, or set one, then the authenticator); sign out everywhere. A new passkey or password sends the account-change notice (`notices`, on by default). On sign-up sites (`selfService`, the server actions from `createSelfServiceActions`): change email (a code to the new address) and delete my account. |
 | Functions | `signInWithPasskey`, `signInWithPassword`, `requestEmailCode`, `confirmCode`, `enrollAuthenticator`, `registerPasskey`, `listPasskeys`, `deletePasskey`, `setFirstPassword`, `changePassword`, `signOutEverywhere`, `fetchAuthFactors`, `describeAuthError`, … for sites building their own screens. |
 
 - **The same screens for every address** until someone proves a factor ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)). Cognito's answer to "a passkey" or "a code" depends on the account (an unused invite has only emailed codes; an unknown address gets a random set), so the screens never show it: an account without a passkey still gets a passkey prompt that finds nothing (`decoyPasskeyPrompt`), an account without a password gets "don't match", and "Check your email" always follows a code request, naming the typed address ("If … has an account here"), with nothing sent when there's nothing to send. There's no method chooser. Cognito's responses still differ on the wire (the network panel, direct API calls); the WAF sign-in rule limits how fast anyone can ask. Sites building their own screens: `isFirstFactorUnavailable`, `decoyPasskeyPrompt`, `answerSimulatedCode`.
 - **The words** are the approved copy deck (Card Studio v4), all in `copy.ts` and exported (`SIGN_IN`, `FIRST_VISIT`, `TROUBLE`, `ERRORS`, `helpScreen`, …) for sites building their own screens. Oxford commas throughout; a test lints for them.
 - **Errors** are plain and never say whether an account exists (a wrong password, an unknown email, a disabled account or expired invite, and an account whose password must be reset read the same, on the passkey and emailed-code paths too; a reset request looks the same either way). Rate limits, including WAF's, say to wait. A closed passkey prompt gets a calm note, not red.
 - **Accessibility:** every field has a label; errors go in a summary that takes focus and links to the field, and again by the field (`aria-invalid`, `aria-describedby`); progress is announced (`role="status"`); focus moves to each new step's heading; Show on password fields; icons are hidden from assistive technology.
-- **The card** is themed (the family's colors and the computed 3:1 edge as `--ak-*` custom properties), carries `data-backdrop-card` for `<Backdrop>`, and has nothing above the heading and no colored line on top (E4). The passkey icon is a fingerprint in the family accent; password rows use a password-field glyph.
+- **The card** (register E5, decided) is 380px wide (`--ak-card-width`), in the Quiet style with the defined 3:1 edge, "Trouble signing in?" inside it, and no monogram, unless the site picks another style (`authTheme(family, { cardStyle })`: `'monogram'`, `'frosted'`, `'plain'`, or `'porcelain'`, as Card Studio draws them; Plain has no card and sits in a soft column the backdrop fades into, the one exception to E4's no-fade rule). It's themed (the family's colors, the edge, and the style as `--ak-*` custom properties; `data-auth-kit-style` on the root), carries `data-backdrop-card` for `<Backdrop>`, and has nothing above the heading (only the Monogram style's badge) and no colored line on top (E4). The email field carries an envelope icon (A9). The passkey icon is a fingerprint in the family accent; password rows use a password-field glyph.
+- **Account-change notices** (register A10, on by default): after a new passkey or a changed or reset password, the screens post to `/api/auth-kit/account-notice` (`notices.url`), where the site mounts `createAccountNoticeRoute` from `auth-kit/accounts`, and say "We've emailed you a note about this." only when the route sent it. Cognito has no trigger for these changes, so the browser asks; the route emails only the signed-in account's own address, checks a passkey notice against the account's passkeys, and is rate-limited. The email-changed notice comes from the email-change action itself.
 - **Styling:** each root has `data-auth-kit="sign-in"` (and so on), each element `data-auth-kit-slot="button"` (`input`, `card`, `summary`, …); pass `className` and `classNames={{ button: '…' }}`. `authKitStyles` is optional zero-specificity CSS, drawn from the design studio, to copy into a stylesheet.
 - **CSP:** `connect-src` needs `https://cognito-idp.<region>.amazonaws.com` (Amplify needs it too) and `https://api.pwnedpasswords.com` for the breached-password check (`checkBreachedPassword={false}` turns it off on Plus-plan pools).
 
@@ -452,7 +456,7 @@ npx auth-kit init-personas --domain reports.test
 npx auth-kit seed-personas --profile personal --account <account id>
 ```
 
-Then a dev-only route (`app/api/dev/sign-in/route.dev.ts` with `createDevKit`), the ribbon in the layout, `withDevKit` in `next.config.ts`, and `npx auth-kit check-prod-build` in CI. The [localhost guide](docs/localhost.md) has every file.
+Then a dev-only route (`app/api/dev/sign-in/route.dev.ts` with `createDevKit`), the ribbon in the layout, `withDevKit` in `next.config.ts`, and `npx auth-kit check-prod-build` in CI. The [localhost guide](docs/localhost.md) has every file. **No role overrides in the browser** (register B1): a role is only ever a real Cognito group on a seeded persona; to see another role, sign in as its persona.
 
 ### 8. The admin area: `auth-kit/admin`
 
@@ -467,7 +471,11 @@ new InviteExpirySweep(admin, 'InviteExpiry', {
   // The last owner's unused invite is never disabled; the owner (and fallbackEmail) is warned instead.
   ownerWarnings: {
     siteName: 'Example Reports',
-    from: 'Example Reports <noreply@example.org>', // on a verified SES identity (default: its domain)
+    family: 'osbm', // the sender's suffix and the email's footer (register E4a)
+    helpEmail: 'apps-help@example.org', // the footer's "Help:" line
+    // The family's sender name and the site's reply-able sign-in@ mailbox, never noreply@ (register A10);
+    // on a verified SES identity (default: its domain). siteSender() from auth-kit/themes builds it.
+    from: '"Example Reports (NC OSBM)" <sign-in@reports.example.org>',
     signInUrl: 'https://reports.example.org/sign-in',
     fallbackEmail: 'ops@example.org',
   },
@@ -485,11 +493,15 @@ export const auditLog = createDynamoAuditLog({ tableName: outputs.custom.auditLo
 export const people = createPeopleActions({
   auth,
   auditLog,
-  mailer: createSesInviteMailer({ from: 'Example Reports <noreply@example.org>' }),
+  // Every email it sends (invites, alerts) has the site's footer; the sender is checked (register A10, E4a).
+  mailer: createSesInviteMailer({
+    from: '"Example Reports (NC OSBM)" <sign-in@reports.example.org>',
+    site: { siteName: 'Example Reports', theme: 'osbm', help: signInHelp }, // or the help address itself
+  }),
   siteName: 'Example Reports',
   signInUrl: 'https://reports.example.org/sign-in',
   inviteDomains: ['example.org'],
-  onChange: (event) => alertOwners(event), // grants and removals alert a named person
+  onChange: (event) => notifySiteOwner(event), // your own hook, after every change (the owner alerts above are built in)
 });
 ```
 
@@ -559,9 +571,8 @@ The card is the same on every site; a site's identity lives behind it ([ADR 0021
 import { Backdrop } from 'auth-kit/backdrops/react';
 
 <Backdrop style="contours" seed="k3f9x2ab" styleVersion={1} family="osbm" className="auth-scene">
-  <section className="auth-card" data-backdrop-card>
-    <SignIn siteName="Example Reports" emailHint="name@example.org" passkeysEnabled={false} />
-  </section>
+  {/* SignIn draws its own card (data-backdrop-card, the footer, "Trouble signing in?"; ADR 0024): no wrapper. */}
+  <SignIn siteName="Example Reports" theme="osbm" help={{ address: 'apps-help@example.org', owner: 'Jordan Lee' }} passkeysEnabled={false} />
 </Backdrop>
 ```
 
@@ -579,7 +590,7 @@ import { Backdrop } from 'auth-kit/backdrops/react';
 
 - **Framework-free core.** `renderBackdrop(canvasOrSvg, { style, seed, styleVersion, family | palette, interactive, reducedMotion, card })` returns a controller (`pause`, `resume`, `update`, `stats`, `destroy`). An SVG target gets a still frame as an image. `drawBackdropStill(ctx, …)` draws one frame anywhere (previews, server-side images, tests).
 - **Enforced, for every style:** light palettes and slow motion; reduced motion draws a single still frame; the loop stops while the tab is hidden or the canvas is off-screen; at most 30 frames per second and 2 backing pixels per CSS pixel (soft styles less); no allocation on the per-frame path (tested); the canvas is `aria-hidden` and `pointer-events: none`, with passive window-level listeners, so clicks always reach the card; taps on the card or a control never reach a style.
-- **The backdrop stays fully present; the card carries its own contrast.** Nothing fades or veils the art around the card. Give the card an opaque surface, a 1px border in its family's `BACKDROP_FAMILIES[family].card.border`, and a soft shadow. `cardContrast(family)` checks the card's text, link, button, and focus colors against WCAG 2.2 AA, and that its edge reaches 3:1 against every color the family's backdrops paint with. Keep all text inside the card; mark it `data-backdrop-card` (styles keep focal points visible around it, and taps on it never reach a style).
+- **The backdrop stays fully present; the card carries its own contrast.** Nothing fades or veils the art around the card. `SignIn` draws it: a solid surface, the defined edge (`cardEdgeColor(authTheme(family))`, `--ak-edge`), and a soft shadow (only the Plain style has no card, register E5). `cardContrast(family)` checks the card's text, link, button, and focus colors against WCAG 2.2 AA, and that its edge reaches 3:1 against every color the family's backdrops paint with. Keep all text inside the card; mark it `data-backdrop-card` (styles keep focal points visible around it, and taps on it never reach a style).
 - **Choosing.** `backdropVariations({ style?, family, count: 9, salt })` gives nine seeds (the same for a salt; "Shuffle" is `randomSalt()`; no style mixes all of them). `defaultBackdrop(siteName)` proposes one from the site's name. `<BackdropPicker>` (`auth-kit/backdrops/picker`, dev only) is the page site-auth-kit-template opens with `npm run backdrop:pick`.
 - **Locking.** A site stores the literal `{ style, seed, styleVersion, locked: true }`, never a value derived at build time, so renaming the site never changes its backdrop. `backdropLockProblems(stored)` says what's missing; the template's production builds fail on any of it. Every released style version is frozen (its own file; `test/backdrops/frozen.json` pins what it draws), so a locked backdrop looks the same on every later auth-kit; a site moves to a newer version only by choosing it.
 - **Adding a style:** a folder `src/backdrops/styles/<id>/` with `index.ts` (`defineStyle`: ID, label, interactivity, versions) and `v1.ts` (`defineVersion`: palette mapping and renderer, drawing only through `kernel/v1`), one line in `styles/registry.ts`, a budget line in `test/backdrops/styles.test.ts`, then `AUTH_KIT_FREEZE_NEW=1 npx vitest run test/backdrops/frozen.test.ts`. Retire a style with `retired: true`; never delete one.
@@ -736,16 +747,17 @@ import { AccessRequestDigest, AccessRequestTable, RateLimitTable, SiteSettingsTa
 const rateLimits = new RateLimitTable(admin, 'RateLimits');           // sign-up and request limits, email changes
 const requests = new AccessRequestTable(admin, 'AccessRequests');    // where the site takes requests
 const settings = new SiteSettingsTable(admin, 'SiteSettings');       // the Super admin's help address (section 12)
-new UnverifiedAccountSweep(admin, 'UnverifiedSweep', { userPool: backend.auth.resources.userPool, auditLog }); // sign-up sites
+// Sign-up sites (domains, open): required, synthesis fails without it (register D3).
+new UnverifiedAccountSweep(admin, 'UnverifiedSweep', { userPool: backend.auth.resources.userPool, auditLog });
 new AccessRequestDigest(admin, 'RequestDigest', {
   userPool: backend.auth.resources.userPool, requests, settings,
-  siteName: 'Example Reports', family: 'osbm', from: 'Example Reports (NC OSBM) <sign-in@example.org>',
+  siteName: 'Example Reports', family: 'osbm', from: '"Example Reports (NC OSBM)" <sign-in@reports.example.org>',
   signInUrl: 'https://reports.example.org/sign-in', peopleUrl: 'https://reports.example.org/admin/people',
   helpEmail: 'apps-help@replace-me.invalid',
 });
 ```
 
-The server role needs `accountCreationAppPolicy({ userPoolArn, rateLimitTableArn, accessRequestTableArn, selfSignUp, sesResourceArns })` and `siteSettingsAppPolicy(tableArn)` (plain JSON for Amplify Hosting's compute role; in CDK, each table's `grantApp`).
+The server role needs `accountCreationAppPolicy({ userPoolArn, rateLimitTableArn, accessRequestTableArn, accountCreation, sesResourceArns })` (`accountCreation` is the preset's setting; it also grants the account-change notice route's read, on by default) and `siteSettingsAppPolicy(tableArn)` (plain JSON for Amplify Hosting's compute role; in CDK, each table's `grantApp`).
 
 **The routes:**
 
@@ -764,15 +776,19 @@ export const accountRoutes = createAccountCreationRoutes({
   background: (task) => after(() => task), // from next/server: the existing-account email goes out after the answer
 });
 export const selfService = createSelfServiceActions({ auth, auditLog, accountCreation, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', help: signInHelp, mailer, rateLimits });
+// Account-change notices (register A10, on by default; every site, not only sign-up sites).
+export const noticeRoute = createAccountNoticeRoute({ auth, siteName: 'Example Reports', theme: 'osbm', signInUrl: 'https://reports.example.org/sign-in', help: signInHelp, mailer, rateLimits });
 
 // app/api/auth/sign-up/route.ts and app/api/auth/request-access/route.ts (public routes)
 export const POST = (request: Request) => accountRoutes.signUp(request);
 export const POST = (request: Request) => accountRoutes.requestAccess(request);
+// app/api/auth-kit/account-notice/route.ts (signed-in people only; the route checks)
+export const POST = (request: Request) => noticeRoute.POST(request);
 ```
 
 - **Sign-up** checks the address (and the list), rate-limits per mailbox (`victim+1@` and `victim+2@` count as one; Gmail without dots), per IP, and site-wide (past 300 attempts an hour every address gets the same "try again later"), and either creates the account with invite-core (no password, no group: Member) or emails "You already have an account". Every answer is identical and takes at least 800 ms, refusals and failures included. `SignUp` then runs the invite's emailed-code sign-in, "Your name", and the required "Choose how you'll sign in next time". A sign-up whose address is never verified is deleted after 24 hours (`UnverifiedAccountSweep`: only marked accounts, never one with a role, never the owner, never an admin's invite).
 - **Request access** stores the request in DynamoDB (never as a Cognito user; one conditional write of a per-address marker and one of the request, whatever the queue holds; at most 100 new requests a day site-wide), or emails an address that already has an account; the same answer either way. Admins with `people.manage` approve (the ordinary invite, with the name the approver confirms) or decline (silent unless `notifyOnDecline`) on the People page's "Pending requests" tab (`createPeopleActions({ accessRequests: requests, help: signInHelp, theme })`, `people.listAccessRequests()`, `people.declineRequests()` for up to 100 at once, always silent, `PeoplePageTabs`, `PendingRequestsTable`, `PendingRequestsBadge`), and get a daily digest instead of one email per request (counts in the subject, never a typed name; at most 25 listed). Requests expire after 30 days, and each is deleted, with its typed name and reason, 30 days after it's settled; the table keeps no point-in-time backups by default.
-- **The silent WAF check**: `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`. **Required in `open` mode:** the preset fails synthesis without `siteWebAclArn` (the ACL's ARN), `createSiteWebAcl({ accountCreation })` fails synthesis if its challenge rule doesn't challenge or its per-IP rule doesn't block, and the sign-up route refuses requests without AWS WAF's `aws-waf-token` cookie (`requireWafToken: false` for local development only). Optional in `domains` mode. The app can't see the ACL's association or validate the token (a cookie can be forged; only WAF at the edge checks it), so **after each deploy, run the smoke test** from outside, with no token:
+- **The silent WAF check**: `createSiteWebAcl` (or `accountCreationWafRules` in your own CLOUDFRONT web ACL) puts a Challenge and a per-IP limit on POSTs to the two routes; deploy it in `us-east-1` and associate it with the Amplify app. Load AWS WAF's JavaScript integration on the sign-up and request pages: the screens then send through `window.AwsWafIntegration.fetch`. **Required in `domains` and `open` modes** (register D3: every sign-up gets the silent check): the preset fails synthesis without `siteWebAclArn` (the ACL's ARN), `createSiteWebAcl({ accountCreation })` fails synthesis if its challenge rule doesn't challenge or its per-IP rule doesn't block, and the sign-up route refuses requests without AWS WAF's `aws-waf-token` cookie (`requireWafToken: false` for local development only). The app can't see the ACL's association or validate the token (a cookie can be forged; only WAF at the edge checks it), so **after each deploy, run the smoke test** from outside, with no token:
 
   ```sh
   curl -si -X POST https://reports.example.org/api/auth/sign-up -H 'origin: https://reports.example.org' -H 'content-type: application/json' -d '{"email":"smoke-test@example.org"}' | head -12
@@ -780,15 +796,18 @@ export const POST = (request: Request) => accountRoutes.requestAccess(request);
 
   Expect AWS WAF's challenge, `HTTP/2 202` with `x-amzn-waf-action: challenge`. The route's own JSON (a 503 saying it couldn't create the account) means the ACL isn't associated with the app or the challenge isn't in effect.
 - **Members on sign-up sites** delete their own account (a recent sign-in, the address typed; never the owner) and change their own email (a recent sign-in; limited per account and per new address; verified before it takes effect; the old address told) through `MyAccount`'s `selfService` prop. On every site, the custom message trigger refuses an email change started through Cognito's public API, so this route (or an admin) is the only way ([ADR 0023](docs/decisions/0023-account-creation.md)).
-- **The matrix:** every site whose server enforces the first credential (the default) needs the `codeOnlyMember` persona (`EMAILED_CODE_ONLY_MEMBER`: only emailed codes, as invitees start), expected to get 403 wherever a signed-in person is needed and a redirect from page guards, unless its row says otherwise (the chooser page); `requireFirstCredential: false` only if the server turns the rule off. `routesFromNextBuild` fails when the build has no page at `firstCredentialPath` (default `/account/sign-in-method`). Sign-up sites also pass `signUpSite: true` and `newMember` (`FRESH_SIGN_UP_MEMBER`: signed up and chose a passkey), held to a member's expectations on every route.
+- **The matrix:** every site whose server enforces the first credential (the default) needs the `codeOnlyMember` persona (`EMAILED_CODE_ONLY_MEMBER`: only emailed codes, as invitees start), expected to get 403 wherever a signed-in person is needed and a redirect from page guards, unless its row says otherwise (the chooser page); `requireFirstCredential: false` only in the matrix server mode, the one place the server rule can be off. `routesFromNextBuild` fails when the build has no page at `firstCredentialPath` (default `/account/sign-in-method`). Sign-up sites also pass `signUpSite: true` and `newMember` (`FRESH_SIGN_UP_MEMBER`: signed up and chose a passkey), held to a member's expectations on every route.
 
 ### 12. Families as themes and the help address: `auth-kit/themes`
 
-One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) carries the accent colors, the sender's display name (`senderDisplayName`: "{Site} (NC OSBM)"), the footer identity line ("This site is managed by the NC Office of State Budget and Management", "This site is managed by UNC-Chapel Hill", none on personal sites), the email field's example, the help route, and an OSBM authorized-use line (off by default). `authTheme(family, overrides)` takes a site's own email hint (A9), `helpAddress`, `helpNamed`, `showAuthorizedUse`, and `cardEdge`. The screens and the emails take the theme; emails match the card: no letterhead, and the footer reads "{identity line}. Help: {address}."
+One theme per family (OSBM, UNC, personal; register E1, E2, E4; [ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)) carries the accent colors, the sender's display name (`senderDisplayName`: "{Site} (NC OSBM)"), the footer identity line ("This site is managed by the NC Office of State Budget and Management", "This site is managed by UNC-Chapel Hill", none on personal sites), the email field's example, the help route, and the card's style. `authTheme(family, overrides)` takes a site's own email hint (A9), `helpAddress`, `helpNamed`, `cardEdge`, and `cardStyle`. The screens and the emails take the theme; emails match the card: no letterhead, and the footer reads "{identity line}. Help: {address}." Register A10 dropped the OSBM "authorized use" line (`showAuthorizedUse` now throws) and MyNCID-like colours; a "Sign in with NCID" slot is in the backlog, only if state single sign-on happens, so nothing reserves it.
+
+- **The sender** (register A10, E4a): every auth-kit email comes from the site's reply-able `sign-in@` mailbox, never `noreply@`, with the family's display name: the preset (`email.fromAddress`, `email.fromName`, and the new required `email.family`), `createSesInviteMailer`, the invite-expiry owner warnings, and the digest all refuse anything else (`senderProblems`; `siteSender(siteName, family, address)` builds one). The personal family sends from `sign-in@yokum.app` (`theme.senderAddress`; register F11), and its sites live at `<name>.yokum.app`.
+- **The card style** (register E5): `'quiet'` (default), `'monogram'`, `'frosted'`, `'plain'`, or `'porcelain'`, matching Card Studio's directions (`cardStyleVariables`).
 
 - **The card edge:** `cardEdge: 'defined'` (default) computes the lightest line in the family ink that reaches 3:1 against every backdrop color (`definedCardEdge`, `checkCardEdge`); `'soft'` is a hairline. `themeCssVariables(theme)` gives the card's `--ak-*` custom properties.
-- **The help route:** the site helps only with the person's account on this site; for their email or app, the help screens point to the theme's IT desk, and for a device that isn't working, to its device desk (`devDesk`: the agency's or UNC's IT help desk; on personal sites, the device maker's support). OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal sites say "the {Site} team".
-- **The help address** is one role-based mailbox per family by default, with a per-site override in site config, and it's required: nothing ships by default, and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, and the digest refuse a missing, placeholder (`apps-help@replace-me.invalid`), or personal address (`helpAddressProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner and every Super admin are alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The override stays on the configured address's domain or the family's own (`theme.help.domains`: nc.gov, unc.edu, subdomains included; `createSignInHelp({ theme, allowedDomains })` for a help desk elsewhere), and must be a plain mailbox (letters, digits, dots, plus, hyphen, underscore). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
+- **The help route:** the site helps only with the person's account on this site; for their email or app, the help screens point to the theme's IT desk, and for a device that isn't working, to its device desk (`devDesk`: the agency's or UNC's IT help desk; on personal sites, the device maker's support). OSBM and UNC sites name the owner ("Jordan Lee looks after Example Reports"); personal and public (open sign-up) sites say "the {Site} team", and an open sign-up site leaves out the Teams line, automatically (register E4c).
+- **The help address** is one role-based mailbox by default (the family's, or the site's own in site config, e.g. Project Portal → `portal@osbm.nc.gov`), and it's required: OSBM and UNC ship none, the personal family's default is `help@yokum.app` (register F11), and the preset (`email.replyTo`), `createSignInHelp`, the custom message trigger, the owner warnings, and the digest refuse a missing or placeholder (`apps-help@replace-me.invalid`) address. A person's own address (`first.last@…`) is refused unless the site acknowledges it on purpose, never by default: `{ address, personal: true }` (register E4c; `helpSettingProblems`). A Super admin can override it without a deploy under Settings → "Sign-in help" (`createSignInHelpActions`, needs `settings.security` and a recent sign-in; audited; the owner and every Super admin are alerted, and the change is undone if the alert can't be sent; `SignInHelpSettings` in `auth-kit/admin/ui`). The override follows the same rule (a person's own address needs its "on purpose" box, stored as `personal: true`) and stays on the configured address's domain or the family's own (`theme.help.domains`: nc.gov, unc.edu, yokum.app, subdomains included; `createSignInHelp({ theme, allowedDomains })` for a help desk elsewhere), and must be a plain mailbox (letters, digits, dots, plus, hyphen, underscore). The sign-in page and the app's emails read the address in effect on the server (`signInHelp.effective()`), falling back to the configured one. Cognito's own Reply-To keeps the configured address until the next deploy.
 
 ## Status codes
 
@@ -895,7 +914,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 | Separate keys; grant below your own level; nobody changes their own role; keep an owner | `checkPeopleAction`, `grantableRoles`, `roleOptions`, run live by every action: one owner, never granted, moved only by `transferOwnership`; only the owner grants Super admin; the invite-expiry sweep keeps the owner too | Pkg |
 | People page buttons and copy | `createPeopleActions`, `peopleActionDetails`, `auth-kit/admin/ui` | Pkg |
 | Append-only audit log, written with the change | `createDynamoAuditLog`, `runAudited` (intent → calls → result), `AuditLogTable` ([ADR 0010](docs/decisions/0010-audit-log-intent-then-result.md)) | Pkg |
-| Grants and removals alert a named person | `onChange` hook on every completed change | Pkg (alert channel: App) |
+| Grants and removals reach the owner | Super admin grants, transfers, and help-address changes email the owner (required; undone if the email fails); the `onChange` hook runs after every completed change | Pkg (other channels: App) |
 | Rich text, uploads, drafts | Not in this package yet | App / later |
 | **Foundation** | SES domain identity required by the preset; SPF/DKIM/DMARC, private database, compute role, master keys, break-glass, secrets, branch passwords | Ops / App |
 | **Local development** | | |
@@ -911,7 +930,7 @@ Keyed to §2 ("the rules") of David's login standard, `03-gold-standard-and-plan
 
 ## WAF: one web ACL for all your sites
 
-AWS WAF bills about $5 a month per web ACL and $1 per rule, so the preset's default (a web ACL per pool, two rules) costs about $7 a month per site. With several sites, share one web ACL per AWS account and Region instead ([ADR 0013](docs/decisions/0013-shared-web-acl.md)):
+Register F7: **one shared web ACL per AWS account and Region**, and a deployed pool must reuse it: without `waf: { webAclArn }`, a branch deployment fails synthesis unless it says its own ACL is deliberate (`waf: { ownWebAcl: true }`: a site alone in its account, or the first one before the shared ACL exists). Sandboxes need neither. AWS WAF bills about $5 a month per web ACL and $1 per rule, so a web ACL per pool would cost about $7 a month per site ([ADR 0013](docs/decisions/0013-shared-web-acl.md)):
 
 ```ts
 // A small CDK app of its own, deployed once per account and Region.

@@ -122,6 +122,10 @@ The seed script refuses unless the pool is a sandbox: tagged `Environment=sandbo
 
 Pick a persona from **Sign in as…** in the ribbon. The route signs it in with `AdminInitiateAuth`, answers the authenticator challenge, and sets the same cookies Amplify's own sign-in sets, so every server check runs exactly as in production. An agent can do the same: `POST /api/dev/sign-in` with `{"persona":"admin-content"}` from the page's origin, or click the menu.
 
+## No role overrides in the browser
+
+A role is only ever a real Cognito group on a seeded persona (register B1). Nothing in the browser (a cookie, a query parameter, a header, local storage) changes what the server thinks someone can do, here or on a deployed site. To see the site as another role, sign in as that role's persona with "Sign in as…"; View as on the live site is read-only, and the server still blocks every write.
+
 ## What the route checks
 
 Every refusal is a plain 404. In order:

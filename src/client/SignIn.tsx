@@ -92,7 +92,7 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   accountCreation?: AccountCreationSettings;
   /** The invite-only line: a "Need access?" link to who to ask (default), or the plain sentence. */
   inviteLine?: 'sentence' | 'link';
-  /** "Trouble signing in?" inside the card (default) or just below it (register E5, Proposed). */
+  /** "Trouble signing in?" inside the card (the default, register E5) or just below it. */
   troubleLink?: 'inside' | 'below';
   /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
