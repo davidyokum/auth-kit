@@ -28,6 +28,8 @@ export interface SceneOptions {
   pixelRatio?: number;
   palette?: Partial<BackdropPalette>;
   family?: 'osbm' | 'unc' | 'personal';
+  /** The site's name, for styles that letter it. Default `Example Site`; `null` leaves it out. */
+  siteName?: string | null;
 }
 
 export interface Scene {
@@ -72,6 +74,7 @@ export function createScene(options: SceneOptions): Scene {
       createLayer,
       ...(options.style === 'painted' ? { image: { src: 'https://example.org/painting.jpg', placeholder: 'data:placeholder', focus: { x: 0.3, y: 0.6 } } } : {}),
       loadImage: fakeLoadImage as never,
+      ...(options.siteName !== null && { siteName: options.siteName ?? 'Example Site' }),
     }),
   );
   return {
