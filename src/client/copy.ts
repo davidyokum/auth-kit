@@ -83,6 +83,14 @@ export const SIGN_IN = {
 
   passwordHeading: 'Enter your password',
   passwordFor: 'for',
+
+  /** "How do you want to sign in?" (register A5a): after Continue, unless this browser remembers a passkey for the address. */
+  chooseHeading: 'How do you want to sign in?',
+  choosePasskey: 'Use a passkey',
+  chooseRecommended: '(recommended)',
+  choosePasskeySub: 'Your face, fingerprint, or device PIN.',
+  choosePassword: 'Use a password',
+  chooseCode: 'Email me a code',
   passwordLabel: 'Password',
   show: 'Show',
   hide: 'Hide',

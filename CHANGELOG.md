@@ -2,6 +2,16 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.9-alpha.1] - 2026-10-19
+
+The register's A5a, decided the same day after v0.1.9-alpha shipped. Pre-release. No breaking changes.
+
+### Changed
+
+- **Continue opens the passkey prompt only where this browser remembers one** (register A5a): a first-time user no longer meets the browser's "no passkey found". Otherwise `SignIn` shows **"How do you want to sign in?"** ("for {email} · Change"): **Use a passkey** (recommended; "Your face, fingerprint, or device PIN."), **Use a password**, and **Email me a code**, with "Trouble signing in?" and the footer. The same screens and the same server traffic for every address until the person chooses ([ADR 0018](docs/decisions/0018-same-screens-for-every-address.md)).
+- **The passkey hint:** salted SHA-256 hashes of normalized addresses in this site's `localStorage` (a random per-browser salt beside them), never sent to the server; set after a passkey sign-in or creating a passkey, removed when My account removes the account's last passkey or after choosing another way in twice in a row from the prompt it opened; blocked storage means the choice screen. ADR 0024 amended (including what it means on a shared computer).
+- The invite email says to choose **Email me a code**.
+
 ## [0.1.9-alpha] - 2026-10-19
 
 auth-kit brought fully in line with the passwords-flow decisions register as answered on 2026-10-19 (A6, A7, A9, A10, B1, C1, C5, D1, D3, E3, E4a, E4c, E4d, E5, E6, E7, F7, F11): the sign-in, email, and account rules ([#22](https://github.com/davidyokum/auth-kit/pull/22)) and the backdrops (six new styles, subject rotation, a still frame on slow devices, each style loaded on first use). Pre-release. Breaking: see Migration.

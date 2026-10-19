@@ -1,3 +1,4 @@
+import { hasPasskeyHint, rememberPasskey } from '../../src/client/passkey-hint.js';
 // @vitest-environment jsdom
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -66,6 +67,13 @@ const CHANGE = /^Change ?email address$/;
 const SHOW = /^Show ?password$/;
 const HIDE = /^Hide ?password$/;
 
+/** Continue on the email step; with no passkey hint for the address (register A5a), "Use a passkey" on the choice screen. */
+async function pressContinue(user: { click: (el: Element) => Promise<void> }) {
+  await user.click(screen.getByRole('button', { name: 'Continue' }));
+  const choose = await screen.findByRole('heading', { name: 'How do you want to sign in?' }, { timeout: 300 }).catch(() => null);
+  if (choose) await user.click(screen.getByRole('button', { name: /^Use a passkey/ }));
+}
+
 async function enterEmail(user: User, email = 'ada@example.org') {
   await user.type(emailField(), email);
 }
@@ -116,10 +124,13 @@ const noNetwork = vi.fn((input: unknown) => Promise.reject(new Error(`test reach
 const guardedFetch = (input: unknown) =>
   String(input) === '/api/auth-kit/account-notice' ? Promise.resolve(new Response('', { status: 404 })) : noNetwork(input);
 
-beforeEach(() => {
+beforeEach(async () => {
   resetAmplifyMocks();
   changePasswordWithoutPrevious.mockReset().mockResolvedValue(undefined);
   window.localStorage.clear();
+  // This browser has signed in with a passkey as ada@ before, so Continue opens the prompt (register
+  // A5a); the choice screen's own tests clear it.
+  await rememberPasskey('ada@example.org');
   vi.stubGlobal('fetch', guardedFetch);
 });
 afterEach(() => {
@@ -211,7 +222,7 @@ describe('the email step', () => {
 
   it('asks for an email before calling Cognito: a summary that takes focus and links to the field, and the error by the field', async () => {
     const { user } = setup();
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     const alert = summary();
     expect(alert.textContent).toBe('Enter your email address');
     expect(document.activeElement).toBe(alert);
@@ -528,7 +539,7 @@ describe('passkey sign-in', () => {
     auth.signIn.mockResolvedValue(SIGNED_IN);
     const { user, navigate } = setup();
     await enterEmail(user);
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes'));
     expect(auth.signIn).toHaveBeenCalledWith({ username: 'ada@example.org', options: { authFlowType: 'USER_AUTH', preferredChallenge: 'WEB_AUTHN' } });
   });
@@ -696,7 +707,7 @@ describe('password sign-in', () => {
     const { user } = setup({ passkeysEnabled: false });
     await user.type(emailField(), 'ada@example.org{Enter}');
     await heading('Enter your password');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     expect(summary().textContent).toBe('Enter your password');
     expect(auth.signIn).not.toHaveBeenCalled();
   });
@@ -734,7 +745,7 @@ describe('password sign-in', () => {
     expect(screen.getByText('If ada@example.org has an account here, we’ve emailed it a code to reset your password. It works for 1 hour.')).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Send a new code' }).disabled).toBe(true);
     expect(submitButtons()).toEqual(['Continue']);
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     expect(summary().textContent).toBe('Enter the code from the email');
     await user.type(screen.getByLabelText('Reset code'), '1234 5678{Enter}');
 
@@ -907,7 +918,7 @@ describe('emailed code (the backstop) and joining', () => {
     await user.clear(field);
     await user.click(field);
     await user.paste('pasted-from-a-password-manager');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('pasted-from-a-password-manager'));
 
     await heading('Add an authenticator app');
@@ -1059,7 +1070,7 @@ describe('after sign-in', () => {
     auth.signIn.mockResolvedValue(SIGNED_IN);
     const { user, navigate } = setup({ reauth: true }, [{ configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] }]);
     await waitFor(() => expect(emailField().value).toBe('ada@example.org'));
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     await waitFor(() => expect(navigate).toHaveBeenCalled());
     expect(screen.queryByRole('heading', { name: 'Create a passkey on this device?' })).toBeNull();
   });
@@ -1137,7 +1148,7 @@ describe('admin-created accounts (temporary password)', () => {
     expect(auth.setUpTOTP).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Start again' })).toBeTruthy();
     await user.type(screen.getByLabelText('6-digit code'), '123456');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     expect(auth.confirmSignIn).toHaveBeenLastCalledWith({ challengeResponse: '123456' });
     await waitFor(() => expect(navigate).toHaveBeenCalled());
   });
@@ -1180,7 +1191,7 @@ describe('unsupported steps and step-up', () => {
     expect(screen.getByRole('heading', { name: 'Confirm it’s you', level: 1 })).toBeTruthy();
     expect(screen.getByText('For your security, sign in again to continue.')).toBeTruthy();
     await waitFor(() => expect(emailField().value).toBe('ada@example.org'));
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await pressContinue(user);
     await waitFor(() => expect(navigate).toHaveBeenCalled());
     expect(auth.signOut).toHaveBeenCalledWith();
     expect(auth.signIn).toHaveBeenCalledTimes(2);
@@ -1212,5 +1223,126 @@ describe('styling hooks', () => {
     expect(root().getAttribute('data-auth-kit-view')).toBe('passkey');
     expect(screen.getByRole('button', { name: 'Try again' }).className).toBe('btn-2');
     expect(root().querySelector('[data-auth-kit-slot="wait"] [data-auth-kit-icon="fingerprint"]')).not.toBeNull();
+  });
+});
+
+describe('register A5a: Continue opens the passkey prompt only where this browser remembers one', () => {
+  const allAuthCalls = () => Object.values(auth).reduce((n, fn) => n + ((fn as { mock?: { calls: unknown[] } }).mock?.calls.length ?? 0), 0);
+
+  it('no hint: "How do you want to sign in?", with no WebAuthn call and nothing sent to the server', async () => {
+    window.localStorage.clear();
+    const browser = stubPasskeyBrowser();
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    expect(root().getAttribute('data-auth-kit-view')).toBe('choose');
+    expect(slotText('who')).toBe('for ada@example.org · Change email address');
+    expect(screen.getByRole('button', { name: /^Use a passkey \(recommended\)Your face, fingerprint, or device PIN\./ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a password' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
+    expect(browser.get).not.toHaveBeenCalled();
+    expect(allAuthCalls()).toBe(0);
+  });
+
+  it('the hint for that address opens the prompt; a hint for another address doesn’t', async () => {
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('Use your passkey');
+    cleanup();
+    resetAmplifyMocks();
+    const other = setup();
+    await enterEmail(other.user, 'grace@example.org');
+    await other.user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    expect(allAuthCalls()).toBe(0);
+  });
+
+  it('blocked storage reads as no hint: the choice screen', async () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage')!;
+    Object.defineProperty(window, 'localStorage', { configurable: true, get: () => { throw new Error('SecurityError'); } });
+    try {
+      const { user } = setup();
+      await enterEmail(user, 'ada@example.org');
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await heading('How do you want to sign in?');
+      expect(allAuthCalls()).toBe(0);
+    } finally {
+      Object.defineProperty(window, 'localStorage', original);
+    }
+  });
+
+  it('the same screens and the same (no) server traffic for an address with an account and one without, up to the choice', async () => {
+    window.localStorage.clear();
+    const seen: string[] = [];
+    for (const address of ['member@example.org', 'nobody@example.org']) {
+      resetAmplifyMocks();
+      const { user } = setup();
+      await enterEmail(user, address);
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await heading('How do you want to sign in?');
+      seen.push(`${root().getAttribute('data-auth-kit-view')}|${allAuthCalls()}|${(root().textContent ?? '').replace(address, '{email}')}`);
+      cleanup();
+    }
+    expect(seen[0]).toBe(seen[1]);
+    expect(seen[0]).toMatch(/^choose\|0\|/);
+  });
+
+  it('each option does what it says: the passkey prompt, the password screen, an emailed code', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockReturnValue(new Promise(() => undefined));
+    let t = setup();
+    await enterEmail(t.user, 'ada@example.org');
+    await t.user.click(screen.getByRole('button', { name: 'Continue' }));
+    await t.user.click(await screen.findByRole('button', { name: /^Use a passkey/ }));
+    await heading('Use your passkey');
+    expect(auth.signIn).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({ preferredChallenge: 'WEB_AUTHN' }) }));
+    cleanup();
+    t = setup();
+    await enterEmail(t.user, 'ada@example.org');
+    await t.user.click(screen.getByRole('button', { name: 'Continue' }));
+    await t.user.click(await screen.findByRole('button', { name: 'Use a password' }));
+    await heading('Enter your password');
+    cleanup();
+    resetAmplifyMocks();
+    auth.signIn.mockReturnValue(new Promise(() => undefined));
+    t = setup();
+    await enterEmail(t.user, 'ada@example.org');
+    await t.user.click(screen.getByRole('button', { name: 'Continue' }));
+    await t.user.click(await screen.findByRole('button', { name: 'Email me a code' }));
+    await waitFor(() => expect(auth.signIn).toHaveBeenCalledWith(expect.objectContaining({ options: expect.objectContaining({ preferredChallenge: 'EMAIL_OTP' }) })));
+  });
+
+  it('a passkey sign-in sets the hint for that address', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockResolvedValue(SIGNED_IN);
+    const { user, navigate } = setup();
+    await enterEmail(user, 'grace@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(await screen.findByRole('button', { name: /^Use a passkey/ }));
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(await hasPasskeyHint('grace@example.org')).toBe(true);
+    expect(await hasPasskeyHint('ada@example.org')).toBe(false);
+  });
+
+  it('keeps hashes, never addresses; and choosing another way in twice from the hint’s prompt forgets it', async () => {
+    const stored = window.localStorage.getItem('auth-kit:passkey-hint:v1') ?? '';
+    expect(stored).not.toContain('ada');
+    expect(JSON.parse(stored).hashes[0]).toMatch(/^[0-9a-f]{64}$/);
+    for (let i = 0; i < 2; i++) {
+      const { user } = setup();
+      await enterEmail(user, 'ada@example.org');
+      await user.click(screen.getByRole('button', { name: 'Continue' }));
+      await heading('Use your passkey');
+      await user.click(screen.getByRole('button', { name: 'Use a password instead' }));
+      await heading('Enter your password');
+      cleanup();
+    }
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
   });
 });

@@ -84,7 +84,7 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
     expect(email.text).toContain('Jordan Lee gave you access to Example Reports. Your role: Member.');
     expect(email.text).toContain('1. Go to https://reports.example.org/sign-in');
     expect(email.text).toContain('2. Enter this email address: sam@example.org');
-    expect(email.text).toContain('3. Choose Email me a code instead. We’ll email you an 8-digit code. Enter it, then set up a passkey so signing in next time takes a second.');
+    expect(email.text).toContain('3. Choose Email me a code. We’ll email you an 8-digit code. Enter it, then set up a passkey so signing in next time takes a second.');
     expect(email.text).toContain('This invitation expires on Friday, October 23 at 5:00 PM Eastern.');
     expect(email.text).toContain('Example Reports will never ask for a password or code by phone, email, or text.');
     expect(email.replyTo).toEqual(['jordan@example.org']);
