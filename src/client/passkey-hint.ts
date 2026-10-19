@@ -9,8 +9,10 @@
  *   the screens and the server traffic are the same for every address up to the person's choice
  *   (ADR 0018). It isn't a secret either: it only decides which screen shows first.
  * - Set after a passkey sign-in and after creating a passkey here. Removed when My account removes
- *   the account's last passkey, and when someone sent to the prompt by the hint chooses another way in
- *   twice in a row (that passkey isn't on this device any more).
+ *   the account's last passkey or deletes the account, and when someone sent to the prompt by the hint
+ *   chooses another way in twice in a row (that passkey isn't on this device any more). It outlasts
+ *   signing out, so on a shared computer it tells anyone who types an address (or a script on the site)
+ *   that someone signed in here with a passkey for it; nothing more (ADR 0024).
  * - Every read and write is guarded: blocked storage, no `crypto.subtle`, or anything odd reads as "no
  *   hint", which only means the choice screen.
  */
