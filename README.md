@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.10-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.11-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 

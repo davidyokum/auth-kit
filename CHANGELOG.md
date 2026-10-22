@@ -2,6 +2,25 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.11-alpha.1] - 2026-10-22
+
+Two things David saw on the first site: the backdrop jittered and ignored the mouse, and the recommended way to sign in looked like the least important one. Pre-release. No breaking changes; locked backdrops draw exactly what they drew.
+
+### Added
+
+- **Contours v2** ([ADR 0026](docs/decisions/0026-smooth-backdrops.md)): v1's topographic map at the display's rate (up to 60 frames a second, about 3 ms a frame at 1440 × 900), with a soft hill that rises under the pointer, its contours ringing around it, and settles when the pointer leaves. Reduced motion still draws one still frame with no pointer response. A site moves to it by setting `styleVersion: 2` in `site.config.ts` (the picker offers the upgrade).
+
+### Changed
+
+- **Backdrops may run at up to 60 frames a second** (`MAX_FPS`; it was 30), when a style version asks. Every existing version keeps its own rate. The slow-device still frame, the hidden-tab and off-screen pauses, the no-allocation rule, and the canvas-call budgets are unchanged.
+- **Contours' `interactivity` is `'pointer'`**, for v2. v1 ignores the pointer.
+- **The recommended way in is the prominent one** on "How do you want to sign in?" (register A5a). The passkey row was a pale grey fill without a border, so it read as disabled. It's now filled like the primary button (`--ak-button-bg`, with the button's text colour, so it passes contrast in every family and card style), with the fingerprint in a white disc with a green glow (`--ak-recommended-icon`, `--ak-recommended-ring`, `--ak-recommended-glow`; it pulses gently only when motion is welcome) and a "Recommended" pill. The first-visit passkey choice gets a border in the button's colour and the same green fingerprint.
+- **Copy:** `SIGN_IN.chooseRecommended` is "Recommended" (was "(recommended)"), drawn as the pill. The row's accessible name is "Use a passkey Recommended Your face, fingerprint, or device PIN."
+
+### Migration
+
+Bump the tarball URL, run `npm install`, and copy `authKitStyles` again (the new rules are at the end of the "way" rows). For the smooth backdrop, set `styleVersion: 2` on a Contours site.
+
 ## [0.1.10-alpha.1] - 2026-10-19
 
 Five defects the Sign-in Studio found by measuring v0.1.10-alpha's real card, fixed, and a screenshot suite that now measures every card's contrast and button words, so they can't come back. Pre-release. Breaking only for a site that passed `SignUp`'s `nameButton` (none do): see Migration.
