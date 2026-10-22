@@ -13,6 +13,7 @@ import {
   defaultBackdrop,
   defaultCardRect,
   drawBackdropStill,
+  latestStyleVersion,
   offeredStyles,
   randomSalt,
 } from '../../src/backdrops/index.js';
@@ -29,7 +30,7 @@ describe('backdropVariations', () => {
     for (const v of a) {
       expect(v.seed).toMatch(/^[0-9a-z]{8}$/);
       expect(v.family).toBe('osbm');
-      expect(v.styleVersion).toBe(1);
+      expect(v.styleVersion).toBe(latestStyleVersion(v.style));
     }
   });
 

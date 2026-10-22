@@ -15,7 +15,7 @@
  *   pointer or a tap and nothing else; the card never waits for it, and no style makes a sound.
  * - **Nothing runs when nobody can see it**: the loop stops while the tab is hidden or the canvas is
  *   entirely off-screen (IntersectionObserver), and stops for good on `destroy()`.
- * - **Capped**: at most 30 frames per second (each style sets its own, often less), backing pixels
+ * - **Capped**: at most 60 frames per second (each style version sets its own, often less; ADR 0026), backing pixels
  *   per CSS pixel at most 2 (soft styles 1-1.5), and at most a 4K canvas.
  * - **Never in the way**: pointer listeners are window-level and passive, so the canvas keeps
  *   `pointer-events: none` and a click on the card is the card's alone. Taps on controls or on the
@@ -28,7 +28,7 @@ import { buildSetup, type BackdropArtOptions, layerFactory, NO_POINTER, type Res
 import { type BackdropHost, browserHost, type PointerLike } from './host.js';
 import { type PickedSubject, pickSubject } from './subjects.js';
 import { defaultCardRect } from './card.js';
-import type { Ctx2D, StyleInstance } from './styles/define.js';
+import { type Ctx2D, MAX_FPS, type StyleInstance } from './styles/define.js';
 import type { BackdropRect } from './types.js';
 
 export interface BackdropOptions extends BackdropArtOptions {
@@ -38,7 +38,7 @@ export interface BackdropOptions extends BackdropArtOptions {
   reducedMotion?: boolean | 'auto';
   /** Where the card sits: an element (tracked as it moves and resizes), a rectangle in CSS pixels, or the default (centered, 380px wide, as `SignIn` draws it; register E5). Styles keep their focal points visible around it; taps on it never reach a style. */
   card?: BackdropRect | Element | null;
-  /** A lower frame-rate cap than the style's (never higher than 30). */
+  /** A lower frame-rate cap than the style's (never higher than 60). */
   maxFps?: number;
   /** Cap on backing pixels per CSS pixel. Default 2. */
   maxPixelRatio?: number;
@@ -336,7 +336,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
 
   function fpsCap(): number {
     const styleFps = art.version.fps > 0 ? art.version.fps : 30;
-    return Math.max(1, Math.min(30, styleFps, options.maxFps ?? 30));
+    return Math.max(1, Math.min(MAX_FPS, styleFps, options.maxFps ?? MAX_FPS));
   }
 
   function updatePointer(dt: number, now: number): void {

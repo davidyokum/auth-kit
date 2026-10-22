@@ -135,7 +135,7 @@ describe.each(LATEST)('$style', ({ style, version, module }) => {
 });
 
 describe('the registry', () => {
-  it('lists unique IDs, versions in order, labels, and frame rates within 30', () => {
+  it('lists unique IDs, versions in order, labels, and frame rates within 60 (ADR 0026)', () => {
     const ids = STYLE_MODULES.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toEqual(['magnetic-dots', 'contours', 'flow-lines', 'watercolor', 'aurora', 'stained-glass', 'constellation', 'ripples', 'yokum-magnetic', 'ai-survey-dots', 'pulse-dots', 'county-survey', 'river-basins', 'star-chart', 'painted']);
@@ -143,7 +143,7 @@ describe('the registry', () => {
       expect(m.label.length).toBeGreaterThan(2);
       m.versions.forEach((v, i) => {
         expect(v.version).toBe(i + 1);
-        expect(v.fps).toBeLessThanOrEqual(30);
+        expect(v.fps).toBeLessThanOrEqual(60);
         expect(v.maxPixelRatio).toBeLessThanOrEqual(2);
       });
     }

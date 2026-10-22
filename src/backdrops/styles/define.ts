@@ -123,10 +123,13 @@ export interface StyleVersionSpec<C> {
   create(setup: StyleSetup, colors: C): StyleInstance;
 }
 
+/** The highest frame rate a version may ask for (ADR 0026: 60, for motion that glides; ADR 0021 had 30). */
+export const MAX_FPS = 60;
+
 /** Declares one version: its palette mapping feeds its renderer. */
 export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
   if (!Number.isInteger(spec.version) || spec.version < 1) throw new Error(`auth-kit/backdrops: style version ${spec.version} must be a positive integer.`);
-  if (!(spec.fps >= 0 && spec.fps <= 30)) throw new Error(`auth-kit/backdrops: fps ${spec.fps} must be between 0 and 30.`);
+  if (!(spec.fps >= 0 && spec.fps <= MAX_FPS)) throw new Error(`auth-kit/backdrops: fps ${spec.fps} must be between 0 and ${MAX_FPS}.`);
   if (spec.settlesAt !== undefined && !(spec.settlesAt > 0 && spec.settlesAt <= spec.stillTime)) throw new Error(`auth-kit/backdrops: settlesAt ${spec.settlesAt} must be after 0 and no later than stillTime.`);
   return Object.freeze({
     version: spec.version,

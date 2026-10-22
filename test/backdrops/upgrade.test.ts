@@ -28,6 +28,6 @@ describe('upgrade offers', () => {
       upgrade: { style: 'aurora', seed: 'k3f9x2ab', styleVersion: 2 },
     });
     expect(upgradeOffer({ ...stored, styleVersion: 2 })).toBeNull();
-    expect(upgradeOffer({ style: 'contours', seed: 'x', styleVersion: 1, locked: true })).toBeNull();
+    expect(upgradeOffer({ style: 'flow-lines', seed: 'x', styleVersion: 1, locked: true })).toBeNull();
   });
 });

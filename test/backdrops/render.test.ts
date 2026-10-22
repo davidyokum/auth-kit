@@ -127,8 +127,12 @@ describe('renderBackdrop', () => {
     controller.destroy();
   });
 
-  it('caps the frame rate at the style’s own (contours: 6 per second) and at maxFps', () => {
-    const contours = setup({ style: 'contours' });
+  it('caps the frame rate at the style version’s own (contours v1: 6 per second; v2: 60) and at maxFps', () => {
+    const smooth = setup({ style: 'contours', styleVersion: 2 });
+    smooth.host.advance(1000);
+    expect(smooth.controller.stats().frames).toBeGreaterThanOrEqual(1 + 55);
+    expect(smooth.controller.stats().frames).toBeLessThanOrEqual(1 + 61);
+    const contours = setup({ style: 'contours', styleVersion: 1 });
     contours.host.advance(2000);
     expect(contours.controller.stats().frames).toBeLessThanOrEqual(1 + 13);
     expect(contours.controller.stats().frames).toBeGreaterThanOrEqual(1 + 10);
