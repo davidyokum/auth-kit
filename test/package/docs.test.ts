@@ -26,9 +26,10 @@ describe('documented examples match the code', () => {
     expect(readme).not.toMatch(/step-up=1/);
     expect(readme).toContain("signInUrl('/admin/people', { reauth: true })");
     expect(signInUrl('/admin/people', { reauth: true })).toBe('/sign-in?next=%2Fadmin%2Fpeople&reauth=1');
-    // The sign-in page example reads both.
-    expect(readme).toMatch(/const \{ next, reauth \} = await searchParams;/);
+    // The sign-in page example reads all three: next, step-up, and a first visit (an invite's link).
+    expect(readme).toMatch(/const \{ next, reauth, first \} = await searchParams;/);
     expect(readme).toMatch(/reauth=\{reauth === '1'\}/);
+    expect(readme).toMatch(/firstVisit=\{first === '1'\}/);
   });
 
   it('the error-boundary example uses isAuthUnavailableError, which auth-kit/client exports', () => {
