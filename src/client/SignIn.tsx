@@ -647,7 +647,7 @@ export function SignIn(props: SignInProps) {
           {summary}
           {heading(SIGN_IN.chooseHeading)}
           <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
-          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, tinted and "(recommended)". */}
+          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, filled like the primary button with a glowing fingerprint and a "Recommended" pill. */}
           <ul {...slot(classNames, 'ways')}>
             <li {...slot(classNames, 'listItem')}>
               <button type="button" disabled={busy} onClick={wayPasskey} {...tagged(wayPasskey)} data-auth-kit-choice="passkey" data-auth-kit-recommended="" {...slot(classNames, 'way')}>

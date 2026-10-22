@@ -1263,7 +1263,7 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(root().getAttribute('data-auth-kit-view')).toBe('choose');
     expect(slotText('who')).toBe('for ada@example.org · Change email address');
     // A space between the label and the description, so a screen reader doesn't run "(recommended)Your" together.
-    expect(screen.getByRole('button', { name: 'Use a passkey (recommended) Your face, fingerprint, or device PIN.' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a passkey Recommended Your face, fingerprint, or device PIN.' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Use a password' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
@@ -1271,7 +1271,7 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(allAuthCalls()).toBe(0);
   });
 
-  it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "(recommended)"), the description below, a chevron', async () => {
+  it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "Recommended"), the description below, a chevron', async () => {
     window.localStorage.clear();
     const { user } = setup({ classNames: { ways: 'my-ways', way: 'my-way', wayText: 'my-text', wayLabel: 'my-label', wayDescription: 'my-desc' } });
     await enterEmail(user, 'ada@example.org');
@@ -1294,8 +1294,8 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(rows.map((b) => b.hasAttribute('data-auth-kit-recommended'))).toEqual([true, false, false]);
     const text = passkey.querySelector('[data-auth-kit-slot="wayText"]')!;
     expect([...text.children].map((c) => c.getAttribute('data-auth-kit-slot'))).toEqual(['wayLabel', 'wayDescription']);
-    expect(text.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a passkey (recommended)');
-    expect(text.querySelector('[data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]')!.textContent).toBe('(recommended)');
+    expect(text.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a passkey Recommended');
+    expect(text.querySelector('[data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]')!.textContent).toBe('Recommended');
     expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.textContent).toBe('Your face, fingerprint, or device PIN.');
     expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.className).toBe('my-desc');
     expect(password.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a password');

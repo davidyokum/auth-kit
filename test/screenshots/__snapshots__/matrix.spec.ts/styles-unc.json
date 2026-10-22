@@ -14,7 +14,8 @@
   "card > alts": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 4px; text-decoration-line: none; opacity: 1; cursor: auto",
   "card > bottom": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(230, 234, 236); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 16px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 8px; text-decoration-line: none; opacity: 1; cursor: auto",
   "card > card": "display: grid; color: rgb(60, 67, 75); background-color: rgb(255, 255, 255); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(47, 74, 93); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(47, 74, 93); border-top-left-radius: 12px; box-shadow: rgba(9, 41, 64, 0.05) 0px 1px 2px 0px, rgba(9, 41, 64, 0.22) 0px 16px 36px -16px; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 36px; padding-right: 32px; padding-bottom: 24px; padding-left: 32px; min-height: 0px; gap: 16px; text-decoration-line: none; opacity: 1; cursor: auto; width: 380px",
-  "card > choice": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(107, 116, 128); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(107, 116, 128); border-top-left-radius: 10px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 16px; padding-right: 16px; padding-bottom: 16px; padding-left: 16px; min-height: auto; gap: 8px; text-decoration-line: none; opacity: 1; cursor: auto",
+  "card > choice": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 2px; border-top-style: solid; border-top-color: rgb(19, 41, 75); border-bottom-width: 2px; border-bottom-style: solid; border-bottom-color: rgb(19, 41, 75); border-top-left-radius: 10px; box-shadow: rgba(9, 41, 64, 0.45) 0px 12px 26px -16px; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 16px; padding-right: 16px; padding-bottom: 16px; padding-left: 16px; min-height: auto; gap: 8px; text-decoration-line: none; opacity: 1; cursor: auto",
+  "card > choice #2": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(107, 116, 128); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(107, 116, 128); border-top-left-radius: 10px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 16px; padding-right: 16px; padding-bottom: 16px; padding-left: 16px; min-height: auto; gap: 8px; text-decoration-line: none; opacity: 1; cursor: auto",
   "card > contact": "display: grid; color: rgb(60, 67, 75); background-color: rgba(9, 41, 64, 0.043); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 8px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 12px; padding-right: 14px; padding-bottom: 12px; padding-left: 14px; min-height: auto; gap: 4px; text-decoration-line: none; opacity: 1; cursor: auto",
   "card > content": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 16px; text-decoration-line: none; opacity: 1; cursor: auto",
   "card > field": "display: grid; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 6px; text-decoration-line: none; opacity: 1; cursor: auto",
@@ -59,10 +60,12 @@
   "text > secondaryButton": "display: inline-flex; color: rgb(9, 41, 64); background-color: rgb(255, 255, 255); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(107, 116, 128); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(107, 116, 128); border-top-left-radius: 8px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 10px; padding-right: 16px; padding-bottom: 10px; padding-left: 16px; min-height: 48px; gap: 8px; text-decoration-line: none; opacity: 1; cursor: pointer",
   "ways > listItem": "display: list-item; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: auto",
   "ways > way": "display: flex; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(216, 221, 224); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(216, 221, 224); border-top-left-radius: 10px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 12px; padding-right: 14px; padding-bottom: 12px; padding-left: 16px; min-height: 60px; gap: 14px; text-decoration-line: none; opacity: 1; cursor: pointer",
-  "ways > wayDescription": "display: block; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
-  "ways > wayLabel": "display: block; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(9, 41, 64); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(9, 41, 64); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
-  "ways > wayText": "display: flex; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(9, 41, 64); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(9, 41, 64); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px; text-decoration-line: none; opacity: 1; cursor: pointer",
-  "ways > way[recommended]": "display: flex; color: rgb(9, 41, 64); background-color: rgba(9, 41, 64, 0.043); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgba(0, 0, 0, 0); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 10px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 12px; padding-right: 14px; padding-bottom: 12px; padding-left: 16px; min-height: 60px; gap: 14px; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayDescription": "display: block; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayLabel": "display: flex; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px 8px; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayLabel #2": "display: block; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(9, 41, 64); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(9, 41, 64); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayText": "display: flex; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayText #2": "display: flex; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(9, 41, 64); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(9, 41, 64); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > way[recommended]": "display: flex; color: rgb(255, 255, 255); background-color: rgb(19, 41, 75); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgba(0, 0, 0, 0); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 10px; box-shadow: rgba(9, 41, 64, 0.14) 0px 1px 2px 0px, rgba(9, 41, 64, 0.55) 0px 12px 26px -14px; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 12px; padding-right: 14px; padding-bottom: 12px; padding-left: 16px; min-height: 60px; gap: 14px; text-decoration-line: none; opacity: 1; cursor: pointer",
   "who > linkButton": "display: inline-flex; color: rgb(0, 109, 155); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(0, 109, 155); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(0, 109, 155); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: 0px; gap: 6px; text-decoration-line: underline; opacity: 1; cursor: pointer"
  },
  "differences": {
@@ -89,7 +92,8 @@
    "card > alts": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > bottom": "color: rgb(63, 57, 51); border-top-color: rgb(235, 230, 222); border-bottom-color: rgb(63, 57, 51)",
    "card > card": "color: rgb(63, 57, 51); background-color: rgb(255, 254, 252); border-top-left-radius: 16px; box-shadow: rgba(70, 50, 30, 0.06) 0px 1px 2px 0px, rgba(70, 50, 30, 0.26) 0px 18px 40px -18px",
-   "card > choice": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
+   "card > choice": "color: rgb(63, 57, 51)",
+   "card > choice #2": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
    "card > contact": "color: rgb(63, 57, 51); background-color: rgba(120, 90, 50, 0.06); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51); border-top-left-radius: 10px",
    "card > content": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > field": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
@@ -120,8 +124,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
-   "ways > wayDescription": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
-   "ways > way[recommended]": "background-color: rgba(120, 90, 50, 0.06); border-top-left-radius: 14px"
+   "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/light/phone": {
    "actions > button": "border-top-left-radius: 10px",
@@ -133,7 +136,8 @@
    "card > alts": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > bottom": "color: rgb(63, 57, 51); border-top-color: rgb(235, 230, 222); border-bottom-color: rgb(63, 57, 51)",
    "card > card": "color: rgb(63, 57, 51); background-color: rgb(255, 254, 252); border-top-left-radius: 16px; box-shadow: rgba(70, 50, 30, 0.06) 0px 1px 2px 0px, rgba(70, 50, 30, 0.26) 0px 18px 40px -18px; padding-top: 28px; padding-right: 22px; padding-bottom: 20px; padding-left: 22px; width: 343px",
-   "card > choice": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
+   "card > choice": "color: rgb(63, 57, 51)",
+   "card > choice #2": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
    "card > contact": "color: rgb(63, 57, 51); background-color: rgba(120, 90, 50, 0.06); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51); border-top-left-radius: 10px",
    "card > content": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > field": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
@@ -165,8 +169,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
-   "ways > wayDescription": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
-   "ways > way[recommended]": "background-color: rgba(120, 90, 50, 0.06); border-top-left-radius: 14px"
+   "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/dark/desktop": {
    "actions > button": "border-top-left-radius: 10px",
@@ -178,7 +181,8 @@
    "card > alts": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > bottom": "color: rgb(63, 57, 51); border-top-color: rgb(235, 230, 222); border-bottom-color: rgb(63, 57, 51)",
    "card > card": "color: rgb(63, 57, 51); background-color: rgb(255, 254, 252); border-top-left-radius: 16px; box-shadow: rgba(70, 50, 30, 0.06) 0px 1px 2px 0px, rgba(70, 50, 30, 0.26) 0px 18px 40px -18px",
-   "card > choice": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
+   "card > choice": "color: rgb(63, 57, 51)",
+   "card > choice #2": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
    "card > contact": "color: rgb(63, 57, 51); background-color: rgba(120, 90, 50, 0.06); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51); border-top-left-radius: 10px",
    "card > content": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > field": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
@@ -211,8 +215,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
-   "ways > wayDescription": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
-   "ways > way[recommended]": "background-color: rgba(120, 90, 50, 0.06); border-top-left-radius: 14px"
+   "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/dark/phone": {
    "actions > button": "border-top-left-radius: 10px",
@@ -224,7 +227,8 @@
    "card > alts": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > bottom": "color: rgb(63, 57, 51); border-top-color: rgb(235, 230, 222); border-bottom-color: rgb(63, 57, 51)",
    "card > card": "color: rgb(63, 57, 51); background-color: rgb(255, 254, 252); border-top-left-radius: 16px; box-shadow: rgba(70, 50, 30, 0.06) 0px 1px 2px 0px, rgba(70, 50, 30, 0.26) 0px 18px 40px -18px; padding-top: 28px; padding-right: 22px; padding-bottom: 20px; padding-left: 22px; width: 343px",
-   "card > choice": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
+   "card > choice": "color: rgb(63, 57, 51)",
+   "card > choice #2": "color: rgb(63, 57, 51); border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106)",
    "card > contact": "color: rgb(63, 57, 51); background-color: rgba(120, 90, 50, 0.06); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51); border-top-left-radius: 10px",
    "card > content": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "card > field": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
@@ -257,8 +261,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
-   "ways > wayDescription": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
-   "ways > way[recommended]": "background-color: rgba(120, 90, 50, 0.06); border-top-left-radius: 14px"
+   "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "frosted/light/desktop": {
    "actions > button": "border-top-left-radius: 10px",
@@ -281,7 +284,7 @@
    "list > secondaryButton": "border-top-left-radius: 10px",
    "text > secondaryButton": "border-top-left-radius: 10px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.12); border-bottom-color: rgba(9, 41, 64, 0.12); border-top-left-radius: 16px",
-   "ways > way[recommended]": "background-color: rgba(255, 255, 255, 0.62); border-top-left-radius: 16px"
+   "ways > way[recommended]": "border-top-left-radius: 16px"
   },
   "frosted/light/phone": {
    "actions > button": "border-top-left-radius: 10px",
@@ -305,7 +308,7 @@
    "stage": "padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px",
    "text > secondaryButton": "border-top-left-radius: 10px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.12); border-bottom-color: rgba(9, 41, 64, 0.12); border-top-left-radius: 16px",
-   "ways > way[recommended]": "background-color: rgba(255, 255, 255, 0.62); border-top-left-radius: 16px"
+   "ways > way[recommended]": "border-top-left-radius: 16px"
   },
   "frosted/dark/desktop": {
    "actions > button": "border-top-left-radius: 10px",
@@ -330,7 +333,7 @@
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); color-scheme: dark",
    "text > secondaryButton": "border-top-left-radius: 10px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.12); border-bottom-color: rgba(9, 41, 64, 0.12); border-top-left-radius: 16px",
-   "ways > way[recommended]": "background-color: rgba(255, 255, 255, 0.62); border-top-left-radius: 16px"
+   "ways > way[recommended]": "border-top-left-radius: 16px"
   },
   "frosted/dark/phone": {
    "actions > button": "border-top-left-radius: 10px",
@@ -355,15 +358,14 @@
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px; color-scheme: dark",
    "text > secondaryButton": "border-top-left-radius: 10px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.12); border-bottom-color: rgba(9, 41, 64, 0.12); border-top-left-radius: 16px",
-   "ways > way[recommended]": "background-color: rgba(255, 255, 255, 0.62); border-top-left-radius: 16px"
+   "ways > way[recommended]": "border-top-left-radius: 16px"
   },
   "plain/light/desktop": {
    "card > card": "background-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 0px; box-shadow: none",
    "card > contact": "background-color: rgba(9, 41, 64, 0.05)",
    "card > note": "background-color: rgba(9, 41, 64, 0.05)",
    "card > wait": "background-color: rgba(9, 41, 64, 0.05)",
-   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)",
-   "ways > way[recommended]": "background-color: rgba(9, 41, 64, 0.05)"
+   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)"
   },
   "plain/light/phone": {
    "card > card": "background-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 0px; box-shadow: none; padding-top: 28px; padding-right: 22px; padding-bottom: 20px; padding-left: 22px; width: 343px",
@@ -371,8 +373,7 @@
    "card > note": "background-color: rgba(9, 41, 64, 0.05)",
    "card > wait": "background-color: rgba(9, 41, 64, 0.05)",
    "stage": "padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px",
-   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)",
-   "ways > way[recommended]": "background-color: rgba(9, 41, 64, 0.05)"
+   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)"
   },
   "plain/dark/desktop": {
    "card > card": "background-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 0px; box-shadow: none",
@@ -381,8 +382,7 @@
    "card > root": "color: rgb(230, 232, 235); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235)",
    "card > wait": "background-color: rgba(9, 41, 64, 0.05)",
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); color-scheme: dark",
-   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)",
-   "ways > way[recommended]": "background-color: rgba(9, 41, 64, 0.05)"
+   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)"
   },
   "plain/dark/phone": {
    "card > card": "background-color: rgba(0, 0, 0, 0); border-top-color: rgba(0, 0, 0, 0); border-bottom-color: rgba(0, 0, 0, 0); border-top-left-radius: 0px; box-shadow: none; padding-top: 28px; padding-right: 22px; padding-bottom: 20px; padding-left: 22px; width: 343px",
@@ -391,8 +391,7 @@
    "card > root": "color: rgb(230, 232, 235); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235)",
    "card > wait": "background-color: rgba(9, 41, 64, 0.05)",
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px; color-scheme: dark",
-   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)",
-   "ways > way[recommended]": "background-color: rgba(9, 41, 64, 0.05)"
+   "ways > way": "border-top-color: rgb(230, 234, 236); border-bottom-color: rgb(230, 234, 236)"
   },
   "porcelain/light/desktop": {
    "actions > button": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 12px; box-shadow: rgba(255, 255, 255, 0.14) 0px 1px 0px 0px inset, rgba(19, 41, 75, 0.7) 0px 8px 18px -10px",
@@ -401,7 +400,7 @@
    "card > alts": "background-color: rgb(236, 244, 250); border-top-left-radius: 14px",
    "card > bottom": "border-top-color: rgba(9, 41, 64, 0.08)",
    "card > card": "border-top-left-radius: 20px; box-shadow: rgba(9, 41, 64, 0.07) 0px 0px 0px 1px, rgba(9, 41, 64, 0.05) 0px 1px 2px 0px, rgba(9, 41, 64, 0.12) 0px 8px 20px -10px, rgba(19, 41, 75, 0.34) 0px 34px 70px -32px; padding-top: 40px; padding-right: 34px; padding-bottom: 26px; padding-left: 34px",
-   "card > choice": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
+   "card > choice #2": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
    "card > contact": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > note": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > wait": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
@@ -414,7 +413,7 @@
    "list > secondaryButton": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156); border-top-left-radius: 12px",
    "text > secondaryButton": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156); border-top-left-radius: 12px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.08); border-bottom-color: rgba(9, 41, 64, 0.08); border-top-left-radius: 18px",
-   "ways > way[recommended]": "background-color: rgb(234, 243, 250); border-top-left-radius: 18px"
+   "ways > way[recommended]": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 18px"
   },
   "porcelain/light/phone": {
    "actions > button": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 12px; box-shadow: rgba(255, 255, 255, 0.14) 0px 1px 0px 0px inset, rgba(19, 41, 75, 0.7) 0px 8px 18px -10px",
@@ -423,7 +422,7 @@
    "card > alts": "background-color: rgb(236, 244, 250); border-top-left-radius: 14px",
    "card > bottom": "border-top-color: rgba(9, 41, 64, 0.08)",
    "card > card": "border-top-left-radius: 20px; box-shadow: rgba(9, 41, 64, 0.07) 0px 0px 0px 1px, rgba(9, 41, 64, 0.05) 0px 1px 2px 0px, rgba(9, 41, 64, 0.12) 0px 8px 20px -10px, rgba(19, 41, 75, 0.34) 0px 34px 70px -32px; padding-top: 30px; padding-right: 22px; padding-bottom: 22px; padding-left: 22px; width: 343px",
-   "card > choice": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
+   "card > choice #2": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
    "card > contact": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > note": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > wait": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
@@ -437,7 +436,7 @@
    "stage": "padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px",
    "text > secondaryButton": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156); border-top-left-radius: 12px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.08); border-bottom-color: rgba(9, 41, 64, 0.08); border-top-left-radius: 18px",
-   "ways > way[recommended]": "background-color: rgb(234, 243, 250); border-top-left-radius: 18px"
+   "ways > way[recommended]": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 18px"
   },
   "porcelain/dark/desktop": {
    "actions > button": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 12px; box-shadow: rgba(255, 255, 255, 0.14) 0px 1px 0px 0px inset, rgba(19, 41, 75, 0.7) 0px 8px 18px -10px",
@@ -446,7 +445,7 @@
    "card > alts": "background-color: rgb(236, 244, 250); border-top-left-radius: 14px",
    "card > bottom": "border-top-color: rgba(9, 41, 64, 0.08)",
    "card > card": "border-top-left-radius: 20px; box-shadow: rgba(9, 41, 64, 0.07) 0px 0px 0px 1px, rgba(9, 41, 64, 0.05) 0px 1px 2px 0px, rgba(9, 41, 64, 0.12) 0px 8px 20px -10px, rgba(19, 41, 75, 0.34) 0px 34px 70px -32px; padding-top: 40px; padding-right: 34px; padding-bottom: 26px; padding-left: 34px",
-   "card > choice": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
+   "card > choice #2": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
    "card > contact": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > note": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > root": "color: rgb(230, 232, 235); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235)",
@@ -461,7 +460,7 @@
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); color-scheme: dark",
    "text > secondaryButton": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156); border-top-left-radius: 12px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.08); border-bottom-color: rgba(9, 41, 64, 0.08); border-top-left-radius: 18px",
-   "ways > way[recommended]": "background-color: rgb(234, 243, 250); border-top-left-radius: 18px"
+   "ways > way[recommended]": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 18px"
   },
   "porcelain/dark/phone": {
    "actions > button": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 12px; box-shadow: rgba(255, 255, 255, 0.14) 0px 1px 0px 0px inset, rgba(19, 41, 75, 0.7) 0px 8px 18px -10px",
@@ -470,7 +469,7 @@
    "card > alts": "background-color: rgb(236, 244, 250); border-top-left-radius: 14px",
    "card > bottom": "border-top-color: rgba(9, 41, 64, 0.08)",
    "card > card": "border-top-left-radius: 20px; box-shadow: rgba(9, 41, 64, 0.07) 0px 0px 0px 1px, rgba(9, 41, 64, 0.05) 0px 1px 2px 0px, rgba(9, 41, 64, 0.12) 0px 8px 20px -10px, rgba(19, 41, 75, 0.34) 0px 34px 70px -32px; padding-top: 30px; padding-right: 22px; padding-bottom: 22px; padding-left: 22px; width: 343px",
-   "card > choice": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
+   "card > choice #2": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156)",
    "card > contact": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > note": "background-color: rgb(234, 243, 250); border-top-left-radius: 12px",
    "card > root": "color: rgb(230, 232, 235); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235)",
@@ -485,7 +484,7 @@
    "stage": "color: rgb(230, 232, 235); background-color: rgb(19, 41, 75); border-top-color: rgb(230, 232, 235); border-bottom-color: rgb(230, 232, 235); padding-top: 24px; padding-right: 16px; padding-bottom: 24px; padding-left: 16px; color-scheme: dark",
    "text > secondaryButton": "border-top-color: rgb(127, 144, 156); border-bottom-color: rgb(127, 144, 156); border-top-left-radius: 12px",
    "ways > way": "border-top-color: rgba(9, 41, 64, 0.08); border-bottom-color: rgba(9, 41, 64, 0.08); border-top-left-radius: 18px",
-   "ways > way[recommended]": "background-color: rgb(234, 243, 250); border-top-left-radius: 18px"
+   "ways > way[recommended]": "background-color: rgba(0, 0, 0, 0); background-image: linear-gradient(rgb(19, 41, 75), rgb(13, 31, 58)); border-top-left-radius: 18px"
   }
  }
 }

@@ -74,13 +74,12 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] [data-auth-kit-slot="list"] [data-auth-kit-slot="secondaryButton"]) { width: 100%; justify-content: space-between; }
 :where([data-auth-kit] [data-auth-kit-slot="ways"]) { margin: 0.5rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
 :where([data-auth-kit] [data-auth-kit-slot="way"]) { font: inherit; font-weight: 600; font-size: 17px; line-height: 22px; box-sizing: border-box; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 60px; margin: 0; padding: 12px 14px 12px 16px; text-align: start; color: var(--ak-ink, #092940); background: transparent; border: 1px solid var(--ak-option-border, #d8dde0); border-radius: max(10px, calc(var(--ak-card-radius, 12px) - 2px)); cursor: pointer; }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]) { background: var(--ak-status, rgba(9, 41, 64, 0.045)); border-color: transparent; }
 :where([data-auth-kit] [data-auth-kit-slot="way"]:hover:not(:disabled)) { border-color: var(--ak-field-border, #6b7480); }
 :where([data-auth-kit] [data-auth-kit-slot="way"]:hover:not(:disabled) [data-auth-kit-slot="wayLabel"]) { text-decoration: underline; text-underline-offset: 3px; }
 :where([data-auth-kit] [data-auth-kit-slot="way"] > svg) { flex: none; width: 22px; height: 22px; color: var(--ak-link, #1668b0); }
 :where([data-auth-kit] [data-auth-kit-slot="way"] > [data-auth-kit-icon="chevron"]) { margin-left: auto; width: 18px; height: 18px; color: var(--ak-muted, #56606b); }
 :where([data-auth-kit] [data-auth-kit-slot="wayText"]) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-:where([data-auth-kit] [data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]) { font-weight: 400; color: var(--ak-text, #3c434b); }
+:where([data-auth-kit] [data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]) { display: inline-block; padding: 0 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 18px; letter-spacing: 0.04em; text-transform: uppercase; vertical-align: 2px; color: inherit; }
 :where([data-auth-kit] [data-auth-kit-slot="wayDescription"]) { display: block; font-weight: 400; font-size: 16px; line-height: 22px; color: var(--ak-text, #3c434b); }
 :where([data-auth-kit] [data-auth-kit-slot="steps"]) { margin: 0; padding-inline-start: 1.25rem; display: grid; gap: 0.5rem; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"]) { display: grid; gap: 0.5rem; padding: 1rem; border: 1px solid var(--ak-field-border, #6b7480); border-radius: 10px; }
@@ -97,6 +96,18 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] [data-auth-kit-slot="error"]:empty, [data-auth-kit] [data-auth-kit-slot="status"]:empty) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 :where([data-auth-kit] [data-auth-kit-slot="error"]) { color: var(--ak-error, #b42318); font-weight: 600; }
 :where([data-auth-kit] [data-auth-kit-sr]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The recommended way in (register A5a): filled like the primary button, a glowing fingerprint, a "Recommended" pill. After the generic icon and row rules, so it wins at equal (zero) specificity. */
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]) { color: var(--ak-button-text, #fff); background: var(--ak-button-bg, var(--ak-button, #1e79c8)); border-color: transparent; box-shadow: var(--ak-recommended-shadow, 0 1px 2px rgba(9, 41, 64, 0.14), 0 12px 26px -14px rgba(9, 41, 64, 0.55)); transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease; }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]:hover:not(:disabled)) { border-color: transparent; filter: brightness(1.07); box-shadow: var(--ak-recommended-shadow-hover, 0 1px 2px rgba(9, 41, 64, 0.16), 0 16px 30px -14px rgba(9, 41, 64, 0.62)); }
+@media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]:hover:not(:disabled)) { transform: translateY(-1px); } }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { width: 24px; height: 24px; margin: 0 8px 0 6px; border-radius: 50%; background: #fff; color: var(--ak-recommended-icon, #047857); box-shadow: 0 0 0 9px #fff, 0 0 0 12px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 22px 12px var(--ak-recommended-glow, rgba(74, 222, 128, 0.5)); }
+@media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { animation: ak-glow 2.8s ease-in-out infinite; } }
+@keyframes ak-glow { 50% { box-shadow: 0 0 0 9px #fff, 0 0 0 13px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 30px 16px var(--ak-recommended-glow, rgba(74, 222, 128, 0.5)); } }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="chevron"]) { color: inherit; }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayDescription"]) { color: inherit; }
+:where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended]) { border: 2px solid var(--ak-button, #1e79c8); box-shadow: 0 12px 26px -16px rgba(9, 41, 64, 0.45); }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayLabel"]) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
+:where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended] h2 > [data-auth-kit-icon="fingerprint"]) { color: var(--ak-recommended-icon, #047857); filter: drop-shadow(0 0 6px var(--ak-recommended-glow, rgba(74, 222, 128, 0.7))); }
 @media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="wait"] svg) { animation: ak-pulse 1.6s ease-in-out infinite; } }
 @keyframes ak-pulse { 50% { opacity: 0.45; } }
 `.trim();
