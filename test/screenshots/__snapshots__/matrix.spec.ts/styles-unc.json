@@ -61,6 +61,7 @@
   "ways > listItem": "display: list-item; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 24px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: auto",
   "ways > way": "display: flex; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 1px; border-top-style: solid; border-top-color: rgb(216, 221, 224); border-bottom-width: 1px; border-bottom-style: solid; border-bottom-color: rgb(216, 221, 224); border-top-left-radius: 10px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 12px; padding-right: 14px; padding-bottom: 12px; padding-left: 16px; min-height: 60px; gap: 14px; text-decoration-line: none; opacity: 1; cursor: pointer",
   "ways > wayDescription": "display: block; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
+  "ways > wayDescription #2": "display: block; color: rgb(60, 67, 75); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(60, 67, 75); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(60, 67, 75); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 16px; font-weight: 400; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
   "ways > wayLabel": "display: flex; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px 8px; text-decoration-line: none; opacity: 1; cursor: pointer",
   "ways > wayLabel #2": "display: block; color: rgb(9, 41, 64); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(9, 41, 64); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(9, 41, 64); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: normal; text-decoration-line: none; opacity: 1; cursor: pointer",
   "ways > wayText": "display: flex; color: rgb(255, 255, 255); background-color: rgba(0, 0, 0, 0); background-image: none; border-top-width: 0px; border-top-style: none; border-top-color: rgb(255, 255, 255); border-bottom-width: 0px; border-bottom-style: none; border-bottom-color: rgb(255, 255, 255); border-top-left-radius: 0px; box-shadow: none; backdrop-filter: none; font-size: 17px; font-weight: 600; line-height: 22px; padding-top: 0px; padding-right: 0px; padding-bottom: 0px; padding-left: 0px; min-height: auto; gap: 2px; text-decoration-line: none; opacity: 1; cursor: pointer",
@@ -124,6 +125,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
+   "ways > wayDescription #2": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/light/phone": {
@@ -169,6 +171,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
+   "ways > wayDescription #2": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/dark/desktop": {
@@ -215,6 +218,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
+   "ways > wayDescription #2": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "monogram/dark/phone": {
@@ -261,6 +265,7 @@
    "text > secondaryButton": "border-top-color: rgb(125, 116, 106); border-bottom-color: rgb(125, 116, 106); border-top-left-radius: 10px",
    "ways > listItem": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way": "border-top-color: rgb(226, 220, 210); border-bottom-color: rgb(226, 220, 210); border-top-left-radius: 14px",
+   "ways > wayDescription #2": "color: rgb(63, 57, 51); border-top-color: rgb(63, 57, 51); border-bottom-color: rgb(63, 57, 51)",
    "ways > way[recommended]": "border-top-left-radius: 14px"
   },
   "frosted/light/desktop": {

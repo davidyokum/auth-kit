@@ -105,6 +105,12 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   allowedRedirectPrefixes?: readonly string[];
   /** Step-up: the server asked for a fresh sign-in (`?reauth=1`). */
   reauth?: boolean;
+  /**
+   * A first visit, from an invite email's link (`?first=1`): "How do you want to sign in?" leads with
+   * "Email me a code", the only way in for an account with nothing saved yet. Never reveals whether the
+   * account has a passkey; it only reorders the choices.
+   */
+  firstVisit?: boolean;
   /** Default: a full page load (`window.location.assign`), so the server sees the new cookies. */
   navigate?: (path: string) => void;
   /** Reads factors after sign-in. Default: Cognito `GetUserAuthFactors` from the browser. */
@@ -347,6 +353,13 @@ export function SignIn(props: SignInProps) {
         set({ status: null });
         return go({ name: 'offer-passkey' });
       case 'done':
+        // The account has a passkey, but not one this browser knows of (signed in by password or emailed
+        // code): offer one on this device too, once, so the next sign-in is Touch ID or Windows Hello,
+        // not a phone and a QR code.
+        if (passkeysEnabled && !props.reauth && methodRef.current !== 'passkey' && !driver.passkeyOfferDismissed(userIdRef.current) && !(await driver.hasPasskeyHint(email))) {
+          set({ status: null });
+          return go({ name: 'offer-passkey' });
+        }
         return finish();
     }
   }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set, driver]);
@@ -642,19 +655,44 @@ export function SignIn(props: SignInProps) {
       const wayPasskey = act('use-passkey', () => startPasskey());
       const wayPassword = act('use-password', () => go({ name: 'password', challenge: false }));
       const wayCode = act('send-email-code', sendEmailCode);
+      const firstVisitCode = props.firstVisit === true && emailCodeEnabled;
+      const codeRow = (
+        <li {...slot(classNames, 'listItem')}>
+          <button type="button" disabled={busy} onClick={wayCode} {...tagged(wayCode)} data-auth-kit-choice="email-code" {...(firstVisitCode && { 'data-auth-kit-recommended': '' })} {...slot(classNames, 'way')}>
+            <Icon name="mail" />
+            <span {...slot(classNames, 'wayText')}>
+              <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.chooseCode}</span>
+              {firstVisitCode ? (
+                <>
+                  {' '}
+                  <span {...slot(classNames, 'wayDescription')}>{SIGN_IN.chooseCodeFirstVisit}</span>
+                </>
+              ) : null}
+            </span>
+            <Icon name="chevron" />
+          </button>
+        </li>
+      );
       body = (
         <div {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_IN.chooseHeading)}
           <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
-          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, filled like the primary button with a glowing fingerprint and a "Recommended" pill. */}
+          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, filled like the primary button with a glowing fingerprint and a "Recommended" pill. A first visit (an invite's link) leads with the emailed code instead. */}
           <ul {...slot(classNames, 'ways')}>
+            {firstVisitCode ? codeRow : null}
             <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={wayPasskey} {...tagged(wayPasskey)} data-auth-kit-choice="passkey" data-auth-kit-recommended="" {...slot(classNames, 'way')}>
+              <button type="button" disabled={busy} onClick={wayPasskey} {...tagged(wayPasskey)} data-auth-kit-choice="passkey" {...(!firstVisitCode && { 'data-auth-kit-recommended': '' })} {...slot(classNames, 'way')}>
                 <Icon name="fingerprint" />
                 <span {...slot(classNames, 'wayText')}>
                   <span {...slot(classNames, 'wayLabel')}>
-                    {SIGN_IN.choosePasskey} <span data-auth-kit-recommended-label="">{SIGN_IN.chooseRecommended}</span>
+                    {SIGN_IN.choosePasskey}
+                    {firstVisitCode ? null : (
+                      <>
+                        {' '}
+                        <span data-auth-kit-recommended-label="">{SIGN_IN.chooseRecommended}</span>
+                      </>
+                    )}
                   </span>{' '}
                   <span {...slot(classNames, 'wayDescription')}>{SIGN_IN.choosePasskeySub}</span>
                 </span>
@@ -670,18 +708,10 @@ export function SignIn(props: SignInProps) {
                 <Icon name="chevron" />
               </button>
             </li>
-            {emailCodeEnabled ? (
-              <li {...slot(classNames, 'listItem')}>
-                <button type="button" disabled={busy} onClick={wayCode} {...tagged(wayCode)} data-auth-kit-choice="email-code" {...slot(classNames, 'way')}>
-                  <Icon name="mail" />
-                  <span {...slot(classNames, 'wayText')}>
-                    <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.chooseCode}</span>
-                  </span>
-                  <Icon name="chevron" />
-                </button>
-              </li>
-            ) : null}
+            {emailCodeEnabled && !firstVisitCode ? codeRow : null}
           </ul>
+          {/* Register A5a: an invitee has no passkey or password yet; say plainly which way gets them in. */}
+          {emailCodeEnabled && !firstVisitCode ? <p {...slot(classNames, 'small')} data-auth-kit-first-time="">{SIGN_IN.chooseFirstTime}</p> : null}
         </div>
       );
       break;

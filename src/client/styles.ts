@@ -106,6 +106,7 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="chevron"]) { color: inherit; }
 :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayDescription"]) { color: inherit; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended]) { border: 2px solid var(--ak-button, #1e79c8); box-shadow: 0 12px 26px -16px rgba(9, 41, 64, 0.45); }
+:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="mail"]) { color: inherit; }
 :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayLabel"]) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended] h2 > [data-auth-kit-icon="fingerprint"]) { color: var(--ak-recommended-icon, #047857); filter: drop-shadow(0 0 6px var(--ak-recommended-glow, rgba(74, 222, 128, 0.7))); }
 @media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="wait"] svg) { animation: ak-pulse 1.6s ease-in-out infinite; } }

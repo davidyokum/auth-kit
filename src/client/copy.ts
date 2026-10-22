@@ -92,6 +92,10 @@ export const SIGN_IN = {
   choosePasskeySub: 'Your face, fingerprint, or device PIN.',
   choosePassword: 'Use a password',
   chooseCode: 'Email me a code',
+  /** The emailed code's row on a first visit (an invite's link), where it leads. */
+  chooseCodeFirstVisit: 'First time here? We’ll email you a code, then you’ll set up a passkey.',
+  /** Under the rows, on every other visit to this screen (register A5a): an invitee's only way in. */
+  chooseFirstTime: 'First time signing in? Choose Email me a code.',
   passwordLabel: 'Password',
   show: 'Show',
   hide: 'Hide',

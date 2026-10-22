@@ -2,9 +2,28 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.12-alpha.1] - 2026-10-22
+
+A first sign-in that people can find. On the first live site, a newly invited account (nothing saved yet, so only an emailed code gets in) met "How do you want to sign in?" with the passkey row filled and recommended, tried it and the password, and found no way in. Pre-release. No breaking changes; one new optional prop.
+
+### Added
+
+- **`SignIn`'s `firstVisit`** (pass `first === '1'` from the page's search parameters, like `reauth`): "How do you want to sign in?" leads with **Email me a code**, as the prominent row, described "First time here? We’ll email you a code, then you’ll set up a passkey." The passkey and password rows follow, outlined. It only reorders the choices, so it never reveals whether an account has a passkey.
+- **The invite email's link carries `?first=1`** (`firstVisitUrl`), so an invitee lands in first-visit mode. Its steps already say to choose "Email me a code".
+- **Preview mode:** the `choose` screen's `first-visit` state (53 states).
+
+### Changed
+
+- **"How do you want to sign in?" says what a first sign-in is**, under the rows: "First time signing in? Choose Email me a code." (`SIGN_IN.chooseFirstTime`; only where emailed codes are on).
+- **"Create a passkey on this device?" is offered when this browser has no passkey for the account**, not only when the account has none. After a sign-in by password or emailed code, an account whose passkey lives elsewhere (a phone, another computer) gets the offer once, so the next sign-in here is the device's own fingerprint or face, not a phone and a QR code. "Not now" is remembered on this device, as before.
+
+### Migration
+
+Bump the tarball URL, run `npm install` (keep the lockfile's other entries; change only auth-kit's lines), copy `authKitStyles` again (one new rule: the mail icon on a prominent row), and pass `firstVisit={first === '1'}` to `SignIn` on the sign-in page.
+
 ## [0.1.11-alpha.1] - 2026-10-22
 
-Two things David saw on the first site: the backdrop jittered and ignored the mouse, and the recommended way to sign in looked like the least important one. Pre-release. No breaking changes; locked backdrops draw exactly what they drew.
+Two things seen on the first site: the backdrop jittered and ignored the mouse, and the recommended way to sign in looked like the least important one. Pre-release. No breaking changes; locked backdrops draw exactly what they drew.
 
 ### Added
 

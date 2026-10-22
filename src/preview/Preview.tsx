@@ -70,6 +70,7 @@ export function PreviewCard(props: { r: ResolvedPreviewSpec; placement: ReturnTy
           notices={{ mounted: true }}
           checkBreachedPassword={false}
           {...(placement.reauth && { reauth: true })}
+          {...(placement.firstVisit && { firstVisit: true })}
           {...(r.qrCode && { renderQrCode: sampleQrCode })}
         />
       );

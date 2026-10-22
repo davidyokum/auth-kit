@@ -26,6 +26,8 @@ export interface PreviewPlacement {
   held: Partial<HeldStates>;
   /** `SignIn`'s step-up (`reauth`). */
   reauth?: boolean;
+  /** `SignIn`'s first visit (`firstVisit`, an invite's link). */
+  firstVisit?: boolean;
   /** The setting a sign-up screen draws with (`domains` or `open`). */
   signUpSetting?: NormalizedAccountCreation;
 }
@@ -146,8 +148,8 @@ const SCREENS: readonly ScreenDef[] = [
     label: 'How do you want to sign in?',
     group: 'sign-in',
     component: 'sign-in',
-    states: [state('', 'The three ways in')],
-    place: (r) => signIn(r, { name: 'choose' }),
+    states: [state('', 'The three ways in'), state('first-visit', 'First visit (an invite’s link)')],
+    place: (r, s) => ({ ...signIn(r, { name: 'choose' }), ...(s === 'first-visit' && { firstVisit: true }) }),
   },
   {
     id: 'passkey',

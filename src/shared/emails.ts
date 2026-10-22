@@ -335,6 +335,17 @@ export interface InviteEmailContent {
   approved?: boolean;
 }
 
+/** The sign-in URL with `first=1` added (kept as given if it doesn't parse). */
+export function firstVisitUrl(signInUrl: string): string {
+  try {
+    const u = new URL(signInUrl);
+    u.searchParams.set('first', '1');
+    return u.toString();
+  } catch {
+    return signInUrl;
+  }
+}
+
 function inviterName(by: InviteEmailContent['invitedBy']): string | undefined {
   return by?.name?.trim() || by?.email?.trim() || undefined;
 }
@@ -342,7 +353,8 @@ function inviterName(by: InviteEmailContent['invitedBy']): string | undefined {
 /** The invite (Card Studio's `mailHTML('invite')`, REPORT §5.2a), and the approved request (§5.2j). */
 export function inviteEmail(site: EmailSite, input: InviteEmailContent): RenderedEmail {
   const who = inviterName(input.invitedBy);
-  const url = site.signInUrl;
+  // `?first=1`: the sign-in card leads with "Email me a code" (register A5a), the invitee's only way in.
+  const url = firstVisitUrl(site.signInUrl);
   const subject = input.approved
     ? `${who ?? 'Someone'} approved your request for ${site.siteName}`
     : who

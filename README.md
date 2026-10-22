@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.11-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.12-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -378,8 +378,8 @@ import { signInHelp } from '@/lib/accounts'; // createSignInHelp: the configured
 
 export const dynamic = 'force-dynamic'; // reads the help address in effect on every request
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; reauth?: string }> }) {
-  const { next, reauth } = await searchParams;
+export default async function Page({ searchParams }: { searchParams: Promise<{ next?: string; reauth?: string; first?: string }> }) {
+  const { next, reauth, first } = await searchParams;
   const help = await signInHelp.effective();
   return (
     <SignIn
@@ -391,6 +391,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ n
       codeLifetimeMinutes={3} // the same as the preset's
       next={next}
       reauth={reauth === '1'}
+      firstVisit={first === '1'}
     />
   );
 }
@@ -418,7 +419,7 @@ The authenticator setup page calls `pages.requireUser({ allowMfaEnrollment: true
 
 | Export | What it does |
 |---|---|
-| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" when this browser remembers a passkey for the address, and otherwise "How do you want to sign in?" (Use a passkey, recommended; Use a password; Email me a code; register A5a: a hint of salted hashes in this site's `localStorage`, never sent anywhere; on a shared computer it tells anyone who types an address there, or any script on the site, that someone signed in there with a passkey for it, and it outlasts sign-out until My account removes the last passkey or deletes the account), or, with passkeys off, "Enter your password" with "for {email} · Change"; "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button (register A6, decided: these words aren't options). Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes` (default 10), `emailHint`, `notices` (account-change notices, on by default; `{ mounted: true }` once the site mounts the notice route, which is what lets "Forgot your password?" promise "We'll email you a note when your password changes"; `false` turns them off), `signUpHref`, `requestAccessHref` (paths or http(s) URLs only; anything else throws), `passkey` (`{ relyingPartyId, timeoutMs }`: the pool's, so the decoy prompt matches the real one). Redirects through `safeRedirect`; `reauth` for step-up. |
+| `SignIn` | The whole card ([ADR 0024](docs/decisions/0024-sign-in-copy-and-family-themes.md)). Email first: **Continue** opens "Use your passkey" when this browser remembers a passkey for the address, and otherwise "How do you want to sign in?" (Use a passkey, recommended; Use a password; Email me a code; register A5a: a hint of salted hashes in this site's `localStorage`, never sent anywhere; on a shared computer it tells anyone who types an address there, or any script on the site, that someone signed in there with a passkey for it, and it outlasts sign-out until My account removes the last passkey or deletes the account), or, with passkeys off, "Enter your password" with "for {email} · Change"; "Use a password instead" (the password, then the authenticator code) and "Email me a code instead" always. **Sign in** finishes on the authenticator and emailed-code steps; the passkey step has no final button (register A6, decided: these words aren't options). Handles every step Cognito returns for these pools. Then: authenticator setup for password users, the required "Choose how you'll sign in next time" after an invite or a sign-up, a one-time "Create a passkey on this device?". "Trouble signing in?" opens the triage list and six help screens (`troubleLink: 'inside'` or `'below'`); the card names the site's account-creation mode (`accountCreation`, `inviteLine`) and carries the family's footer line. Props: `theme`, `help` (required), `codeLifetimeMinutes` (default 10), `emailHint`, `notices` (account-change notices, on by default; `{ mounted: true }` once the site mounts the notice route, which is what lets "Forgot your password?" promise "We'll email you a note when your password changes"; `false` turns them off), `signUpHref`, `requestAccessHref` (paths or http(s) URLs only; anything else throws), `passkey` (`{ relyingPartyId, timeoutMs }`: the pool's, so the decoy prompt matches the real one). Redirects through `safeRedirect`; `reauth` for step-up; `firstVisit` (`?first=1`, the invite email's link) leads "How do you want to sign in?" with "Email me a code", and otherwise the screen says "First time signing in? Choose Email me a code." After a sign-in by password or emailed code, an account that has a passkey, but not one this browser remembers, is offered "Create a passkey on this device?" too (once; "Not now" is remembered). |
 | `SignUp` | "Create your account" ([section 11](#11-account-creation-auth-kitaccounts)): the address (and the domain list), the privacy notice (`privacyNoticeUrl`, required), the sign-up route, the emailed code and "Your name" (both "Continue", register A6: a step follows each), the required first credential, "You're set up" as a Member. |
 | `RequestAccess` | "Request access to {Site}": name, email, an optional reason, then "Request sent", the same for every address. |
 | `SignedOutEverywhere` | "You're signed out everywhere", where My account's sign-out lands. |
@@ -904,12 +905,12 @@ The real sign-in card, held at any screen and state with sample data, and inert 
 | `onAction(name, info)` | Called for every click or submit. `info`: `{ screen, state, next, label, values }`; `next` is where the live card goes when that succeeds (`{ screen, state? }`, or `@signed-in`, `@link`, `@mail`; `null` when it stays); `values` has what's typed, never a password | none |
 | `onEffect(name)` | Called if a screen reached an effect the preview refuses; it never should (tests watch it) | none |
 
-**Screens and states** (27 screens, 52 states; the Sign-in Studio's IDs plus the card's other views)
+**Screens and states** (27 screens, 53 states; the Sign-in Studio's IDs plus the card's other views)
 
 | Screen | Heading | States (first is the default) |
 |---|---|---|
 | `email` | Sign in | `''` As it first shows; `typed` Address typed; `reauth` Confirm it’s you (step-up); `empty` Empty email; `invalid` Badly formed email; `throttled` Too many attempts; `offline` Can’t reach the service |
-| `choose` | How do you want to sign in? | `''` The three ways in |
+| `choose` | How do you want to sign in? | `''` The three ways in; `first-visit` First visit (an invite’s link) |
 | `passkey` | Use your passkey | `''` Waiting for the passkey; `cancelled` Passkey cancelled |
 | `password` | Enter your password | `''` As it first shows; `wrong` Wrong password |
 | `totp` | Enter your authenticator code | `''` As it first shows; `wrong` Wrong authenticator code |

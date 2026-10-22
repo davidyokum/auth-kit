@@ -1099,6 +1099,21 @@ describe('after sign-in', () => {
     expect(screen.queryByRole('heading', { name: 'Create a passkey on this device?' })).toBeNull();
   });
 
+  it('offers a passkey on this device when the account has one but this browser doesn’t (signed in another way)', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockResolvedValue(SIGNED_IN);
+    const { user, navigate } = setup({}, [{ configured: ['PASSWORD', 'WEB_AUTHN'], mfa: ['SOFTWARE_TOKEN_MFA'] }]);
+    // No passkey hint here: Continue asks how, and the person uses their password.
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Use a password' }));
+    await user.type(await screen.findByLabelText('Password'), 'my long password{Enter}');
+    await heading('Create a passkey on this device?');
+    expect(navigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(navigate).toHaveBeenCalled();
+  });
+
   const CHECK_FAILED = 'We couldn’t check how you sign in. Try again. If it keeps happening, email apps-help@example.org.';
 
   it('a failed factor check after an emailed code never goes in: "Try again" re-reads, and a fresh invite must then choose (ADR 0024)', async () => {
@@ -1269,6 +1284,29 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
     expect(browser.get).not.toHaveBeenCalled();
     expect(allAuthCalls()).toBe(0);
+  });
+
+  it('says plainly that a first sign-in is by emailed code (register A5a)', async () => {
+    window.localStorage.clear();
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    expect(screen.getByText('First time signing in? Choose Email me a code.')).toBeTruthy();
+  });
+
+  it('a first visit (an invite’s link, ?first=1) leads with the emailed code, and the passkey row isn’t the prominent one', async () => {
+    window.localStorage.clear();
+    const { user } = setup({ firstVisit: true });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    const rows = [...card().querySelectorAll<HTMLButtonElement>('[data-auth-kit-slot="ways"] > li > button')];
+    expect(rows.map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['email-code', 'passkey', 'password']);
+    expect(rows.map((b) => b.hasAttribute('data-auth-kit-recommended'))).toEqual([true, false, false]);
+    expect(screen.getByRole('button', { name: 'Email me a code First time here? We’ll email you a code, then you’ll set up a passkey.' })).toBeTruthy();
+    expect(card().querySelector('[data-auth-kit-recommended-label]')).toBeNull();
+    expect(screen.queryByText('First time signing in? Choose Email me a code.')).toBeNull();
   });
 
   it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "Recommended"), the description below, a chevron', async () => {
