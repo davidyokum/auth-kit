@@ -79,6 +79,7 @@ export function previewDriver(options: PreviewDriverOptions): ClientDriver {
     writeClipboard: refused<void>('writeClipboard'),
     // Reads a held screen may make on mount: answered from the sample, touching nothing.
     currentUser: () => Promise.resolve({ userId: 'preview', loginId: options.email }),
+    lastPasskeyAttachment: () => null,
     fetchAccountEmail: () => Promise.resolve(options.email),
     hasPasskeyHint: () => Promise.resolve(options.remembered),
     passkeyOfferDismissed: () => false,

@@ -112,9 +112,54 @@ async function startSignIn(input: SignInInput): Promise<SignInStep> {
   return settle(output);
 }
 
+/** Where the passkey that signed in lives: on this device, or another (a phone over Bluetooth, a security key). */
+export type PasskeyAttachment = 'platform' | 'cross-platform';
+
+let lastAttachment: PasskeyAttachment | null = null;
+
+/**
+ * The last passkey sign-in's `authenticatorAttachment`, or `null` when the browser didn't say (or none
+ * ran yet). A passkey from another device signs in fine but leaves this one without its own, so the
+ * screens offer one here (`afterSignIn`).
+ */
+export function lastPasskeyAttachment(): PasskeyAttachment | null {
+  return lastAttachment;
+}
+
+/**
+ * Runs `run` while noting the `authenticatorAttachment` of any assertion `navigator.credentials.get`
+ * returns. Amplify calls the browser itself and keeps the credential, so this is the only place to
+ * see it. Nothing else changes: the same options go in, the same credential comes out, and the
+ * original `get` is put back however `run` ends.
+ */
+async function noteAttachment<T>(run: () => Promise<T>): Promise<T> {
+  const creds = typeof navigator === 'undefined' ? undefined : navigator.credentials;
+  if (!creds || typeof creds.get !== 'function') return run();
+  const own = Object.getOwnPropertyDescriptor(creds, 'get');
+  const original = creds.get.bind(creds);
+  const watched = (options?: CredentialRequestOptions) =>
+    original(options).then((credential) => {
+      const attachment = (credential as { authenticatorAttachment?: unknown } | null)?.authenticatorAttachment;
+      if (attachment === 'platform' || attachment === 'cross-platform') lastAttachment = attachment;
+      return credential;
+    });
+  try {
+    Object.defineProperty(creds, 'get', { value: watched, configurable: true, writable: true });
+  } catch {
+    return run(); // a browser that won't let it be watched: the attachment stays unknown
+  }
+  try {
+    return await run();
+  } finally {
+    if (own) Object.defineProperty(creds, 'get', own);
+    else Reflect.deleteProperty(creds, 'get');
+  }
+}
+
 /** Passkey first: Amplify asks Cognito for a challenge for this email, then runs the browser's passkey prompt. */
 export function signInWithPasskey(email: string): Promise<SignInStep> {
-  return startSignIn({ username: email.trim(), options: { authFlowType: 'USER_AUTH', preferredChallenge: 'WEB_AUTHN' } });
+  lastAttachment = null;
+  return noteAttachment(() => startSignIn({ username: email.trim(), options: { authFlowType: 'USER_AUTH', preferredChallenge: 'WEB_AUTHN' } }));
 }
 
 /** Password, then (if the person has one) the authenticator code. */

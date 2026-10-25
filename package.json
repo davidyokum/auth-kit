@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.12-alpha.1",
+  "version": "0.1.13-alpha.1",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",

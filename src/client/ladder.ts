@@ -67,6 +67,20 @@ export function afterSignInStep(factors: ClientAuthFactors, options: { passkeysE
   return 'done';
 }
 
+/**
+ * For an account that already has a passkey (`afterSignInStep` said `done`): whether to offer one on
+ * this device too ("Create a passkey on this device?"), so the next sign-in here needs no phone or QR
+ * code. Yes after a password or an emailed code when this browser knew no passkey for the address; yes
+ * after a passkey from another device (`cross-platform`: a phone over Bluetooth, a security key); when
+ * the browser didn't say where the passkey lives, only where this browser knew no passkey before. A
+ * passkey on this device (`platform`) needs no offer. The caller still skips a step-up and an offer
+ * dismissed here before.
+ */
+export function offersPasskeyHere(method: SignInMethod | null, attachment: 'platform' | 'cross-platform' | null, hadHint: boolean): boolean {
+  if (method !== 'passkey') return !hadHint;
+  return attachment === 'cross-platform' || (attachment === null && !hadHint);
+}
+
 export interface RemovalCheck {
   allowed: boolean;
   /** Why not, in words for the person. */

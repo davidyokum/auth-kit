@@ -11,7 +11,7 @@ import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCreden
 import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
 import { hrefOr } from './href.js';
 import { Icon } from './icons.js';
-import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode } from './ladder.js';
+import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode, offersPasskeyHere } from './ladder.js';
 import type { AuthErrorContext, AuthErrorInfo, AuthErrorKind, MessageWords } from './messages.js';
 import { type PasskeyPromptOptions, answerSimulatedCode, isFirstFactorRefusal, isFirstFactorUnavailable } from './parity.js';
 import type { PasswordCheckOptions } from './PasswordForm.js';
@@ -324,7 +324,12 @@ export function SignIn(props: SignInProps) {
     go({ name: 'finishing' });
     set({ status: SIGN_IN.signedInOneMoment, error: null });
     userIdRef.current = (await driver.currentUser())?.userId;
-    if (methodRef.current === 'passkey') await driver.rememberPasskey(email);
+    // Read before a passkey sign-in sets it: whether this browser already knew a passkey for the address,
+    // and where the passkey that just signed in lives.
+    const method = methodRef.current;
+    const hadHint = await driver.hasPasskeyHint(email);
+    const attachment = method === 'passkey' ? driver.lastPasskeyAttachment() : null;
+    if (method === 'passkey') await driver.rememberPasskey(email);
     if (pendingNotice.current) {
       const event = pendingNotice.current;
       pendingNotice.current = null;
@@ -353,10 +358,12 @@ export function SignIn(props: SignInProps) {
         set({ status: null });
         return go({ name: 'offer-passkey' });
       case 'done':
-        // The account has a passkey, but not one this browser knows of (signed in by password or emailed
-        // code): offer one on this device too, once, so the next sign-in is Touch ID or Windows Hello,
-        // not a phone and a QR code.
-        if (passkeysEnabled && !props.reauth && methodRef.current !== 'passkey' && !driver.passkeyOfferDismissed(userIdRef.current) && !(await driver.hasPasskeyHint(email))) {
+        // The account has a passkey, but maybe not on this device: offer one here too, once, so the next
+        // sign-in is Touch ID or Windows Hello, not a phone and a QR code. That's a sign-in by password or
+        // emailed code where this browser knows no passkey, or a passkey from another device (a phone, a
+        // security key: authenticatorAttachment "cross-platform"; when the browser doesn't say, only
+        // where this browser knew no passkey before). A passkey on this device goes straight in.
+        if (passkeysEnabled && !props.reauth && !driver.passkeyOfferDismissed(userIdRef.current) && offersPasskeyHere(method, attachment, hadHint)) {
           set({ status: null });
           return go({ name: 'offer-passkey' });
         }

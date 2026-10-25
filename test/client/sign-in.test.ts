@@ -112,6 +112,22 @@ function stubPasskeyBrowser() {
   return { get };
 }
 
+/**
+ * A passkey sign-in as Amplify runs it: signIn calls the browser's prompt, which answers with a passkey
+ * that lives on this device (`platform`), on another (`cross-platform`), or doesn't say.
+ */
+function passkeyFrom(attachment: 'platform' | 'cross-platform' | undefined) {
+  const get = vi.fn((_options: unknown) => Promise.resolve({ type: 'public-key', ...(attachment && { authenticatorAttachment: attachment }) }));
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+  Object.defineProperty(window, 'PublicKeyCredential', { value: function PublicKeyCredential() {}, configurable: true });
+  Object.defineProperty(navigator, 'credentials', { value: { get }, configurable: true });
+  auth.signIn.mockImplementation(async () => {
+    await navigator.credentials.get({ publicKey: {} } as CredentialRequestOptions);
+    return SIGNED_IN;
+  });
+  return { get };
+}
+
 function unstubPasskeyBrowser() {
   for (const [target, key] of [[window, 'isSecureContext'], [window, 'PublicKeyCredential'], [navigator, 'credentials']] as const) {
     if (Object.getOwnPropertyDescriptor(target, key)?.configurable) Reflect.deleteProperty(target, key);
@@ -1265,6 +1281,98 @@ describe('styling hooks', () => {
   });
 });
 
+describe('a passkey from another device: offer one on this device too', () => {
+  const offer = 'Create a passkey on this device?';
+
+  it('a passkey on this device goes straight in', async () => {
+    window.localStorage.clear();
+    passkeyFrom('platform');
+    const { user, navigate } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(await screen.findByRole('button', { name: /^Use a passkey/ }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes'));
+    expect(screen.queryByRole('heading', { name: offer })).toBeNull();
+  });
+
+  it('a passkey from a phone or security key offers one here, even where this browser already remembers the address', async () => {
+    // The beforeEach hint: Continue opens the prompt, and the person answers on their phone.
+    const { get } = passkeyFrom('cross-platform');
+    const { user, navigate } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await heading(offer);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Create a passkey' }));
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes'));
+    expect(auth.associateWebAuthnCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it('a passkey from another device, on a browser that knew no passkey for the address, offers one', async () => {
+    window.localStorage.clear();
+    passkeyFrom('cross-platform');
+    const { user, navigate } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(await screen.findByRole('button', { name: /^Use a passkey/ }));
+    await heading(offer);
+    expect(navigate).not.toHaveBeenCalled();
+    // Signed in by passkey, so the hint is set as before (next time Continue opens the prompt).
+    expect(await hasPasskeyHint('ada@example.org')).toBe(true);
+  });
+
+  it('"Not now", once, is remembered here: the next passkey from another device goes straight in', async () => {
+    passkeyFrom('cross-platform');
+    let { user, navigate } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await heading(offer);
+    await user.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(navigate).toHaveBeenCalled();
+    cleanup();
+
+    ({ user, navigate } = setup());
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(screen.queryByRole('heading', { name: offer })).toBeNull();
+  });
+
+  it('a step-up never offers, whatever device the passkey is on', async () => {
+    passkeyFrom('cross-platform');
+    const { user, navigate } = setup({ reauth: true });
+    await waitFor(() => expect(emailField().value).toBe('ada@example.org'));
+    await pressContinue(user);
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(screen.queryByRole('heading', { name: offer })).toBeNull();
+  });
+
+  it('when the browser doesn’t say where the passkey lives: an offer only where this browser knew no passkey', async () => {
+    passkeyFrom(undefined);
+    let { user, navigate } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(screen.queryByRole('heading', { name: offer })).toBeNull();
+    cleanup();
+
+    window.localStorage.clear();
+    passkeyFrom(undefined);
+    ({ user, navigate } = setup());
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(await screen.findByRole('button', { name: /^Use a passkey/ }));
+    await heading(offer);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('watching the prompt changes nothing else: the browser’s own get comes back afterwards', async () => {
+    const { get } = passkeyFrom('platform');
+    const { user, navigate } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await waitFor(() => expect(navigate).toHaveBeenCalled());
+    expect(get).toHaveBeenCalledWith({ publicKey: {} });
+    expect(Object.getOwnPropertyDescriptor(navigator.credentials, 'get')?.value).toBe(get);
+  });
+});
+
 describe('register A5a: Continue opens the passkey prompt only where this browser remembers one', () => {
   const allAuthCalls = () => Object.values(auth).reduce((n, fn) => n + ((fn as { mock?: { calls: unknown[] } }).mock?.calls.length ?? 0), 0);
 
@@ -1411,7 +1519,7 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
 
   it('a passkey sign-in sets the hint for that address', async () => {
     window.localStorage.clear();
-    auth.signIn.mockResolvedValue(SIGNED_IN);
+    passkeyFrom('platform');
     const { user, navigate } = setup();
     await enterEmail(user, 'grace@example.org');
     await user.click(screen.getByRole('button', { name: 'Continue' }));

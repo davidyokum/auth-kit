@@ -2,6 +2,14 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.13-alpha.1] - 2026-10-26
+
+A passkey from another device now leads to one on this device. Pre-release. No breaking changes.
+
+### Changed
+
+- **After signing in with a passkey from a phone or a security key, "Create a passkey on this device?" (M5) offers one here** (David, 2026-10-25). Signing in on a new computer with the passkey on a phone went straight in, so every later sign-in on that computer needed the phone and a QR code again. Now the kit notes where the signing-in passkey lives (the browser's `authenticatorAttachment`, read as Amplify's passkey prompt returns it) and offers a passkey for this device when it came from another one. A passkey already on this device goes straight in, as before. When the browser doesn't say where the passkey lives, the offer appears only where this browser hadn't signed in with that address before. A step-up never offers, and "Not now" is remembered on this device. The rule is `offersPasskeyHere` in `ladder.ts`; the screens before sign-in are unchanged for every address (ADR 0018).
+
 ## [0.1.12-alpha.1] - 2026-10-22
 
 A first sign-in that people can find. On the first live site, a newly invited account (nothing saved yet, so only an emailed code gets in) met "How do you want to sign in?" with the passkey row filled and recommended, tried it and the password, and found no way in. Pre-release. No breaking changes; one new optional prop.

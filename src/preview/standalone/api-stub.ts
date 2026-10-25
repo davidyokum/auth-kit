@@ -3,17 +3,19 @@
  * Amplify calls, each refusing. With it, neither Amplify nor the direct Cognito calls (`cognito.ts`) are
  * in the file at all. The preview's driver never calls these.
  */
-import type { AuthenticatorEnrollment } from '../../client/api.js';
+import type { AuthenticatorEnrollment, PasskeyAttachment } from '../../client/api.js';
 import type { ClientAuthFactors } from '../../client/ladder.js';
 import type { SignInStep } from '../../client/steps.js';
 
-export type { AuthenticatorEnrollment };
+export type { AuthenticatorEnrollment, PasskeyAttachment };
 
 function refused(): Promise<never> {
   return Promise.reject(new Error('auth-kit preview: no Cognito calls'));
 }
 
 export const signInWithPasskey: (email: string) => Promise<SignInStep> = refused;
+/** No passkey sign-in ever runs here, so where one lived is never known. */
+export const lastPasskeyAttachment = (): PasskeyAttachment | null => null;
 export const signInWithPassword: (email: string, password: string) => Promise<SignInStep> = refused;
 export const requestEmailCode: (email: string) => Promise<SignInStep> = refused;
 export const confirmPassword: (password: string) => Promise<SignInStep> = refused;

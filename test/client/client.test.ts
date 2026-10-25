@@ -13,6 +13,7 @@ import {
   SIGN_IN_METHODS,
   toSignInStep,
 } from '../../src/client/index.js';
+import { offersPasskeyHere } from '../../src/client/ladder.js';
 import { needsTotpEnrollment } from '../../src/server/index.js';
 import { awsError, next, SIGNED_IN, TEST_SECRET } from './amplify-mock.js';
 
@@ -45,6 +46,28 @@ describe('afterSignInStep', () => {
     [{ configured: ['PASSWORD', 'WEB_AUTHN'], mfa: ['SOFTWARE_TOKEN_MFA'] }, on, 'done'],
   ] as const)('%j (%j) -> %s', (factors, options, step) => {
     expect(afterSignInStep(factors, options)).toBe(step);
+  });
+});
+
+describe('offersPasskeyHere: an account with a passkey, signed in, maybe without one on this device', () => {
+  it.each([
+    // A passkey on this device: nothing to offer.
+    ['passkey', 'platform', false, false],
+    ['passkey', 'platform', true, false],
+    // A passkey from another device (a phone, a security key): offer one here, whatever the hint says.
+    ['passkey', 'cross-platform', false, true],
+    ['passkey', 'cross-platform', true, true],
+    // The browser didn't say: only where this browser knew no passkey for the address.
+    ['passkey', null, false, true],
+    ['passkey', null, true, false],
+    // A password or an emailed code: where this browser knows no passkey for the address.
+    ['password', null, false, true],
+    ['password', null, true, false],
+    ['email-code', null, false, true],
+    ['email-code', null, true, false],
+    [null, null, false, true],
+  ] as const)('%s, %s, hint %s -> %s', (method, attachment, hadHint, offer) => {
+    expect(offersPasskeyHere(method, attachment, hadHint)).toBe(offer);
   });
 });
 

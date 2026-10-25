@@ -34,6 +34,8 @@ import {
   requestPasswordReset,
   saveName,
   setFirstPassword,
+  lastPasskeyAttachment,
+  type PasskeyAttachment,
   signInWithPasskey,
   signInWithPassword,
 } from './api.js';
@@ -52,6 +54,8 @@ import type { SignInStep } from './steps.js';
 /** Everything the screens do outside the card. The live driver calls the real thing; the preview's does nothing. */
 export interface DriverEffects {
   readonly signInWithPasskey: (email: string) => Promise<SignInStep>;
+  /** Where the last passkey sign-in's passkey lives (`null`: the browser didn't say). */
+  readonly lastPasskeyAttachment: () => PasskeyAttachment | null;
   readonly signInWithPassword: (email: string, password: string) => Promise<SignInStep>;
   readonly requestEmailCode: (email: string) => Promise<SignInStep>;
   readonly confirmPassword: (password: string) => Promise<SignInStep>;
@@ -149,6 +153,7 @@ export const LIVE_DRIVER: ClientDriver = Object.freeze({
   initial: () => undefined,
   act: liveAct as ClientDriver['act'],
   signInWithPasskey: (email: string) => signInWithPasskey(email),
+  lastPasskeyAttachment: () => lastPasskeyAttachment(),
   signInWithPassword: (email: string, password: string) => signInWithPassword(email, password),
   requestEmailCode: (email: string) => requestEmailCode(email),
   confirmPassword: (password: string) => confirmPassword(password),
