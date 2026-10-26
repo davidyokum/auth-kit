@@ -10,6 +10,16 @@ A passkey from another device now leads to one on this device. Pre-release. No b
 
 - **After signing in with a passkey from a phone or a security key, "Create a passkey on this device?" (M5) offers one here** (David, 2026-10-25). Signing in on a new computer with the passkey on a phone went straight in, so every later sign-in on that computer needed the phone and a QR code again. Now the kit notes where the signing-in passkey lives (the browser's `authenticatorAttachment`, read as Amplify's passkey prompt returns it) and offers a passkey for this device when it came from another one. A passkey already on this device goes straight in, as before. When the browser doesn't say where the passkey lives, the offer appears only where this browser hadn't signed in with that address before. A step-up never offers, and "Not now" is remembered on this device. The rule is `offersPasskeyHere` in `ladder.ts`; the screens before sign-in are unchanged for every address (ADR 0018).
 
+### Release assets
+
+Built by CI from the tag. All three are covered by one provenance attestation (`gh attestation verify <file> --repo davidyokum/auth-kit`, verified 2026-10-26: SLSA provenance v1, built by `.github/workflows/ci.yml` at `refs/tags/v0.1.13-alpha.1`, commit `44e77d1`). A local `npm run build:preview` of the tag reproduces both preview files byte for byte.
+
+| File | Bytes | sha256 |
+|---|---|---|
+| `auth-kit-0.1.13-alpha.1.tgz` | 1,528,477 | `abe091cac89487cf273635368954a2d809d84bc70891c843be325e987f41b7d6` |
+| `auth-kit-preview.js` | 394,533 (120,771 gzipped) | `e33c7b76d6f02bdae7539d570eb2a6dbc5c07408ece6233f772fb87fca714ab9` |
+| `auth-kit-preview-backdrops.js` | 613,259 (373,371 gzipped) | `9c79e67cf2f663c43b131d34c8ecca15a630af4b55070444379956ece39c3cde` |
+
 ## [0.1.12-alpha.1] - 2026-10-22
 
 A first sign-in that people can find. On the first live site, a newly invited account (nothing saved yet, so only an emailed code gets in) met "How do you want to sign in?" with the passkey row filled and recommended, tried it and the password, and found no way in. Pre-release. No breaking changes; one new optional prop.
