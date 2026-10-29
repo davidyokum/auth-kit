@@ -29,7 +29,11 @@ describe('the public repo holds no secrets or real identifiers', () => {
   });
 
   it('has no AWS account IDs (12-digit numbers)', () => {
-    const hits = all.flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/(?<![\d.])\d{12}(?![\d.])/g)].map((m) => `${relative(ROOT, f)}: ${m[0]}`));
+    // A sha256 (64 hex characters, as the release notes list them) can hold twelve digits in a row by chance; it
+    // isn't an account ID, so hashes are set aside before looking.
+    const hits = all.flatMap((f) =>
+      [...readFileSync(f, 'utf8').replace(/\b[0-9a-f]{64}\b/g, '').matchAll(/(?<![\d.])\d{12}(?![\d.])/g)].map((m) => `${relative(ROOT, f)}: ${m[0]}`),
+    );
     expect(hits).toEqual([]);
   });
 
