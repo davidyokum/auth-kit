@@ -146,9 +146,9 @@
     "test:screenshots": "playwright test"
   },
   "dependencies": {
-    "@aws-sdk/client-cognito-identity-provider": "^3.1152.0",
-    "@aws-sdk/client-dynamodb": "^3.1152.0",
-    "@aws-sdk/client-sesv2": "^3.1152.0",
+    "@aws-sdk/client-cognito-identity-provider": "^3.1158.0",
+    "@aws-sdk/client-dynamodb": "^3.1158.0",
+    "@aws-sdk/client-sesv2": "^3.1158.0",
     "aws-jwt-verify": "^5.2.1"
   },
   "peerDependencies": {
@@ -193,7 +193,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "aws-amplify": "^6.22.2",
-    "aws-cdk-lib": "^2.273.0",
+    "aws-cdk-lib": "^2.275.0",
     "aws-sdk-client-mock": "^4.1.0",
     "constructs": "^10.8.1",
     "esbuild": "^0.27.7",
