@@ -22,6 +22,8 @@ function expectAuditedWrites(timeline: string[]) {
 }
 
 describe('listPeople', () => {
+  // Vera has a name and the others don't: Cognito refuses a ListUsers that names `name` then (the fixture
+  // does too), so this also checks the list asks for no attributes by name (0.1.14).
   it('joins a paginated ListUsers snapshot with ListUsersInGroup, without per-person reads', async () => {
     const t = setup({ actor: ADMIN, pool: { pageSize: 2 } });
     t.pool.add({ sub: 'v-1', email: 'vera@example.org', name: 'Vera' }, 'admin-view', 'reviewer');

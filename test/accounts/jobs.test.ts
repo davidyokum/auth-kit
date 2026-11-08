@@ -137,7 +137,8 @@ describe('createUnverifiedAccountSweep', () => {
     const { pool, sweep, timeline } = sweepSetup();
     seedAccounts(pool);
     await sweep();
-    for (const input of pool.inputsOf(ListUsersCommand)) expect(input.AttributesToGet).toContain('custom:authkit_origin');
+    // Every attribute comes back (the sign-up mark included): naming them fails when one person lacks one.
+    for (const input of pool.inputsOf(ListUsersCommand)) expect(input.AttributesToGet).toBeUndefined();
     expect(usernames(pool.inputsOf(AdminListGroupsForUserCommand))).toEqual(['stray', 'exactly-24h', 'owner', 'given-role']);
     // Re-read just before each delete, and only then.
     expect(usernames(pool.inputsOf(AdminGetUserCommand))).toEqual(['stray', 'exactly-24h']);

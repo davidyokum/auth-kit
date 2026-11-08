@@ -2,6 +2,12 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## Unreleased
+
+### Fixed
+
+- **The People page lists people again when some have no name** (found 2026-11-08 on the PMA Event Series sandbox and auth-kit-demo's live pool). The list asked Cognito's ListUsers for four attributes by name (`sub`, `email`, `email_verified`, `name`), and Cognito now refuses the whole page, with "Input fails to satisfy the constraints", when any person on it lacks one. Invites don't set `name`, so most pools couldn't be listed: the page showed "Couldn't load people". ListUsers now asks for no attributes by name and reads what comes back, so the sign-up mark (`custom:authkit_origin`) arrives the same way and the unverified-account sweep no longer trips on admin invites, which don't carry it. `CognitoAdminOptions.signUpOrigin` is deprecated and ignored. The test pool refuses a named attribute someone lacks, as Cognito does.
+
 ## [0.1.13-alpha.1] - 2026-10-26
 
 A passkey from another device now leads to one on this device. Pre-release. No breaking changes.

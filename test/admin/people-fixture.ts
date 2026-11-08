@@ -135,7 +135,13 @@ export function fakeUserPool(options: { pageSize?: number; passwordless?: boolea
         }
       }
       const { slice, next } = page(list, input.PaginationToken, input.Limit);
-      return { Users: slice.map((u) => toType(u, input.AttributesToGet)), ...(next && { PaginationToken: next }) };
+      // Like Cognito (seen 2026-11-08): naming an attribute that a listed person doesn't have is refused
+      // outright, so a pool where some people have no `name` can't be listed that way.
+      const wanted = input.AttributesToGet;
+      if (wanted && slice.some((u) => wanted.some((a) => !toType(u).Attributes?.some((x) => x.Name === a)))) {
+        throw awsError('InvalidParameterException', 'Input fails to satisfy the constraints.');
+      }
+      return { Users: slice.map((u) => toType(u, wanted)), ...(next && { PaginationToken: next }) };
     }),
   );
   mock.on(ListUsersInGroupCommand).callsFake(

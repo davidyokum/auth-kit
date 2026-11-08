@@ -69,28 +69,25 @@ function filterValue(value: string): string {
   return `"${value}"`;
 }
 
-const LIST_ATTRIBUTES = ['sub', 'email', 'email_verified', 'name'];
-
 /**
  * The Admin* and List* calls the People page makes, each spent against its quota category. Reads
  * retry transient failures; writes retry only throttling (which guarantees the call didn't run).
  */
 export interface CognitoAdminOptions {
-  /** Also read the sign-up mark (`custom:authkit_origin`). Only on sign-up sites, whose pools have it. */
+  /**
+   * @deprecated Ignored since 0.1.14: ListUsers now returns every attribute, the sign-up mark included.
+   * (Naming attributes made Cognito refuse the whole page when one person lacked one, such as `name`.)
+   */
   signUpOrigin?: boolean;
 }
 
 export class CognitoAdmin {
-  private readonly attributes: string[];
-
   constructor(
     readonly client: CognitoIdentityProviderClient,
     readonly userPoolId: string,
     private readonly limiter: QuotaLimiter,
-    options: CognitoAdminOptions = {},
-  ) {
-    this.attributes = options.signUpOrigin ? [...LIST_ATTRIBUTES, SIGN_UP_ORIGIN_ATTRIBUTE] : LIST_ATTRIBUTES;
-  }
+    _options: CognitoAdminOptions = {},
+  ) {}
 
   /** Everyone, 60 a page (ListUsers' maximum), stopping at `max`. */
   async listUsers(max: number): Promise<{ users: CognitoPerson[]; truncated: boolean }> {
@@ -101,7 +98,7 @@ export class CognitoAdmin {
         'UserList',
         () =>
           this.client.send(
-            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, AttributesToGet: this.attributes, PaginationToken: token }),
+            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, PaginationToken: token }),
           ),
         { read: true },
       );
@@ -127,7 +124,7 @@ export class CognitoAdmin {
         'UserList',
         () =>
           this.client.send(
-            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, AttributesToGet: this.attributes, PaginationToken: token, ...(filter !== undefined && { Filter: filter }) }),
+            new ListUsersCommand({ UserPoolId: this.userPoolId, Limit: 60, PaginationToken: token, ...(filter !== undefined && { Filter: filter }) }),
           ),
         { read: true },
       );
@@ -177,7 +174,7 @@ export class CognitoAdmin {
   private async findOne(filter: string): Promise<CognitoPerson | null> {
     const page = await this.limiter.run(
       'UserList',
-      () => this.client.send(new ListUsersCommand({ UserPoolId: this.userPoolId, Filter: filter, Limit: 2, AttributesToGet: this.attributes })),
+      () => this.client.send(new ListUsersCommand({ UserPoolId: this.userPoolId, Filter: filter, Limit: 2 })),
       { read: true },
     );
     return personFromUser(page.Users?.[0]);
