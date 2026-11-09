@@ -145,6 +145,34 @@ function liveAct(_name: string, handler?: (...args: never[]) => void): ((...args
 }
 
 /**
+ * The older way to copy: select the text in an off-screen field and run the browser's copy command.
+ * Deprecated but still supported everywhere, and it works where the async clipboard is refused (a
+ * webview, a browser setting, a document without focus). True when the browser says it copied.
+ */
+function copyWithSelection(text: string): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false;
+  const field = document.createElement('textarea');
+  field.value = text;
+  field.setAttribute('readonly', '');
+  field.setAttribute('aria-hidden', 'true');
+  field.style.position = 'fixed';
+  field.style.top = '0';
+  field.style.left = '-9999px';
+  field.style.opacity = '0';
+  const active = document.activeElement as HTMLElement | null;
+  document.body.appendChild(field);
+  try {
+    field.select();
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    field.remove();
+    active?.focus?.();
+  }
+}
+
+/**
  * Exactly what the screens did before the driver existed. Each member calls through at call time, so a
  * module a test mocks (`aws-amplify/auth`, `./cognito.js`) is the one that runs.
  */
@@ -195,8 +223,11 @@ export const LIVE_DRIVER: ClientDriver = Object.freeze({
   breachedPasswordProblem: (password: string, check: BreachedPasswordCheck | false | undefined) => breachedPasswordProblem(password, check),
   writeClipboard(text: string): Promise<void> {
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
-    if (!clipboard) return Promise.reject(new Error('No clipboard here.'));
-    return clipboard.writeText(text);
+    const fallback = () => (copyWithSelection(text) ? Promise.resolve() : Promise.reject(new Error('No clipboard here.')));
+    if (!clipboard?.writeText) return fallback();
+    // Some browsers and embedded views refuse the async clipboard even on a click; the selection copy
+    // still works there, inside the same click.
+    return clipboard.writeText(text).catch(fallback);
   },
   navigate: (path: string) => window.location.assign(path),
 });

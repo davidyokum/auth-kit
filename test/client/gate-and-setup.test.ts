@@ -212,6 +212,43 @@ describe('AuthenticatorSetup', () => {
     expect(screen.getByRole('alert').textContent).toBe('Couldn’t copy here. Select the key and copy it instead.');
   });
 
+  it('copies by selection where the async clipboard is refused (an embedded browser, a blocked permission)', async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockRejectedValue(Object.assign(new Error('Write permission denied.'), { name: 'NotAllowedError' }));
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    let copied = '';
+    const execCommand = vi.fn((command: string) => {
+      copied = command === 'copy' ? (document.querySelector<HTMLTextAreaElement>('textarea[aria-hidden="true"]')?.value ?? '') : '';
+      return command === 'copy';
+    });
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
+    try {
+      render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+      await user.click(await screen.findByRole('button', { name: COPY }));
+      await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+      expect(writeText).toHaveBeenCalledWith(TEST_SECRET.replace(/\s/g, ''));
+      expect(copied).toBe(TEST_SECRET.replace(/\s/g, ''));
+      expect(screen.queryByRole('alert')).toBeNull();
+      // The off-screen field is gone again.
+      expect(document.querySelectorAll('textarea[aria-hidden="true"]')).toHaveLength(0);
+    } finally {
+      Reflect.deleteProperty(document, 'execCommand');
+    }
+  });
+
+  it('still says plainly when neither way of copying works', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) }, configurable: true });
+    Object.defineProperty(document, 'execCommand', { value: vi.fn(() => false), configurable: true });
+    try {
+      render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+      await user.click(await screen.findByRole('button', { name: COPY }));
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Couldn’t copy here. Select the key and copy it instead.'));
+    } finally {
+      Reflect.deleteProperty(document, 'execCommand');
+    }
+  });
+
   it('explains a wrong code and clears the field for the next one', async () => {
     const user = userEvent.setup();
     auth.verifyTOTPSetup.mockRejectedValueOnce(awsError('EnableSoftwareTokenMFAException', 'Code mismatch'));
