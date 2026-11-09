@@ -71,7 +71,7 @@ export function PreviewCard(props: { r: ResolvedPreviewSpec; placement: ReturnTy
           checkBreachedPassword={false}
           {...(placement.reauth && { reauth: true })}
           {...(placement.firstVisit && { firstVisit: true })}
-          {...(r.qrCode && { renderQrCode: sampleQrCode })}
+          renderQrCode={r.qrCode ? sampleQrCode : false}
         />
       );
     case 'sign-up': {
@@ -87,7 +87,7 @@ export function PreviewCard(props: { r: ResolvedPreviewSpec; placement: ReturnTy
           passkeysEnabled={r.passkeysEnabled}
           notices={{ mounted: true }}
           checkBreachedPassword={false}
-          {...(r.qrCode && { renderQrCode: sampleQrCode })}
+          renderQrCode={r.qrCode ? sampleQrCode : false}
         />
       );
     }

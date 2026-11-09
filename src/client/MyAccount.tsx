@@ -49,7 +49,7 @@ export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
   loadFactors?: () => Promise<ClientAuthFactors>;
   /** Heading level for the page heading; sections use the next level. Default 1. */
   headingLevel?: HeadingLevel;
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
   /**
    * Sign-up sites (register D4): members change their own email address and delete their own
    * account. Without it, the email is read-only ("ask the site's admin") and there's no delete.
@@ -292,7 +292,7 @@ export function MyAccount(props: MyAccountProps) {
           reloadFactors();
         }}
         {...(editing === 'authenticator' && { onCancel: () => setEditing(null) })}
-        {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+        {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
         classNames={classNames}
       />
     );

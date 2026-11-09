@@ -3,11 +3,12 @@ import { hasPasskeyHint, rememberPasskey } from '../../src/client/passkey-hint.j
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type * as CognitoModule from '../../src/client/cognito.js';
 import { type ClientAuthFactors, SignIn, type SignInProps, authTheme } from '../../src/client/index.js';
 import type { ThemeFamily } from '../../src/themes/index.js';
 import { auth, awsError, next, resetAmplifyMocks, SIGNED_IN, TEST_SECRET } from './amplify-mock.js';
+import { pretendTouchDevice } from './touch.js';
 
 vi.mock('aws-amplify', async () => (await import('./amplify-mock.js')).amplifyModule);
 vi.mock('aws-amplify/auth', async () => (await import('./amplify-mock.js')).authModule);
@@ -1064,6 +1065,8 @@ describe('emailed code (the backstop) and joining', () => {
 
 describe('after sign-in', () => {
   it('a password user without an authenticator gets only the setup screen', async () => {
+    const restore = pretendTouchDevice();
+    onTestFinished(restore);
     auth.signIn.mockResolvedValue(SIGNED_IN);
     const { user, navigate } = setup({ passkeysEnabled: false }, [{ configured: ['PASSWORD', 'EMAIL_OTP'], mfa: [] }, { configured: ['PASSWORD'], mfa: ['SOFTWARE_TOKEN_MFA'] }]);
     await user.type(emailField(), 'ada@example.org{Enter}');

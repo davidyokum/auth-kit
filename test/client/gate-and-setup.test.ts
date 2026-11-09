@@ -2,9 +2,10 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createElement, StrictMode, useEffect } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { AuthenticatorSetup, type ClientAuthFactors, TOTPEnrollmentGate } from '../../src/client/index.js';
 import { auth, awsError, resetAmplifyMocks, TEST_SECRET } from './amplify-mock.js';
+import { pretendTouchDevice } from './touch.js';
 
 vi.mock('aws-amplify', async () => (await import('./amplify-mock.js')).amplifyModule);
 vi.mock('aws-amplify/auth', async () => (await import('./amplify-mock.js')).authModule);
@@ -141,6 +142,7 @@ const COPY = /^Copy ?setup key$/;
 
 describe('AuthenticatorSetup', () => {
   it('starts one setup even under StrictMode, labels it with the account email, and offers the key', async () => {
+    onTestFinished(pretendTouchDevice());
     const user = userEvent.setup();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
@@ -168,19 +170,40 @@ describe('AuthenticatorSetup', () => {
     expect(auth.verifyTOTPSetup).toHaveBeenCalledWith({ code: '123456' });
   });
 
-  it('Card Studio’s words: "Add an authenticator app", the setup key with Copy, and Continue', async () => {
+  it('Card Studio’s words: "Add an authenticator app", its own QR code, the setup key with Copy, and Continue', async () => {
     render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
     expect(screen.getByRole('heading', { name: 'Add an authenticator app', level: 2 })).toBeTruthy();
-    // No QR code: the intro speaks of the setup key.
-    expect(screen.getByText('Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.')).toBeTruthy();
+    // auth-kit draws the QR code itself (ADR 0027): the intro says to scan it, and the key is the fallback.
+    expect(screen.getByText('Scan the code with your app or password manager, then enter the 6-digit code it shows.')).toBeTruthy();
     expect(await screen.findByLabelText('Setup key')).toBeTruthy();
+    const qr = screen.getByRole('img', { name: 'QR code for your authenticator app' });
+    await waitFor(() => expect(qr.querySelector('path')?.getAttribute('d')).toMatch(/^M\d+ \d+h1v1h-1z/));
+    expect(screen.getByText('Can’t scan it? Enter this setup key in your app instead.')).toBeTruthy();
     expect(screen.getByRole('button', { name: COPY }).textContent).toBe('Copy setup key');
-    expect(screen.queryByText('Can’t scan it? Enter this setup key in your app instead.')).toBeNull();
     const submit = screen.getByRole('button', { name: 'Continue' });
     expect(submit.getAttribute('type')).toBe('submit');
     expect(screen.getByLabelText('6-digit code').getAttribute('autocomplete')).toBe('one-time-code');
     // Required where it's used: no cancel unless the caller asks for one.
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+  });
+
+  it('on a computer there is no setup link (an otpauth:// link opens nothing there); on a phone there is', async () => {
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+    expect(await screen.findByLabelText('Setup key')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'On this device? Open the setup link.' })).toBeNull();
+    cleanup();
+    onTestFinished(pretendTouchDevice());
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
+    const link = await screen.findByRole('link', { name: 'On this device? Open the setup link.' });
+    expect(link.getAttribute('href')).toMatch(/^otpauth:\/\/totp\//);
+  });
+
+  it('without a QR code (renderQrCode false), the intro speaks of the setup key', async () => {
+    render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org', renderQrCode: false }));
+    expect(screen.getByText('Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.')).toBeTruthy();
+    expect(await screen.findByLabelText('Setup key')).toBeTruthy();
+    expect(screen.queryByRole('img', { name: 'QR code for your authenticator app' })).toBeNull();
+    expect(screen.queryByText('Can’t scan it? Enter this setup key in your app instead.')).toBeNull();
   });
 
   it('with a QR code, the intro says to scan it, and the key is the fallback', async () => {

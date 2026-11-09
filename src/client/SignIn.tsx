@@ -117,7 +117,7 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   loadFactors?: () => Promise<ClientAuthFactors>;
   /** Default 1: the sign-in screen is usually the page. */
   headingLevel?: HeadingLevel;
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
   /**
    * The email field's example address (A9): defaults to the family's (`name@osbm.nc.gov`), and a site
    * may set its own (`name@nc.gov`). A hint inside the field, under the "Email address" label.
@@ -951,7 +951,7 @@ export function SignIn(props: SignInProps) {
           }}
           onCancel={act('start-again', backToEmail)}
           cancelLabel={SIGN_IN.startAgain}
-          {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+          {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
           classNames={classNames}
         />
       );
@@ -1086,7 +1086,7 @@ export function SignIn(props: SignInProps) {
           intro={FIRST_VISIT.addTotpAfterPassword}
           headingLevel={level}
           onDone={() => void afterSignIn()}
-          {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+          {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
           classNames={classNames}
         />
       );
@@ -1102,7 +1102,7 @@ export function SignIn(props: SignInProps) {
             // ChooseFirstCredential has already set the passkey hint for accountName (register A5a).
             void driver.sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', how, emailed }));
           }}
-          {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+          {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
           classNames={classNames}
         />

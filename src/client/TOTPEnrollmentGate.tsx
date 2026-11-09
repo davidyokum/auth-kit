@@ -28,7 +28,7 @@ export interface TOTPEnrollmentGateProps extends StyleProps {
   /** After setup (tokens are already refreshed): e.g. `router.refresh()` so server components re-check. */
   onEnrolled?: () => void;
   headingLevel?: HeadingLevel;
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
 }
 
 type GateState = { kind: 'checking' } | { kind: 'open' } | { kind: 'enroll' } | { kind: 'error'; message: string };
@@ -114,7 +114,7 @@ export function TOTPEnrollmentGate(props: TOTPEnrollmentGateProps) {
             setState({ kind: 'open' });
             props.onEnrolled?.();
           }}
-          {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+          {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
           classNames={classNames}
         />
       ) : null}

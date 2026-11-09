@@ -3,6 +3,7 @@ import type { AuthenticatorEnrollment } from './api.js';
 import { ERRORS, FIRST_VISIT, SHARED, SIGN_IN, STATUS } from './copy.js';
 import { tagged, useDriver } from './driver.js';
 import { Icon } from './icons.js';
+import { QrCode } from './qr.js';
 import { SIGN_IN_AUTOCOMPLETE, normalizeCode } from './ladder.js';
 import { describeAuthError } from './messages.js';
 import { buildOtpauthUri, formatSetupKey } from './totp.js';
@@ -31,17 +32,18 @@ export interface AuthenticatorSetupProps extends StyleProps {
   submitLabel?: string;
   headingLevel?: HeadingLevel;
   /**
-   * Renders a QR code for the `otpauth://` link (auth-kit ships none, to stay dependency-free):
-   * `renderQrCode={(uri) => <QRCodeSVG value={uri} title="Authenticator setup QR code" />}`.
+   * The QR code for the `otpauth://` link. Omit it for auth-kit's own (an inline SVG, its encoder
+   * loaded on first use; ADR 0027); pass a function to draw your own, or `false` for none.
    */
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
   /** A name for this authenticator in Cognito. */
   deviceName?: string;
 }
 
 /**
- * "Add an authenticator app" (Card Studio v4): a QR code when the site renders one, the setup key as
- * text with Copy (WCAG 3.3.8), a same-device setup link, then one 6-digit code. Used inside sign-in,
+ * "Add an authenticator app" (Card Studio v4): a QR code (auth-kit's own unless the site draws one or
+ * turns it off), the setup key as text with Copy (WCAG 3.3.8), a setup link on touch devices (where an
+ * app can take it; on a computer it opens nothing), then one 6-digit code. Used inside sign-in,
  * by the enrollment gate, and under My account.
  */
 export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
@@ -147,7 +149,12 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
     }
   }
 
-  const qr = props.renderQrCode && uri ? props.renderQrCode(uri) : null;
+  const showQr = props.renderQrCode !== false;
+  const qr = !showQr || !uri ? null : props.renderQrCode ? props.renderQrCode(uri) : <QrCode value={uri} label={FIRST_VISIT.qrLabel} />;
+  // The setup link opens an authenticator app only where one can take it (a phone or tablet). Decided
+  // after the first paint, so the server's HTML and the browser's agree.
+  const [touch, setTouch] = useState(false);
+  useEffect(() => setTouch(driver.isTouchDevice()), [driver]);
   const codeId = `${uid}-code`;
   const retryNow = driver.act('try-again', retry);
   const copyNow = driver.act('copy-setup-key', copy);
@@ -159,7 +166,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
       <Heading level={props.headingLevel ?? 2} classNames={classNames}>
         {props.heading ?? FIRST_VISIT.addTotpHeading}
       </Heading>
-      <Text classNames={classNames}>{props.intro ?? (props.renderQrCode ? FIRST_VISIT.addTotpSub : FIRST_VISIT.addTotpSubNoQr)}</Text>
+      <Text classNames={classNames}>{props.intro ?? (showQr ? FIRST_VISIT.addTotpSub : FIRST_VISIT.addTotpSubNoQr)}</Text>
       <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? STATUS.preparingSetupKey : null)} />
       {loadFailed ? (
         <Actions classNames={classNames}>
@@ -187,11 +194,13 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
               <span data-auth-kit-sr="">{SHARED.setupKeySr}</span>
             </Button>
           </p>
-          <p {...slot(classNames, 'small')}>
-            <a href={uri} onClick={openLink} {...tagged(openLink)} {...slot(classNames, 'link')}>
-              {FIRST_VISIT.openSetupLink}
-            </a>
-          </p>
+          {touch ? (
+            <p {...slot(classNames, 'small')}>
+              <a href={uri} onClick={openLink} {...tagged(openLink)} {...slot(classNames, 'link')}>
+                {FIRST_VISIT.openSetupLink}
+              </a>
+            </p>
+          ) : null}
           <Field
             id={codeId}
             label={SIGN_IN.totpLabel}

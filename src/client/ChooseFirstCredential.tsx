@@ -39,7 +39,7 @@ export interface ChooseFirstCredentialProps extends StyleProps, PasswordCheckOpt
   /** Called once a passkey is saved (and the hint set), or a password and an authenticator are both set. */
   onDone: (how: FirstCredential) => void;
   headingLevel?: HeadingLevel;
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
 }
 
 /** Where the chooser is. Exported for the driver (ADR 0025), not from `auth-kit/client`. */
@@ -133,7 +133,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         {...(props.accountName !== undefined && { accountName: props.accountName })}
         headingLevel={level}
         onDone={() => props.onDone('password')}
-        {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+        {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
         classNames={classNames}
       />
     );

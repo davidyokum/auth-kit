@@ -88,6 +88,8 @@ export interface DriverEffects {
   readonly takeHandedOffEmail: () => string;
   readonly breachedPasswordProblem: (password: string, check: BreachedPasswordCheck | false | undefined) => Promise<string | null>;
   readonly writeClipboard: (text: string) => Promise<void>;
+  /** Whether this is a touch device (a phone or tablet), where an `otpauth://` link opens an app. */
+  readonly isTouchDevice: () => boolean;
   /** A full page load, so the server sees the new cookies. A screen's own `navigate` prop wins. */
   readonly navigate: (path: string) => void;
 }
@@ -229,6 +231,7 @@ export const LIVE_DRIVER: ClientDriver = Object.freeze({
     // still works there, inside the same click.
     return clipboard.writeText(text).catch(fallback);
   },
+  isTouchDevice: () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches,
   navigate: (path: string) => window.location.assign(path),
 });
 

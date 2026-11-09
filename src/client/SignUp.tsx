@@ -68,7 +68,7 @@ export interface SignUpProps extends StyleProps, PasswordCheckOptions {
   navigate?: (path: string) => void;
   loadFactors?: () => Promise<ClientAuthFactors>;
   headingLevel?: HeadingLevel;
-  renderQrCode?: (otpauthUri: string) => ReactNode;
+  renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
   /** Inject `fetch` (tests). Default: AWS WAF's integration when the page loaded it, else `fetch`. */
   fetch?: typeof fetch;
 }
@@ -452,14 +452,14 @@ export function SignUp(props: SignUpProps) {
             // ChooseFirstCredential has already set the passkey hint for accountName (register A5a; L9).
             void driver.sendAccountNotice(notices, how === 'password' ? 'password-changed' : 'passkey-added').then((emailed) => go({ name: 'done', emailed }));
           }}
-          {...(props.renderQrCode && { renderQrCode: props.renderQrCode })}
+          {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
           {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}
           classNames={classNames}
         />
       );
       break;
     case 'enroll-authenticator':
-      body = <AuthenticatorSetup issuer={siteName} accountName={email.trim()} headingLevel={level} onDone={finish} {...(props.renderQrCode && { renderQrCode: props.renderQrCode })} classNames={classNames} />;
+      body = <AuthenticatorSetup issuer={siteName} accountName={email.trim()} headingLevel={level} onDone={finish} {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })} classNames={classNames} />;
       break;
     case 'done':
       body = (

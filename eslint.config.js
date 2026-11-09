@@ -4,7 +4,7 @@ import tseslint from 'typescript-eslint';
 export default tseslint.config(
   // test/e2e/app is a plain-JS Next app the e2e test builds and runs; Next owns its conventions.
   // release/ is preview mode's built standalone files (scripts/build-preview.mjs).
-  { ignores: ['dist/**', 'release/**', 'coverage/**', 'node_modules/**', 'cdk.out/**', 'test/e2e/app/**', 'test-results/**', 'playwright-report/**'] },
+  { ignores: ['dist/**', 'release/**', 'coverage/**', 'node_modules/**', 'cdk.out/**', 'test/e2e/app/**', 'test-results/**', 'playwright-report/**', 'src/client/vendor/*.js'] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

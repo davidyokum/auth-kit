@@ -170,6 +170,7 @@ export const FIRST_VISIT = {
   addTotpAfterPassword: 'You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute.',
   addTotpSubNoQr: 'Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.',
   cantScan: 'Can’t scan it? Enter this setup key in your app instead.',
+  qrLabel: 'QR code for your authenticator app',
   setupKeyLabel: 'Setup key',
   copy: 'Copy',
   copied: 'Setup key copied.',

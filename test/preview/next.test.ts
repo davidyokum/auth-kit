@@ -15,6 +15,9 @@ import { rememberPasskey } from '../../src/client/passkey-hint.js';
 import { AuthKitPreview, nextAfter, placementOf, type PreviewSpec, resolvePreviewSpec } from '../../src/preview/index.js';
 import { PreviewCard } from '../../src/preview/Preview.js';
 import { auth, next as nextStep, resetAmplifyMocks, SIGNED_IN } from '../client/amplify-mock.js';
+import { pretendTouchDevice } from '../client/touch.js';
+
+let restoreTouch: () => void = () => undefined;
 
 vi.mock('aws-amplify', async () => (await import('../client/amplify-mock.js')).amplifyModule);
 vi.mock('aws-amplify/auth', async () => (await import('../client/amplify-mock.js')).authModule);
@@ -26,6 +29,8 @@ vi.mock('../../src/client/cognito.js', async (importOriginal) => ({ ...(await im
 const pending = () => new Promise<never>(() => undefined);
 
 beforeEach(() => {
+  // The live card shows the setup link on touch devices only; the held screens are drawn as a phone shows them.
+  restoreTouch = pretendTouchDevice();
   resetAmplifyMocks();
   window.localStorage.clear();
   window.sessionStorage.clear();
@@ -43,6 +48,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreTouch();
   cleanup();
   vi.unstubAllGlobals();
 });

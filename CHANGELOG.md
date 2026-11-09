@@ -2,6 +2,19 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.15-alpha.1] - 2026-11-09
+
+"Add an authenticator app" works: a QR code built in, Copy that copies, and the setup link only where it opens something ([ADR 0027](docs/decisions/0027-authenticator-setup-that-works.md)). Pre-release. No breaking changes.
+
+### Changed
+
+- **auth-kit draws the QR code** on "Add an authenticator app" (David, 2026-11-09, setting up the first real site: no QR, a 52-character key, and two buttons that did nothing). Sites passed `renderQrCode` or got none, and the template passed none. Now every site gets one: an inline SVG from a vendored encoder (qrcode-generator 2.0.4, MIT), loaded on first use in its own chunk. `renderQrCode` still draws a site's own, and `renderQrCode={false}` turns it off.
+- **The setup link ("On this device? Open the setup link.") shows on phones and tablets only.** On a computer an `otpauth://` link opens nothing. Preview mode holds screens as a phone shows them.
+
+### Fixed
+
+- **Copy copies where the browser refuses the async clipboard.** It falls back, inside the same click, to selecting the key in an off-screen field and running the copy command; "Couldn't copy here" shows only when both fail.
+
 ## [0.1.14-alpha.2] - 2026-11-08
 
 The People page lists people who have no name again. Pre-release. No breaking changes. (The `v0.1.14-alpha.1` tag was never released: CI's `npm ci` refused its lockfile, whose semver 7.8.5 no longer satisfied a dependency; this release carries the same fix with the lockfile updated.)
