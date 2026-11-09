@@ -2,7 +2,9 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
-## Unreleased
+## [0.1.14-alpha.1] - 2026-11-08
+
+The People page lists people who have no name again. Pre-release. No breaking changes.
 
 ### Fixed
 
