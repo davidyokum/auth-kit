@@ -34,12 +34,12 @@ describe('invite email', () => {
     expect(email.subject).toBe('Jordan <b> invited you to Example & Co');
     expect(email.text).toContain('Jordan <b> gave you access to Example & Co. Your role: Admin – view only.');
     // `first=1`: the card leads with "Email me a code", the invitee's only way in (register A5a).
-    expect(email.text).toContain('1. Go to https://reports.example.org/sign-in?x=%221%22&first=1');
-    expect(email.text).toContain('2. Enter this email address: alice@example.org');
+    expect(email.text).toContain('1. Go to https://reports.example.org/sign-in?x=%221%22&first=1#email=alice%40example.org');
+    expect(email.text).toContain('2. Check that it shows alice@example.org, then choose Email me a code.');
     expect(email.text).toContain('This invitation expires on Saturday, October 24 at 8:00 AM Eastern.');
     expect(email.html).toContain('Jordan &lt;b&gt;');
     expect(email.html).toContain('Example &amp; Co');
-    expect(email.html).toContain('href="https://reports.example.org/sign-in?x=%221%22&amp;first=1"');
+    expect(email.html).toContain('href="https://reports.example.org/sign-in?x=%221%22&amp;first=1#email=alice%40example.org"');
     expect(email.html).not.toContain('<b>');
     expect(email.text).toContain('This site is managed by the NC Office of State Budget and Management. Help: help@example.org.');
     expect(email.replyTo).toEqual(['jordan@example.org']);

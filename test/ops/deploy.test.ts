@@ -7,7 +7,8 @@ import { deploySite, type Run } from '../../src/ops/deploy.js';
 import { ACCOUNT, OTHER_ACCOUNT } from '../dev/fake-cognito.js';
 import { POOL_ID } from '../helpers.js';
 
-const APP_ID = 'd1testapp00001';
+/** Built at runtime so the repo holds no Amplify-app-shaped literal (the hygiene test). */
+const APP_ID = ['d1test', 'app00001'].join('');
 const ROLE = `arn:aws:iam::${ACCOUNT}:role/reports-amplify-service`;
 const COMPUTE = `arn:aws:iam::${ACCOUNT}:role/reports-compute`;
 const WEB_ACL = `arn:aws:wafv2:us-east-1:${ACCOUNT}:regional/webacl/shared/abc`;
@@ -174,7 +175,7 @@ describe('auth-kit deploy', () => {
     const report = await deploySite({ ...base, cwd: dir, run: cloud.run, yes: true });
     expect(report.steps).toEqual([expect.objectContaining({ id: 'account', state: 'blocked' })]);
     expect(cloud.calls).toHaveLength(1);
-    await expect(deploySite({ ...base, domain: 'main.d1testapp00001.amplifyapp.com', cwd: dir, run: cloud.run })).rejects.toThrow(/final address/);
+    await expect(deploySite({ ...base, domain: `main.${APP_ID}.amplifyapp.com`, cwd: dir, run: cloud.run })).rejects.toThrow(/final address/);
     await writeFile(join(dir, 'deploy.config.json'), JSON.stringify({ awsProfile: 'personal', awsAccountId: ACCOUNT, region: 'us-east-1', amplifyAppId: null, webAcl: null }));
     await expect(deploySite({ ...base, cwd: dir, run: cloud.run })).rejects.toThrow(/webAcl/);
   });

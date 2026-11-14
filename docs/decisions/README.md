@@ -30,3 +30,5 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0024](0024-sign-in-copy-and-family-themes.md) | Sign-in copy, families as themes, the card edge, the help route, and emails that match the card |
 | [0025](0025-preview-mode.md) | Preview mode: the real card held at any screen and state, inert, through a driver; a standalone release file; screenshot tests |
 | [0026](0026-smooth-backdrops.md) | Smooth backdrops: up to 60 frames a second; Contours v2 drifts smoothly and follows the pointer |
+| [0027](0027-authenticator-setup-that-works.md) | Authenticator setup that works: a QR code built in, Copy that copies, the setup link on phones only |
+| [0028](0028-the-owner-decides-and-the-kit-deploys.md) | The owner decides, the kit deploys: a first visit that's one code, and owner, deploy, and upgrade commands |

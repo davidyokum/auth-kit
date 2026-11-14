@@ -2,6 +2,28 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.16-alpha.1] - 2026-11-14
+
+The first sign-in is one code and one fingerprint, and the steps an agent used to leave to the site's owner are commands: `owner`, `deploy`, and `upgrade` ([ADR 0028](docs/decisions/0028-the-owner-decides-and-the-kit-deploys.md)). From a retrospective of five real sites. Pre-release. No breaking changes.
+
+### Added
+
+- **`npx auth-kit owner`**: makes the site's one owner (no password; the owner group) and emails them the invite, role Owner, so they arrive in first-visit mode with their address filled in. Replaces the README's two hand-typed AWS commands and "go to /sign-in, choose Email me a code instead". Refuses another account's pool, a site with a different owner, and an address that has signed in; run again, it re-sends the invite; `--dry-run` lists the steps.
+- **`npx auth-kit deploy`**: the last mile, in order (account check, private GitHub repository, service role, Amplify app, branch with `APP_ORIGIN`, first build, compute role and a rebuild, the final address with its DNS records, then the owner). Without `--yes` it only prints the plan. Every step skips what exists, so it's run again after the DNS records go in. The final address comes before the owner, so passkeys work from the first sign-in. The GitHub token reaches Amplify in a 0600 file it deletes, never on a command line.
+- **`npx auth-kit upgrade <version>`**: changes only the kit's lines in `package.json` and `package-lock.json`, with the tarball's real integrity; refuses when the release needs a dependency the lockfile can't give; checks with Amplify's npm (`npx npm@10.9.9 ci --dry-run`) and restores both files if it fails. `npm install <url>` re-resolved the tree, and twice its lockfile failed Amplify's build.
+- **`check-prod-build --protected <file>`** (repeatable; `protected` on `checkProductionBuild`, `protectedPhrases`): fails when a protected phrase is in `.next/static`, which anyone with a file's address can download. Found on a live site, where a client component's import put attendee names in a public chunk. Findings name the file and the source, never the phrase.
+
+### Changed
+
+- **A first visit (`?first=1`): the email step's button is "Email me a code", and it sends the code**, for every address alike. Before, a first visit took Continue, then "How do you want to sign in?", then the code; and on a site whose passkeys weren't on yet, Continue went to "Enter your password", which a new account doesn't have. The passkey and the password stay as the other ways. A line under the field says what follows: a passkey, or a password before passkeys are on (`SIGN_IN.firstVisitLine`, `firstVisitLineNoPasskey`).
+- **The invite's link carries the address** in its fragment (`?first=1#email=…`, never sent to a server); the card fills it in and removes it from the address bar (`firstVisitUrl(signInUrl, email)`; the driver's `takeLinkEmail`). The invite's steps say "Check that it shows {email}, then choose Email me a code."
+- **"Add an authenticator app" says** "Once it’s added, your sign-in codes come from this app, not by email." (`FIRST_VISIT.totpReplacesEmail`).
+- **A passkey that didn't finish names the password manager's empty window**, on "Create a passkey" and in the passkey help screen (`FIRST_VISIT.blankWindow`).
+
+### Migration
+
+`npx auth-kit upgrade 0.1.16-alpha.1`, then `npm ci`. Nothing else is required: the sign-in page already passes `firstVisit`. Sites may replace their owner and deploy steps with the new commands (the template does).
+
 ## [0.1.15-alpha.1] - 2026-11-09
 
 "Add an authenticator app" works: a QR code built in, Copy that copies, and the setup link only where it opens something ([ADR 0027](docs/decisions/0027-authenticator-setup-that-works.md)). Pre-release. No breaking changes.

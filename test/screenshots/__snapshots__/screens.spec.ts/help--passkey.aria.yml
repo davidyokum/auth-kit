@@ -7,7 +7,7 @@
     - text: .
   - listitem: Enter the 8-digit code we email you.
   - listitem: When asked, create a new passkey.
-- paragraph: Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, your agency’s IT help desk can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.
+- paragraph: Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, your agency’s IT help desk can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead. Password manager showing an empty window? Close it and try again. Then pick this device or your phone in the browser’s window.
 - button "Email me a code"
 - paragraph:
   - strong: Need help with your Example Reports account?

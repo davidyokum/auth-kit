@@ -2,7 +2,7 @@
 
 Shared login and authorization for David Yokum's websites. Every site runs on AWS Amplify (Gen 2) with an Amazon Cognito user pool and Next.js 16; auth-kit is the one place the login rules live, so a fix ships by bumping a version instead of copying code between sites.
 
-> **Status: pre-release (`0.1.15-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
+> **Status: pre-release (`0.1.16-alpha.1`). Not yet used in production.** Phase 1 ships the backend preset, the server checks, the proxy, and the test helpers. Phase 2 adds the sign-in screens and My account (`auth-kit/client`), the localhost kit (`auth-kit/dev`, `auth-kit/ribbon`; [guide](docs/localhost.md)), the admin module (`auth-kit/admin`), resource roles (`auth-kit/resources`), account creation (`auth-kit/accounts`), and the families as themes (`auth-kit/themes`). The starter site that wires all of this up, with the auth matrix in CI, is [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template): start a new site from it.
 
 ## What it does
 
@@ -42,6 +42,28 @@ npm i https://github.com/davidyokum/auth-kit/releases/download/v0.1.8-alpha.1/au
 Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarball that changed. Each release is built once by this repo's CI from the tagged commit, and nothing of auth-kit's builds or runs on your machine. To check a tarball came from that CI: `gh attestation verify auth-kit-0.1.8-alpha.1.tgz --repo davidyokum/auth-kit` ([ADR 0012](docs/decisions/0012-release-tarballs.md)). Don't install from a `github:` URL: there's no install-time build any more, so you'd get a package without `dist/`.
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
+
+**To move a site to another release**, use `npx auth-kit upgrade <version>`, not `npm install <url>`: it changes only the kit's lines in `package.json` and `package-lock.json` and checks the result with Amplify's npm (below).
+
+## Commands: owner, deploy, upgrade
+
+Three commands do the steps that used to be typed by hand, so an agent can do them and the site's owner approves once ([ADR 0028](docs/decisions/0028-the-owner-decides-and-the-kit-deploys.md)). The starter site wraps each as an npm script that reads `site.config.ts` and `deploy.config.json` for you.
+
+| Command | What it does |
+|---|---|
+| `npx auth-kit deploy --repo <owner/name> --domain <final address>` | Without `--yes`, reads and prints the plan. With it: checks the AWS account; makes the private GitHub repository (or pushes to it); the Amplify service role; the app (WEB_COMPUTE, its id saved in `deploy.config.json`); the branch with `APP_ORIGIN`; the first build; the compute role and a rebuild; the final address, printing the DNS records to add (DNS only); then the owner. Every step skips what exists, so run it again after adding the records. The final address comes before the owner, so passkeys work from the first sign-in |
+| `npx auth-kit owner --email … --site-name … --sign-in-url https://<address>/sign-in --family … --help-address … --profile … --account …` | Makes the site's one owner (no password; the owner group) and emails them the invite, whose link opens the card in first-visit mode with their address filled in. Refuses another account's pool, a site with a different owner, and an address that has signed in. `--dry-run` lists the steps |
+| `npx auth-kit upgrade <version>` | Changes only the kit's lines, with the release tarball's real integrity; refuses when the new release needs a dependency the lockfile can't give; then runs `npx npm@10.9.9 ci --dry-run` (Amplify's npm) and puts both files back if it fails |
+| `npx auth-kit check-prod-build --protected <file>` | As before, and also fails when a phrase from that file (a roster as one name per line, agendas as JSON) is in `.next/static`, where anyone with a file's address can download it, signed in or not. Repeatable; findings never print the phrase |
+
+## Adding the kit to an existing site
+
+Start from [`site-auth-kit-template`](https://github.com/davidyokum/site-auth-kit-template) whenever you can, and bring the site's own pages into it: the template carries the pool, the proxy, the auth matrix, the admin area, and the setup and deploy scripts, and every one of those is easier to keep than to re-create.
+
+- **A Next.js site with its own login** (NextAuth, a hand-built Cognito page, Amplify's branch password): make a branch, copy the template's `amplify/`, `proxy.ts`, `lib/`, `app/sign-in/`, `app/admin/`, the scripts, and `site.config.ts` into it, and move the site's pages under the template's layout. Give the site **its own new pool**: never reuse or rotate another app's client, which may still be serving a live site. Retire the old login's secrets only after the cutover.
+- **A site that isn't Next.js** (a static build, a Vite app): put the template in front of it. The template's Next.js app serves the sign-in, the admin area, and every protected route; the other app's build becomes files the Next.js app serves after the check (a route handler that streams `engine/dist/…`, or its pages moved into `app/`), and its own API calls verify auth-kit's token on the server (`verifyAccessToken`). Never put the only copy of protected content in a public bucket or in `public/`.
+- **Anything a person must not see before signing in** stays on the server: read it in a server component or a route that checks first, never import it into a client component, and list it for `check-prod-build --protected`.
+- **Then:** `npm run setup` (its questions are the owner's; it prints them for an agent to ask), `npm run check`, and `npm run deploy`.
 
 ## Quick start
 
