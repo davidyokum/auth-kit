@@ -6,6 +6,7 @@
  *   check-prod-build   fail if a production build contains dev sign-in, the matrix server mode, or the backdrop picker
  *   check-dev-route    fail unless a running production build answers the dev route with 404
  *   owner              make the site's one owner and email them the first-visit invite (src/ops/owner.ts)
+ *   upgrade            move the site to another release, changing only the kit's lockfile lines (src/ops/upgrade.ts)
  */
 import type { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -20,6 +21,8 @@ import { seedPersonas } from './seed.js';
 import { SESv2Client } from '@aws-sdk/client-sesv2';
 import { createSesInviteMailer, type InviteMailer } from '../admin/mailer.js';
 import { createOwner } from '../ops/owner.js';
+import { AMPLIFY_NPM_VERSION, upgradeKit } from '../ops/upgrade.js';
+import { spawn } from 'node:child_process';
 import { authTheme, isThemeFamily, siteSender } from '../themes/index.js';
 
 export interface CliIo {
@@ -31,6 +34,9 @@ export interface CliIo {
   createClient?: (input: { region: string; profile?: string }) => CognitoIdentityProviderClient;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Tests inject the command runner (upgrade's npm ci check, deploy's aws and gh) and fetch. */
+  run?: (command: string, args: readonly string[], options?: { input?: string }) => Promise<{ code: number; output: string }>;
+  fetch?: typeof fetch;
   /** Tests inject a mailer instead of SES. */
   createMailer?: (input: { from: string; siteName: string; family: string; help: string; region: string; profile?: string }) => InviteMailer;
 }
@@ -83,6 +89,12 @@ Usage: npx auth-kit <command> [options]
                        --outputs <path> | --pool <id>           default amplify_outputs.json
                        --name <name>          the owner's display name
                        --dry-run              say what would happen; write and send nothing
+
+  upgrade <version>  Move this site to another auth-kit release (or a tarball URL), changing only the
+                     kit's lines in package.json and package-lock.json, then check the result with
+                     Amplify's npm (npm ci --dry-run); both files go back if it fails
+                       --npm <version>        default ${AMPLIFY_NPM_VERSION}
+                       --no-verify            skip the npm ci check
 
 Exit codes: 0 ok, 1 refused or check failed, 2 usage error.`;
 
@@ -311,6 +323,37 @@ async function owner(args: string[], io: CliIo): Promise<number> {
   return 0;
 }
 
+/** Runs a command, collecting stdout and stderr together (nothing is shown while it runs). */
+export function runCommand(cwd: string): NonNullable<CliIo['run']> {
+  return (command, args, options = {}) =>
+    new Promise((resolveRun) => {
+      const child = spawn(command, [...args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+      let output = '';
+      child.stdout.on('data', (d: Buffer) => (output += d.toString()));
+      child.stderr.on('data', (d: Buffer) => (output += d.toString()));
+      child.on('error', (error) => resolveRun({ code: 127, output: `${output}${error.message}` }));
+      child.on('close', (code) => resolveRun({ code: code ?? 1, output }));
+      child.stdin.end(options.input ?? '');
+    });
+}
+
+async function upgrade(args: string[], io: CliIo): Promise<number> {
+  const { values, positionals } = parseArgs({ args, options: { npm: { type: 'string' }, 'no-verify': { type: 'boolean' } }, allowPositionals: true, strict: true });
+  const target = positionals[0];
+  if (!target || positionals.length > 1) throw new UsageError('upgrade takes one release version, such as: npx auth-kit upgrade 0.1.16-alpha.1');
+  const report = await upgradeKit({
+    cwd: io.cwd,
+    target,
+    ...(io.fetch !== undefined && { fetch: io.fetch }),
+    run: io.run ?? runCommand(io.cwd),
+    ...(values.npm !== undefined && { npmVersion: values.npm }),
+    noVerify: values['no-verify'] === true,
+    log: io.out,
+  });
+  if (report.changed) io.out(`Done: auth-kit ${report.from ?? '?'} → ${report.to}. Next: npm ci, then read the release's CHANGELOG section for anything the site copies (authKitStyles, new props), and run npm run check.`);
+  return 0;
+}
+
 /** Runs one command; returns the exit code. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command, ...args] = argv;
@@ -326,6 +369,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return await checkRoute(args, io);
       case 'owner':
         return await owner(args, io);
+      case 'upgrade':
+        return await upgrade(args, io);
       case undefined:
       case 'help':
       case '--help':
