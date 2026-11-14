@@ -93,11 +93,28 @@ describe('auth-kit upgrade', () => {
     expect(nextLock.packages['node_modules/semver']).toEqual(lock.packages['node_modules/semver']);
     expect(Object.keys(nextLock.packages as Record<string, unknown>)).toEqual(Object.keys(lock.packages));
     expect(run).toHaveBeenCalledWith('npx', ['-y', 'npm@10.9.9', 'ci', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund']);
+    // Once before (the lockfile as it was), once after.
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('changes nothing when the lockfile already fails npm ci, and shows npm’s reason, not its usage text', async () => {
+    const before = await readFile(join(dir, 'package-lock.json'), 'utf8');
+    const output = ['npm error code EUSAGE', 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync.', "npm error Invalid: lock file's semver@7.8.5 does not satisfy semver@7.8.6", 'npm error', 'npm error Clean install a project', 'npm error', 'npm error Usage:', 'npm error npm ci'].join('\n');
+    const run = vi.fn(() => Promise.resolve({ code: 1, output }));
+    const error = (await upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz, run }).catch((e: unknown) => e)) as Error;
+    expect(error.message).toMatch(/already fails npm 10\.9\.9 ci, before any change/);
+    expect(error.message).toMatch(/semver@7\.8\.5 does not satisfy semver@7\.8\.6/);
+    expect(error.message).not.toMatch(/Usage:|Clean install/);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(await readFile(join(dir, 'package-lock.json'), 'utf8')).toBe(before);
   });
 
   it('puts both files back when npm ci refuses the result', async () => {
     const before = await readFile(join(dir, 'package-lock.json'), 'utf8');
-    const run = vi.fn(() => Promise.resolve({ code: 1, output: 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync' }));
+    const run = vi
+      .fn<(c: string, a: readonly string[]) => Promise<{ code: number; output: string }>>()
+      .mockResolvedValueOnce({ code: 0, output: '' })
+      .mockResolvedValueOnce({ code: 1, output: 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync\nnpm error\nnpm error Clean install a project\nnpm error\nnpm error Usage:' });
     await expect(upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz, run })).rejects.toThrow(/both files are back as they were:\n.*in sync/);
     expect(await readFile(join(dir, 'package-lock.json'), 'utf8')).toBe(before);
     expect(JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies['auth-kit']).toBe(OLD);

@@ -122,6 +122,14 @@ function normalizedBin(bin: Record<string, string> | string): Record<string, str
   return Object.fromEntries(entries.map(([name, path]) => [name, path.replace(/^\.\//, '')]));
 }
 
+/** npm's reason, without the usage text it prints after it (`npm ci` prints its whole usage on EUSAGE). */
+export function npmReason(output: string): string {
+  const lines = output.trim().split('\n');
+  const usage = lines.findIndex((l) => /^npm error Clean install a project|^npm error Usage:/.test(l));
+  const shown = usage > 0 ? lines.slice(0, usage) : lines.slice(-12);
+  return shown.filter((l) => !/^npm error\s*$/.test(l)).join('\n');
+}
+
 function indentOf(text: string): string {
   return /^\{\n(\s+)"/.exec(text)?.[1] ?? '  ';
 }
@@ -175,6 +183,18 @@ export async function upgradeKit(options: UpgradeOptions): Promise<UpgradeReport
     );
   }
 
+  // A lockfile that already fails npm ci isn't this upgrade's to fix silently: say so, change nothing.
+  const npm = options.npmVersion ?? AMPLIFY_NPM_VERSION;
+  const ciArgs = ['-y', `npm@${npm}`, 'ci', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund'];
+  if (!options.noVerify && options.run) {
+    const before = await options.run('npx', ciArgs);
+    if (before.code !== 0) {
+      throw new Error(
+        `auth-kit upgrade: this lockfile already fails npm ${npm} ci, before any change, so nothing was changed. Fix that first (often one entry a newer release no longer satisfies), then upgrade:\n${npmReason(before.output)}`,
+      );
+    }
+  }
+
   pkg[field]!['auth-kit'] = url;
   if (root.dependencies?.['auth-kit'] !== undefined) root.dependencies['auth-kit'] = url;
   if (root.devDependencies?.['auth-kit'] !== undefined) root.devDependencies['auth-kit'] = url;
@@ -191,14 +211,12 @@ export async function upgradeKit(options: UpgradeOptions): Promise<UpgradeReport
   log(`package.json and package-lock.json: auth-kit ${from ?? '?'} → ${manifest.version} (only the kit's lines).`);
 
   if (options.noVerify || !options.run) return { from, to: manifest.version, changed: true, verified: false };
-  const npm = options.npmVersion ?? AMPLIFY_NPM_VERSION;
   log(`Checking with Amplify's npm: npx -y npm@${npm} ci --dry-run`);
-  const result = await options.run('npx', ['-y', `npm@${npm}`, 'ci', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund']);
+  const result = await options.run('npx', ciArgs);
   if (result.code !== 0) {
     await writeFile(pkgPath, pkgText);
     await writeFile(lockPath, lockText);
-    const tail = result.output.trim().split('\n').slice(-12).join('\n');
-    throw new Error(`auth-kit upgrade: npm ${npm} ci --dry-run refused the result, so both files are back as they were:\n${tail}`);
+    throw new Error(`auth-kit upgrade: npm ${npm} ci --dry-run refused the result, so both files are back as they were:\n${npmReason(result.output)}`);
   }
   log(`npm ${npm} ci --dry-run accepts the lockfile.`);
   return { from, to: manifest.version, changed: true, verified: true };

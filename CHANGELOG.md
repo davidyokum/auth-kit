@@ -2,6 +2,19 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.16-alpha.2] - 2026-11-14
+
+`auth-kit upgrade` says why npm refused, and refuses a lockfile that was already broken. Pre-release. No breaking changes.
+
+### Fixed
+
+- **`npx auth-kit upgrade` checks the lockfile before it changes anything.** On the starter site, `npm ci` already failed (a published semver 7.8.6 no longer satisfied by the lockfile's 7.8.5), and the upgrade blamed its own change. Now that case changes nothing and says the lockfile needs fixing first.
+- **It shows npm's reason** ("Invalid: lock file's semver@7.8.5 does not satisfy semver@7.8.6"), not the last lines of `npm ci`'s usage text, which is all npm prints after the reason on an EUSAGE error.
+
+### Migration
+
+None: `npx auth-kit upgrade 0.1.16-alpha.2`.
+
 ## [0.1.16-alpha.1] - 2026-11-14
 
 The first sign-in is one code and one fingerprint, and the steps an agent used to leave to the site's owner are commands: `owner`, `deploy`, and `upgrade` ([ADR 0028](docs/decisions/0028-the-owner-decides-and-the-kit-deploys.md)). From a retrospective of five real sites. Pre-release. No breaking changes.
