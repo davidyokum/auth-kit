@@ -484,7 +484,7 @@ describe('Card Studio v4’s words', () => {
 
   it('a device or browser that isn’t working: the passkey help names who helps with that (devDesk), the other screens the IT desk', () => {
     expect(copy.helpScreen('passkey', personal).after).toBe(
-      'Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, the device maker’s support can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.',
+      'Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, the device maker’s support can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead. Password manager showing an empty window? Close it and try again. Then pick this device or your phone in the browser’s window.',
     );
     expect(copy.helpScreen('passkey', osbm).after).toContain('If your device or browser itself isn’t working, your agency’s IT help desk can help with that part.');
     expect(copy.helpScreen('passkey', context('unc')).after).toContain('If your device or browser itself isn’t working, the UNC IT help desk can help with that part.');

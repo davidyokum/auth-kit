@@ -167,6 +167,7 @@ export function AuthenticatorSetup(props: AuthenticatorSetupProps) {
         {props.heading ?? FIRST_VISIT.addTotpHeading}
       </Heading>
       <Text classNames={classNames}>{props.intro ?? (showQr ? FIRST_VISIT.addTotpSub : FIRST_VISIT.addTotpSubNoQr)}</Text>
+      <p {...slot(classNames, 'small')} data-auth-kit-totp-replaces-email="">{FIRST_VISIT.totpReplacesEmail}</p>
       <StatusRegion classNames={classNames} status={fb.status ?? (!secret && !loadFailed ? STATUS.preparingSetupKey : null)} />
       {loadFailed ? (
         <Actions classNames={classNames}>

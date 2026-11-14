@@ -96,6 +96,13 @@ export const SIGN_IN = {
   chooseCodeFirstVisit: 'First time here? We’ll email you a code, then you’ll set up a passkey.',
   /** Under the rows, on every other visit to this screen (register A5a): an invitee's only way in. */
   chooseFirstTime: 'First time signing in? Choose Email me a code.',
+  /**
+   * The email step on a first visit (an invite's link): Continue emails the code straight away, the only
+   * way in for an account with nothing saved yet, and the line says what follows on this site.
+   */
+  firstVisitLine: 'First time here? We’ll email you a code, then you’ll set up a passkey.',
+  /** The same line on a site whose passkeys aren't on yet (no final domain). */
+  firstVisitLineNoPasskey: 'First time here? We’ll email you a code, then you’ll choose a password.',
   passwordLabel: 'Password',
   show: 'Show',
   hide: 'Hide',
@@ -157,6 +164,8 @@ export const FIRST_VISIT = {
   createPasskeySub: 'Confirm with your face, fingerprint, or device PIN when your browser asks. Nothing to remember or type.',
   waitingForDevice: 'Waiting for your device…',
   passkeyOnPhone: 'Want the passkey on your phone? Choose the phone option in the window that opens.',
+  /** After a passkey attempt that didn't finish: some password managers open an empty window. */
+  blankWindow: 'Password manager showing an empty window? Close it and choose Try again. Then pick this device or your phone in the browser’s window. Or use a password instead.',
 
   createPasswordHeading: 'Create a password',
   createPasswordSub: 'At least 15 characters. A few words make a good one, or let your password manager create it.',
@@ -169,6 +178,8 @@ export const FIRST_VISIT = {
   /** The enrollment step after a password sign-in with no authenticator yet. */
   addTotpAfterPassword: 'You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute.',
   addTotpSubNoQr: 'Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.',
+  /** Under the setup step's intro: once an authenticator is on, Cognito stops emailing sign-in codes. */
+  totpReplacesEmail: 'Once it’s added, your sign-in codes come from this app, not by email.',
   cantScan: 'Can’t scan it? Enter this setup key in your app instead.',
   qrLabel: 'QR code for your authenticator app',
   setupKeyLabel: 'Setup key',
@@ -225,7 +236,7 @@ export function helpScreen(topic: HelpTopic, c: CopyContext, options: { security
         heading: 'Can’t use your passkey?',
         intro: 'You can still get in with an emailed code, then make a new passkey on this device.',
         steps: [['Go back and choose ', { strong: 'Email me a code instead' }, '.'], ['Enter the 8-digit code we email you.'], ['When asked, create a new passkey.']],
-        after: `Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, ${devDesk} can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead.`,
+        after: `Your old passkey stays on your account until you remove it under My account. If your device or browser itself isn’t working, ${devDesk} can help with that part. Use an authenticator app? Codes can’t be emailed to you, so use your password and authenticator code instead. Password manager showing an empty window? Close it and try again. Then pick this device or your phone in the browser’s window.`,
         button: { label: 'Email me a code', action: 'email-code' },
       };
     case 'password':

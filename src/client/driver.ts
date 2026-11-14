@@ -86,6 +86,11 @@ export interface DriverEffects {
   /** "Ask for access instead" hands the typed address to the request form (sessionStorage). */
   readonly handOffEmail: (email: string) => void;
   readonly takeHandedOffEmail: () => string;
+  /**
+   * The address an invite's first-visit link carries in its fragment (`#email=`, never sent to a
+   * server), removed from the address bar once read. `''` when there's none or it isn't an address.
+   */
+  readonly takeLinkEmail: () => string;
   readonly breachedPasswordProblem: (password: string, check: BreachedPasswordCheck | false | undefined) => Promise<string | null>;
   readonly writeClipboard: (text: string) => Promise<void>;
   /** Whether this is a touch device (a phone or tablet), where an `otpauth://` link opens an app. */
@@ -178,6 +183,9 @@ function copyWithSelection(text: string): boolean {
  * Exactly what the screens did before the driver existed. Each member calls through at call time, so a
  * module a test mocks (`aws-amplify/auth`, `./cognito.js`) is the one that runs.
  */
+/** A plausible address from a link: one @, no spaces, a dot in the domain. Cognito decides the rest. */
+const LINK_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const LIVE_DRIVER: ClientDriver = Object.freeze({
   held: false,
   initial: () => undefined,
@@ -222,6 +230,20 @@ export const LIVE_DRIVER: ClientDriver = Object.freeze({
   postAccountForm: (url: string, payload: Record<string, unknown>, options?: { fetch?: typeof fetch; helpAddress?: string; networkMessage?: string }) => postAccountForm(url, payload, options),
   handOffEmail: (email: string) => handOffEmail(email),
   takeHandedOffEmail: () => takeHandedOffEmail(),
+  takeLinkEmail(): string {
+    if (typeof window === 'undefined') return '';
+    try {
+      const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const email = (fragment.get('email') ?? '').trim();
+      if (!fragment.has('email')) return '';
+      fragment.delete('email');
+      const rest = fragment.toString();
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}${rest ? `#${rest}` : ''}`);
+      return LINK_EMAIL.test(email) && email.length <= 254 ? email : '';
+    } catch {
+      return '';
+    }
+  },
   breachedPasswordProblem: (password: string, check: BreachedPasswordCheck | false | undefined) => breachedPasswordProblem(password, check),
   writeClipboard(text: string): Promise<void> {
     const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;

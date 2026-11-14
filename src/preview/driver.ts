@@ -86,6 +86,7 @@ export function previewDriver(options: PreviewDriverOptions): ClientDriver {
     hasPasskeyHint: () => Promise.resolve(options.remembered),
     passkeyOfferDismissed: () => false,
     takeHandedOffEmail: () => '',
+    takeLinkEmail: () => '',
     // Writes: never made.
     rememberPasskey: () => {
       onEffect('rememberPasskey');

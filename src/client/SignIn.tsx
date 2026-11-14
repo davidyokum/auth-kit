@@ -259,6 +259,8 @@ export function SignIn(props: SignInProps) {
   const signUpHref = hrefOr('signUpHref', props.signUpHref, '/sign-up');
   const requestAccessHref = hrefOr('requestAccessHref', props.requestAccessHref, '/request-access');
   const passkeyOptions = props.passkey;
+  /** An invite's first visit, on a site with emailed codes: Continue is "Email me a code". */
+  const firstVisitFlow = props.firstVisit === true && emailCodeEnabled && !props.reauth;
   /** The first factor last asked for: a passkey sign-in sets this browser's passkey hint (register A5a). */
   const methodRef = useRef<'passkey' | 'password' | 'email-code' | null>(null);
   const notices = useMemo(() => resolveNotices(props.notices, 'SignIn'), [props.notices]);
@@ -290,6 +292,13 @@ export function SignIn(props: SignInProps) {
       active = false;
     };
   }, [props.reauth, driver]);
+
+  // A first visit from an invite's link: the address it carries (in the fragment, never sent anywhere).
+  useEffect(() => {
+    if (props.firstVisit !== true) return;
+    const linked = driver.takeLinkEmail();
+    if (linked) setEmail((e) => e || linked);
+  }, [props.firstVisit, driver]);
 
   // "Send a new code" waits a little between sends (each one emails the person and counts toward WAF limits).
   useEffect(() => {
@@ -484,6 +493,9 @@ export function SignIn(props: SignInProps) {
    */
   function continueFromEmail() {
     if (!requireEmail()) return;
+    // A first visit (an invite's link): the emailed code is the only way in for an account with nothing
+    // saved yet, so Continue sends it, for every address alike (register A5a; nothing is revealed).
+    if (firstVisitFlow) return sendEmailCode();
     if (!passkeysEnabled) return go({ name: 'password', challenge: false });
     const typed = email;
     void driver.hasPasskeyHint(typed).then((hinted) => {
@@ -649,12 +661,24 @@ export function SignIn(props: SignInProps) {
           {heading(title)}
           {reauthNote}
           {emailField}
+          {firstVisitFlow ? (
+            <p {...slot(classNames, 'small')} data-auth-kit-first-visit="">
+              {passkeysEnabled ? SIGN_IN.firstVisitLine : SIGN_IN.firstVisitLineNoPasskey}
+            </p>
+          ) : null}
           <Actions classNames={classNames}>
             <Button type="submit" disabled={busy} classNames={classNames}>
-              {SIGN_IN.continue}
+              {firstVisitFlow ? SIGN_IN.chooseCode : SIGN_IN.continue}
             </Button>
           </Actions>
-          <AltLinks links={[...(passkeysEnabled ? [passwordAlt] : []), ...(emailCodeEnabled ? [codeAlt] : [])]} classNames={classNames} />
+          <AltLinks
+            links={
+              firstVisitFlow
+                ? [...(passkeysEnabled ? [passkeyAlt] : []), passwordAlt]
+                : [...(passkeysEnabled ? [passwordAlt] : []), ...(emailCodeEnabled ? [codeAlt] : [])]
+            }
+            classNames={classNames}
+          />
         </form>
       );
       break;

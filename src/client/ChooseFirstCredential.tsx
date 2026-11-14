@@ -187,6 +187,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
           </Button>
         </Actions>
         <Text classNames={classNames}>{FIRST_VISIT.passkeyOnPhone}</Text>
+        {passkeyFailed ? <Text classNames={classNames}>{FIRST_VISIT.blankWindow}</Text> : null}
         <AltLinks links={[{ icon: 'password', label: SIGN_IN.usePassword, onClick: driver.act('use-password', () => go('create-password')), disabled: fb.busy }]} classNames={classNames} />
         <p {...slot(classNames, 'small')}>{FIRST_VISIT.sharedComputer}</p>
       </div>

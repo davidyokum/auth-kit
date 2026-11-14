@@ -1406,18 +1406,51 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(screen.getByText('First time signing in? Choose Email me a code.')).toBeTruthy();
   });
 
-  it('a first visit (an invite’s link, ?first=1) leads with the emailed code, and the passkey row isn’t the prominent one', async () => {
+  it('a first visit (an invite’s link, ?first=1): Continue is "Email me a code", sent straight away, with the passkey and password as the other ways', async () => {
     window.localStorage.clear();
+    auth.signIn.mockResolvedValue(CODE_SENT);
     const { user } = setup({ firstVisit: true });
+    expect(screen.getByText('First time here? We’ll email you a code, then you’ll set up a passkey.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Use a passkey instead' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Email me a code instead' })).toBeNull();
     await enterEmail(user, 'ada@example.org');
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await heading('How do you want to sign in?');
-    const rows = [...card().querySelectorAll<HTMLButtonElement>('[data-auth-kit-slot="ways"] > li > button')];
-    expect(rows.map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['email-code', 'passkey', 'password']);
-    expect(rows.map((b) => b.hasAttribute('data-auth-kit-recommended'))).toEqual([true, false, false]);
-    expect(screen.getByRole('button', { name: 'Email me a code First time here? We’ll email you a code, then you’ll set up a passkey.' })).toBeTruthy();
-    expect(card().querySelector('[data-auth-kit-recommended-label]')).toBeNull();
-    expect(screen.queryByText('First time signing in? Choose Email me a code.')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+    // No "How do you want to sign in?" in between: the code is the invitee's only way in.
+    expect(screen.queryByRole('heading', { name: 'How do you want to sign in?' })).toBeNull();
+    expect(auth.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a first visit fills in the address the invite’s link carries (#email=) and takes it out of the address bar', async () => {
+    window.localStorage.clear();
+    window.history.replaceState(null, '', '/sign-in?first=1#email=ada%40example.org');
+    onTestFinished(() => window.history.replaceState(null, '', '/'));
+    setup({ firstVisit: true });
+    await waitFor(() => expect(emailField().value).toBe('ada@example.org'));
+    expect(window.location.hash).toBe('');
+    expect(window.location.search).toBe('?first=1');
+  });
+
+  it('a link’s #email= is ignored when it isn’t an address, and on every visit that isn’t a first one', async () => {
+    window.history.replaceState(null, '', '/sign-in?first=1#email=not-an-address');
+    onTestFinished(() => window.history.replaceState(null, '', '/'));
+    setup({ firstVisit: true });
+    await act(async () => {});
+    expect(emailField().value).toBe('');
+    cleanup();
+    window.history.replaceState(null, '', '/sign-in#email=ada%40example.org');
+    setup();
+    await act(async () => {});
+    expect(emailField().value).toBe('');
+  });
+
+  it('a first visit on a site whose passkeys aren’t on yet says a password follows, not a passkey', () => {
+    setup({ firstVisit: true, passkeysEnabled: false });
+    expect(screen.getByText('First time here? We’ll email you a code, then you’ll choose a password.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Use a passkey instead' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
   });
 
   it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "Recommended"), the description below, a chevron', async () => {

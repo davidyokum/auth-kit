@@ -335,11 +335,15 @@ export interface InviteEmailContent {
   approved?: boolean;
 }
 
-/** The sign-in URL with `first=1` added (kept as given if it doesn't parse). */
-export function firstVisitUrl(signInUrl: string): string {
+/**
+ * The sign-in URL with `first=1` added (kept as given if it doesn't parse), and, given the invitee's
+ * address, `#email=` so the card fills it in. The fragment never reaches a server or its logs.
+ */
+export function firstVisitUrl(signInUrl: string, email?: string): string {
   try {
     const u = new URL(signInUrl);
     u.searchParams.set('first', '1');
+    if (email?.trim()) u.hash = new URLSearchParams({ email: email.trim() }).toString();
     return u.toString();
   } catch {
     return signInUrl;
@@ -353,8 +357,9 @@ function inviterName(by: InviteEmailContent['invitedBy']): string | undefined {
 /** The invite (Card Studio's `mailHTML('invite')`, REPORT §5.2a), and the approved request (§5.2j). */
 export function inviteEmail(site: EmailSite, input: InviteEmailContent): RenderedEmail {
   const who = inviterName(input.invitedBy);
-  // `?first=1`: the sign-in card leads with "Email me a code" (register A5a), the invitee's only way in.
-  const url = firstVisitUrl(site.signInUrl);
+  // `?first=1#email=`: the card fills in the address and Continue is "Email me a code" (register A5a),
+  // the invitee's only way in.
+  const url = firstVisitUrl(site.signInUrl, input.email);
   const subject = input.approved
     ? `${who ?? 'Someone'} approved your request for ${site.siteName}`
     : who
@@ -382,8 +387,8 @@ export function inviteEmail(site: EmailSite, input: InviteEmailContent): Rendere
         title: 'To accept',
         items: [
           ['Go to ', link(url)],
-          ['Enter this email address: ', strong(input.email)],
-          ['Choose ', strong('Email me a code'), '. We’ll email you an 8-digit code. Enter it, then set up a passkey so signing in next time takes a second.'],
+          ['Check that it shows ', strong(input.email), ', then choose ', strong('Email me a code'), '.'],
+          ['Enter the 8-digit code we email you, then set up a passkey so signing in next time takes a second.'],
         ],
       },
       p(`This invitation expires on ${clockDateTime(input.expiresAt, site)}.`),
