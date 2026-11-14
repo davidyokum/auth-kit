@@ -66,12 +66,12 @@ afterEach(async () => {
 });
 
 const tgz = tarball(MANIFEST);
-const fetchTgz = vi.fn(() => Promise.resolve(new Response(tgz)));
+const fetchTgz = vi.fn(() => Promise.resolve(new Response(new Uint8Array(tgz).buffer)));
 
 describe('auth-kit upgrade', () => {
   it('changes only the kit’s lines, with the tarball’s real integrity, then checks with Amplify’s npm', async () => {
     const run = vi.fn(() => Promise.resolve({ code: 0, output: 'ok' }));
-    const report = await upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz as unknown as typeof fetch, run });
+    const report = await upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz, run });
     expect(report).toEqual({ from: '0.1.13-alpha.1', to: '0.1.16-alpha.1', changed: true, verified: true });
     const nextPkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'));
     const nextLock = JSON.parse(await readFile(join(dir, 'package-lock.json'), 'utf8'));
@@ -91,21 +91,21 @@ describe('auth-kit upgrade', () => {
     });
     // Every other line as it was.
     expect(nextLock.packages['node_modules/semver']).toEqual(lock.packages['node_modules/semver']);
-    expect(Object.keys(nextLock.packages)).toEqual(Object.keys(lock.packages));
+    expect(Object.keys(nextLock.packages as Record<string, unknown>)).toEqual(Object.keys(lock.packages));
     expect(run).toHaveBeenCalledWith('npx', ['-y', 'npm@10.9.9', 'ci', '--dry-run', '--ignore-scripts', '--no-audit', '--no-fund']);
   });
 
   it('puts both files back when npm ci refuses the result', async () => {
     const before = await readFile(join(dir, 'package-lock.json'), 'utf8');
     const run = vi.fn(() => Promise.resolve({ code: 1, output: 'npm error `npm ci` can only install packages when your package.json and package-lock.json are in sync' }));
-    await expect(upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz as unknown as typeof fetch, run })).rejects.toThrow(/both files are back as they were:\n.*in sync/);
+    await expect(upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: fetchTgz, run })).rejects.toThrow(/both files are back as they were:\n.*in sync/);
     expect(await readFile(join(dir, 'package-lock.json'), 'utf8')).toBe(before);
     expect(JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies['auth-kit']).toBe(OLD);
   });
 
   it('changes nothing when the new release needs a dependency the lockfile can’t give', async () => {
     const needsMore = tarball({ ...MANIFEST, dependencies: { 'aws-jwt-verify': '^6.0.0' } });
-    const f = vi.fn(() => Promise.resolve(new Response(needsMore))) as unknown as typeof fetch;
+    const f = vi.fn(() => Promise.resolve(new Response(new Uint8Array(needsMore).buffer))) as unknown as typeof fetch;
     await expect(upgradeKit({ cwd: dir, target: '0.1.16-alpha.1', fetch: f, noVerify: true })).rejects.toThrow(/needs aws-jwt-verify@\^6\.0\.0 \(lockfile has 5\.2\.1\).*Nothing was changed/s);
     expect(JSON.parse(await readFile(join(dir, 'package.json'), 'utf8')).dependencies['auth-kit']).toBe(OLD);
   });

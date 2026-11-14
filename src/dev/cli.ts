@@ -7,6 +7,7 @@
  *   check-dev-route    fail unless a running production build answers the dev route with 404
  *   owner              make the site's one owner and email them the first-visit invite (src/ops/owner.ts)
  *   upgrade            move the site to another release, changing only the kit's lockfile lines (src/ops/upgrade.ts)
+ *   deploy             put the site online end to end, its final address before the owner (src/ops/deploy.ts)
  */
 import type { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -22,6 +23,7 @@ import { SESv2Client } from '@aws-sdk/client-sesv2';
 import { createSesInviteMailer, type InviteMailer } from '../admin/mailer.js';
 import { createOwner } from '../ops/owner.js';
 import { AMPLIFY_NPM_VERSION, upgradeKit } from '../ops/upgrade.js';
+import { deploySite } from '../ops/deploy.js';
 import { spawn } from 'node:child_process';
 import { authTheme, isThemeFamily, siteSender } from '../themes/index.js';
 
@@ -95,6 +97,22 @@ Usage: npx auth-kit <command> [options]
                      Amplify's npm (npm ci --dry-run); both files go back if it fails
                        --npm <version>        default ${AMPLIFY_NPM_VERSION}
                        --no-verify            skip the npm ci check
+
+  deploy             Put this site online on Amplify, in the order that keeps the first sign-in
+                     simple: repository, service role, app, branch, build, compute role, the final
+                     address, then the owner. Without --yes it only reads and prints the plan (show
+                     that list to the site's owner once); every step skips what exists, so run it
+                     again after adding the DNS records it prints
+                       --repo <owner/name>    the GitHub repository (made private if it's missing)
+                       --domain <host>        the final address, e.g. reports.example.org (required)
+                       --branch <name>        default main
+                       --app-name <name>      default the repository's name
+                       --wait-for-domain <m>  minutes to wait for the address once its records are in
+                       --owner-email, --site-name, --family, --help-address   to invite the owner at
+                                              the end (as for owner)
+                       --yes                  do it
+                     Reads deploy.config.json (awsProfile, awsAccountId, region, webAcl) and writes
+                     amplifyAppId into it.
 
 Exit codes: 0 ok, 1 refused or check failed, 2 usage error.`;
 
@@ -354,6 +372,81 @@ async function upgrade(args: string[], io: CliIo): Promise<number> {
   return 0;
 }
 
+async function deploy(args: string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: {
+      repo: { type: 'string' },
+      domain: { type: 'string' },
+      branch: { type: 'string' },
+      'app-name': { type: 'string' },
+      'wait-for-domain': { type: 'string' },
+      'owner-email': { type: 'string' },
+      'site-name': { type: 'string' },
+      family: { type: 'string' },
+      'help-address': { type: 'string' },
+      yes: { type: 'boolean' },
+    },
+    strict: true,
+  });
+  if (!values.repo) throw new UsageError('deploy needs --repo <owner/name>.');
+  if (!values.domain) throw new UsageError('deploy needs --domain <the final address>: passkeys are bound to it, so it comes before the first sign-in.');
+  const waitMinutes = values['wait-for-domain'] === undefined ? 0 : Number(values['wait-for-domain']);
+  if (!Number.isFinite(waitMinutes) || waitMinutes < 0) throw new UsageError('--wait-for-domain takes minutes.');
+  const ownerFlags = [values['owner-email'], values['site-name'], values.family, values['help-address']];
+  if (ownerFlags.some(Boolean) && !ownerFlags.every(Boolean)) throw new UsageError('To invite the owner, pass all four: --owner-email, --site-name, --family, --help-address.');
+  const run = io.run ?? runCommand(io.cwd);
+  const report = await deploySite({
+    cwd: io.cwd,
+    run,
+    repo: values.repo,
+    domain: values.domain,
+    ...(values.branch !== undefined && { branch: values.branch }),
+    ...(values['app-name'] !== undefined && { appName: values['app-name'] }),
+    yes: values.yes === true,
+    domainWaitMs: waitMinutes * 60_000,
+    log: io.out,
+    ...(io.sleep !== undefined && { sleep: io.sleep }),
+    ...(ownerFlags.every(Boolean) && {
+      owner: async (input) => {
+        const lines: string[] = [];
+        const code = await owner(
+          [
+            '--email', values['owner-email']!,
+            '--site-name', values['site-name']!,
+            '--family', values.family!,
+            '--help-address', values['help-address']!,
+            '--sign-in-url', input.signInUrl,
+            '--pool', input.userPoolId,
+            '--region', input.region,
+            '--profile', input.profile,
+            '--account', input.accountId,
+          ],
+          { ...io, out: (l) => lines.push(l), err: (l) => lines.push(l) },
+        );
+        if (code !== 0) throw new Error(lines.join('\n'));
+        return lines.at(-1) ?? 'invited';
+      },
+    }),
+  });
+  if (report.dnsRecords.length > 0) {
+    io.out('');
+    io.out('Add these at the DNS host (DNS only, not proxied), then run this again:');
+    for (const r of report.dnsRecords) io.out(`  ${r.type.padEnd(6)} ${r.name}  →  ${r.value}`);
+  }
+  const blocked = report.steps.find((s) => s.state === 'blocked');
+  if (blocked) return 1;
+  io.out('');
+  io.out(
+    report.complete
+      ? 'Done: the site is live on its address, and the owner has their invite.'
+      : values.yes
+        ? 'Not finished yet: run this again once the steps above that are waiting are done.'
+        : 'That is the plan. Nothing was changed. Run again with --yes to do it.',
+  );
+  return 0;
+}
+
 /** Runs one command; returns the exit code. */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command, ...args] = argv;
@@ -371,6 +464,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
         return await owner(args, io);
       case 'upgrade':
         return await upgrade(args, io);
+      case 'deploy':
+        return await deploy(args, io);
       case undefined:
       case 'help':
       case '--help':
