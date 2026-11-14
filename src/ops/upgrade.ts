@@ -116,6 +116,12 @@ function versionFromTarget(target: string): { url: string; version: string | und
   return { url: tarballUrl(version), version };
 }
 
+/** As npm writes `bin` into a lockfile: an object, each path without a leading `./`. */
+function normalizedBin(bin: Record<string, string> | string): Record<string, string> {
+  const entries = typeof bin === 'string' ? [['auth-kit', bin] as const] : Object.entries(bin);
+  return Object.fromEntries(entries.map(([name, path]) => [name, path.replace(/^\.\//, '')]));
+}
+
 function indentOf(text: string): string {
   return /^\{\n(\s+)"/.exec(text)?.[1] ?? '  ';
 }
@@ -175,7 +181,8 @@ export async function upgradeKit(options: UpgradeOptions): Promise<UpgradeReport
   const next: LockEntry = { ...kitEntry, version: manifest.version, resolved: url, integrity };
   for (const key of ['license', 'dependencies', 'peerDependencies', 'peerDependenciesMeta', 'engines', 'bin'] as const) {
     if (manifest[key] === undefined) delete next[key];
-    else next[key] = key === 'bin' && typeof manifest.bin === 'string' ? { 'auth-kit': manifest.bin } : manifest[key];
+    else if (key === 'bin') next.bin = normalizedBin(manifest.bin!);
+    else next[key] = manifest[key];
   }
   lock.packages!['node_modules/auth-kit'] = next;
 

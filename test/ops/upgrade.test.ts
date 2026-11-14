@@ -86,7 +86,8 @@ describe('auth-kit upgrade', () => {
       peerDependencies: MANIFEST.peerDependencies,
       peerDependenciesMeta: MANIFEST.peerDependenciesMeta,
       engines: MANIFEST.engines,
-      bin: MANIFEST.bin,
+      // As npm writes it: no leading ./
+      bin: { 'auth-kit': 'dist/bin/auth-kit.js' },
     });
     // Every other line as it was.
     expect(nextLock.packages['node_modules/semver']).toEqual(lock.packages['node_modules/semver']);
