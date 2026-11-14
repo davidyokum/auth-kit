@@ -12,7 +12,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { chooseCredentials, createDevCognitoClient, devPoolConfig } from './aws.js';
-import { checkProductionBuild } from './build-check.js';
+import { checkProductionBuild, type ProtectedSource, protectedPhrases } from './build-check.js';
 import { checkDevRouteAbsent } from './http-check.js';
 import { DEV_SIGN_IN_ROUTE } from './marker.js';
 import { defaultPersonas, parsePersonas } from './personas.js';
@@ -58,9 +58,13 @@ Usage: npx auth-kit <command> [options]
                        --dry-run              report what would change; write nothing
 
   check-prod-build   Fail if a production build contains dev sign-in, the matrix server mode, or the
-                     backdrop picker (run after next build)
+                     backdrop picker (run after next build), or protected content in its public files
                        --dir <path>           default .next
                        --route <path>         default ${DEV_SIGN_IN_ROUTE}
+                       --protected <path>     content only signed-in people may see (repeatable): a .txt
+                                              file is one phrase per line (names, say); .json, every
+                                              string; code, every string literal; anything else, every
+                                              line. None may appear in .next/static
 
   check-dev-route    Fail unless a running production build answers the dev route with 404
                        --url <base>           e.g. http://127.0.0.1:3000 (required)
@@ -193,14 +197,29 @@ async function seed(args: string[], io: CliIo): Promise<number> {
 }
 
 async function checkBuild(args: string[], io: CliIo): Promise<number> {
-  const { values } = parseArgs({ args, options: { dir: { type: 'string' }, route: { type: 'string' } }, strict: true });
+  const { values } = parseArgs({ args, options: { dir: { type: 'string' }, route: { type: 'string' }, protected: { type: 'string', multiple: true } }, strict: true });
   const buildDir = resolve(io.cwd, values.dir ?? '.next');
-  const result = await checkProductionBuild({ buildDir, ...(values.route !== undefined && { devRoute: values.route }) });
+  const sources: ProtectedSource[] = [];
+  for (const path of values.protected ?? []) {
+    let text: string;
+    try {
+      text = await readFile(resolve(io.cwd, path), 'utf8');
+    } catch {
+      throw new Error(`auth-kit: no protected-content file at ${path}.`);
+    }
+    const phrases = protectedPhrases(path, text);
+    if (phrases.length === 0) throw new Error(`auth-kit: ${path} has no protected phrase long enough to check (a .txt file takes one per line, 4 characters or more).`);
+    sources.push({ label: path, phrases });
+  }
+  const result = await checkProductionBuild({ buildDir, ...(values.route !== undefined && { devRoute: values.route }), ...(sources.length > 0 && { protected: sources }) });
   if (result.ok) {
-    io.out(`OK: no dev sign-in, matrix server, or backdrop picker code, and no dev route, in ${buildDir} (${result.filesScanned} files scanned).`);
+    const phrases = sources.reduce((n, s) => n + s.phrases.length, 0);
+    io.out(
+      `OK: no dev sign-in, matrix server, or backdrop picker code, and no dev route, in ${buildDir}${sources.length > 0 ? `, and none of ${phrases} protected phrases from ${sources.length} file${sources.length === 1 ? '' : 's'} in its public files` : ''} (${result.filesScanned} files scanned).`,
+    );
     return 0;
   }
-  io.err(`FAIL: dev-only code is in the production build ${buildDir}:`);
+  io.err(`FAIL: the production build ${buildDir} isn't clean:`);
   for (const f of result.findings) io.err(`  - ${f.file ? `${f.file}: ` : ''}${f.detail}`);
   return 1;
 }

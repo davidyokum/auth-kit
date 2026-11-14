@@ -93,6 +93,9 @@ export { base32Decode, base32Encode, totpCode, totpStep, TOTP_STEP_SECONDS } fro
 export {
   assertProductionBuild,
   checkProductionBuild,
+  MIN_PROTECTED_PHRASE,
+  protectedPhrases,
+  type ProtectedSource,
   type ProductionBuildCheckOptions,
   type ProductionBuildCheckResult,
   type ProductionBuildFinding,

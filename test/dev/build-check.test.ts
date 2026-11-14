@@ -127,3 +127,59 @@ describe('checkProductionBuild', () => {
     expect(result.findings.map((f) => f.kind)).toEqual(['route-file', 'marker']);
   });
 });
+
+describe('protected content in public files (check-prod-build --protected)', () => {
+  const names = ['Ada Lovelace', 'Grace Hopper'];
+
+  it('fails when a public chunk holds a protected phrase, and names the file and source, never the phrase', async () => {
+    await fixture({ 'static/chunks/app/agenda.js': 'const a={attendees:["Ada Lovelace","Someone Else"]}' });
+    const result = await checkProductionBuild({ buildDir: build, protected: [{ label: 'roster.txt', phrases: names }] });
+    expect(result.ok).toBe(false);
+    expect(result.findings).toEqual([{ kind: 'protected-content', file: join('static', 'chunks', 'app', 'agenda.js'), detail: expect.stringMatching(/^holds 1 protected phrase from roster\.txt/) }]);
+    expect(JSON.stringify(result.findings)).not.toContain('Ada');
+  });
+
+  it('finds a phrase the bundler escaped (JSON, or non-ASCII as \\u escapes)', async () => {
+    const phrase = `Retreat at Pine${String.fromCharCode(0x2019)}s Lodge`;
+    const escaped = `Retreat at Pine\\u${(0x2019).toString(16).padStart(4, '0')}s Lodge`;
+    await fixture({ 'static/chunks/a.js': `x="${escaped}"` });
+    const result = await checkProductionBuild({ buildDir: build, protected: [{ label: 'agenda.json', phrases: [phrase] }] });
+    expect(result.findings.map((f) => f.kind)).toEqual(['protected-content']);
+  });
+
+  it('lets the server’s own bundles hold protected content (served only after a check)', async () => {
+    await fixture({ 'server/app/agenda/page.js': 'const a=["Ada Lovelace"]' });
+    expect((await checkProductionBuild({ buildDir: build, protected: [{ label: 'roster.txt', phrases: names }] })).ok).toBe(true);
+  });
+});
+
+describe('protectedPhrases', () => {
+  it('reads a .txt file as one phrase per line (comments and blanks skipped), from 4 characters', async () => {
+    const { protectedPhrases } = await import('../../src/dev/build-check.js');
+    expect(protectedPhrases('roster.txt', '# staff\nAda Lovelace\n\nBo\nGrace Hopper\n')).toEqual(['Ada Lovelace', 'Grace Hopper']);
+  });
+
+  it('reads every string in JSON, every literal in code, and every line elsewhere, from 12 characters', async () => {
+    const { protectedPhrases } = await import('../../src/dev/build-check.js');
+    expect(protectedPhrases('a.json', JSON.stringify({ title: 'September retreat', n: 3, people: ['Ada Lovelace', 'Bo'] }))).toEqual(['September retreat', 'Ada Lovelace']);
+    expect(protectedPhrases('a.ts', `export const x = { venue: 'Pine Lodge, Room 4', short: "ok", t: \`Morning session\` };`)).toEqual(['Pine Lodge, Room 4', 'Morning session']);
+    expect(protectedPhrases('a.md', '# Agenda\n\n- Breakfast with the chairs\n| ok |')).toEqual(['Breakfast with the chairs']);
+  });
+});
+
+describe('npx auth-kit check-prod-build --protected', () => {
+  it('reads the files, fails on a leak, and says how many phrases it checked when clean', async () => {
+    const { runCli } = await import('../../src/dev/cli.js');
+    await writeFile(join(root, 'roster.txt'), 'Ada Lovelace\nGrace Hopper\n');
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = { cwd: root, env: {}, out: (l: string) => out.push(l), err: (l: string) => err.push(l) };
+    await fixture({});
+    expect(await runCli(['check-prod-build', '--protected', 'roster.txt'], io)).toBe(0);
+    expect(out.at(-1)).toMatch(/none of 2 protected phrases from 1 file in its public files/);
+    await writeFile(join(build, 'static', 'chunks', 'leak.js'), 'x="Grace Hopper"');
+    expect(await runCli(['check-prod-build', '--protected', 'roster.txt'], io)).toBe(1);
+    expect(err.join('\n')).toMatch(/leak\.js: holds 1 protected phrase from roster\.txt/);
+    expect(await runCli(['check-prod-build', '--protected', 'missing.txt'], io)).toBe(1);
+  });
+});
