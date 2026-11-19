@@ -1108,6 +1108,21 @@ describe('emailed code (the backstop) and joining', () => {
     await heading('Sign in to Example Reports');
     expect(emailField().value).toBe('ada@example.org');
   });
+
+  it('the links under a form are an icon and the words, with no chevron pointing the other way (0.1.20)', async () => {
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    const { user } = setup();
+    const parts = (name: string) =>
+      [...screen.getByRole('button', { name }).children].map((el) => el.getAttribute('data-auth-kit-icon') ?? el.tagName.toLowerCase());
+    // The email screen's "instead" links.
+    expect(parts('Use a password instead')).toEqual(['password', 'span']);
+    expect(parts('Email me a code instead')).toEqual(['mail', 'span']);
+    // The code screen: a refresh, and a back arrow that is the only arrow on the row.
+    await askForCode(user);
+    expect(parts('Send a new code')).toEqual(['refresh', 'span']);
+    expect(parts('Use a different email address')).toEqual(['back', 'span']);
+    expect(root().querySelector('[data-auth-kit-slot="alts"] [data-auth-kit-icon="chevron"]')).toBeNull();
+  });
 });
 
 describe('after sign-in', () => {
