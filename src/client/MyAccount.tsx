@@ -13,6 +13,7 @@ import {
 } from './api.js';
 import { refreshSession } from './api.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
+import { type SignInSettings, normalizeSignIn, stayWords } from '../shared/sign-in-mode.js';
 import { MY_ACCOUNT, SELF_SERVICE, SIGN_IN, STATUS } from './copy.js';
 import { type AccountNotices, resolveNotices, sendAccountNotice } from './notices.js';
 import { forgetPasskey, rememberPasskey } from './passkey-hint.js';
@@ -38,7 +39,14 @@ export interface MyAccountSelfService {
 }
 
 export interface MyAccountProps extends StyleProps, PasswordCheckOptions {
+  /** Ignored on a Simple site. */
   passkeysEnabled: boolean;
+  /**
+   * How people sign in to the site (ADR 0029): the same `signIn` setting the preset and `SignIn` get.
+   * On a Simple site the page has no passkey, authenticator, or password sections: it says the person
+   * signs in with an emailed code, and how long a sign-in lasts on this device.
+   */
+  signIn?: SignInSettings;
   /** The site's name, shown in the authenticator app. */
   issuer: string;
   /** Where "Sign out everywhere" goes afterwards. Default `/sign-in`. A same-site path or an http(s) URL (anything else throws). */
@@ -108,7 +116,10 @@ function describePasskey(passkey: PasskeyInfo): string {
  * is refused.
  */
 export function MyAccount(props: MyAccountProps) {
-  const { classNames, passkeysEnabled } = props;
+  const { classNames } = props;
+  const signIn = normalizeSignIn(props.signIn, 2, 'MyAccount signIn');
+  const simple = signIn.mode === 'simple';
+  const passkeysEnabled = props.passkeysEnabled && !simple;
   // Checked before anything renders: each ends up in an href or window.location.assign.
   const signedOutPath = hrefOr('signedOutPath', props.signedOutPath, '/sign-in');
   const deletedPath = hrefOr('deletedPath', props.deletedPath, '/');
@@ -120,9 +131,10 @@ export function MyAccount(props: MyAccountProps) {
   const loadFactors = props.loadFactors ?? fetchAuthFactors;
   const notices = useMemo(() => resolveNotices(props.notices, 'MyAccount'), [props.notices]);
   const [email, reloadEmail] = useLoaded(fetchAccountEmail, 'account');
-  const [factors, reloadFactors] = useLoaded(loadFactors, 'account');
+  // A Simple site reads nothing it won't show: no factors, passkeys, or authenticator.
+  const [factors, reloadFactors] = useLoaded(() => (simple ? Promise.resolve<ClientAuthFactors>({ configured: ['EMAIL_OTP'], mfa: [] }) : loadFactors()), 'account');
   const [passkeys, reloadPasskeys] = useLoaded(() => (passkeysEnabled ? listPasskeys() : Promise.resolve([])), 'account');
-  const [totp, reloadTotp] = useLoaded(hasAuthenticator, 'account');
+  const [totp, reloadTotp] = useLoaded(() => (simple ? Promise.resolve(false) : hasAuthenticator()), 'account');
   const [confirmingRemoval, setConfirmingRemoval] = useState<string | null>(null);
   const [editing, setEditing] = useState<'authenticator' | 'password' | 'authenticator-after-password' | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -398,20 +410,33 @@ export function MyAccount(props: MyAccountProps) {
           <Text classNames={classNames}>{SELF_SERVICE.askAdmin}</Text>
         )}
       </section>
-      {passkeySection}
-      <section aria-labelledby={`${errorId}-authenticator`} {...slot(classNames, 'section')}>
-        <Heading level={sub} classNames={classNames} id={`${errorId}-authenticator`}>
-          {MY_ACCOUNT.authenticatorHeading}
-        </Heading>
-        {authenticatorBody}
-      </section>
-      <section aria-labelledby={`${errorId}-password`} {...slot(classNames, 'section')}>
-        <Heading level={sub} classNames={classNames} id={`${errorId}-password`}>
-          <Icon name="password" />
-          {MY_ACCOUNT.passwordHeading}
-        </Heading>
-        {passwordBody}
-      </section>
+      {simple ? (
+        <section aria-labelledby={`${errorId}-signing-in`} data-auth-kit-sign-in-mode="simple" {...slot(classNames, 'section')}>
+          <Heading level={sub} classNames={classNames} id={`${errorId}-signing-in`}>
+            <Icon name="mail" />
+            {MY_ACCOUNT.signingInHeading}
+          </Heading>
+          <Text classNames={classNames}>{MY_ACCOUNT.signingInCode}</Text>
+          {signIn.stay !== null ? <Text classNames={classNames}>{MY_ACCOUNT.staySignedIn(stayWords(signIn.stay))}</Text> : null}
+        </section>
+      ) : (
+        <>
+          {passkeySection}
+          <section aria-labelledby={`${errorId}-authenticator`} {...slot(classNames, 'section')}>
+            <Heading level={sub} classNames={classNames} id={`${errorId}-authenticator`}>
+              {MY_ACCOUNT.authenticatorHeading}
+            </Heading>
+            {authenticatorBody}
+          </section>
+          <section aria-labelledby={`${errorId}-password`} {...slot(classNames, 'section')}>
+            <Heading level={sub} classNames={classNames} id={`${errorId}-password`}>
+              <Icon name="password" />
+              {MY_ACCOUNT.passwordHeading}
+            </Heading>
+            {passwordBody}
+          </section>
+        </>
+      )}
       <section aria-labelledby={`${errorId}-signout`} {...slot(classNames, 'section')}>
         <Heading level={sub} classNames={classNames} id={`${errorId}-signout`}>
           {MY_ACCOUNT.signOutHeading}

@@ -518,6 +518,12 @@ export const MY_ACCOUNT = {
   newPasswordLabel: 'New password',
   newPasswordHint: (minLength: number) => `At least ${minLength} characters. Your password manager can make one.`,
 
+  /** A Simple site (ADR 0029): how this person signs in, in place of the passkey, authenticator, and password sections. */
+  signingInHeading: 'How you sign in',
+  signingInCode: 'You sign in with a code we email you. There’s nothing else to set up.',
+  /** After `stayWords`: "for 30 days", "for 1 day", or "until you quit your browser". */
+  staySignedIn: (stay: string) => `You stay signed in on this device ${stay}.`,
+
   signOutHeading: 'Sign out everywhere',
   signOutIntro: 'Ends your sessions on every device, including this one. Pages already open elsewhere can keep working for up to an hour.',
   signOut: 'Sign out everywhere',

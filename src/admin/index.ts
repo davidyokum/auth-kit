@@ -195,6 +195,7 @@ export {
 export {
   PEOPLE_FORM_FIELDS,
   DECLINE_REQUESTS_MAX,
+  INVITE_MANY_MAX,
   PENDING_REQUESTS_SHOWN,
   type PersonRow,
   type PeopleList,
@@ -204,6 +205,9 @@ export {
   type DeclineRequestInput,
   type DeclineRequestsInput,
   type DeclineRequestsResult,
+  type InviteManyInput,
+  type InviteManyResult,
+  type InviteManySkip,
   type DeclineRequestsSkip,
   type DeclineRequestsSkipStatus,
   type ActionResult,

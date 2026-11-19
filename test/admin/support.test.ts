@@ -49,6 +49,18 @@ describe('invite email', () => {
     expect(plain.text).toContain('You’ve been given access to Example & Co. Your role: Member.');
   });
 
+  it('a Simple site’s mailer (site.signIn, ADR 0029) sends the code-only invite', async () => {
+    const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
+    const ses = mockClient(client);
+    ses.on(SendEmailCommand).resolves({ MessageId: 'm-1' });
+    const mailer = createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org', signIn: { mode: 'simple', stay: 30 } }, client });
+    await mailer.sendInvite(invite);
+    const text = ses.commandCalls(SendEmailCommand)[0]!.args[0].input.Content!.Simple!.Body!.Text!.Data!;
+    expect(text).toContain('That’s all: there’s no password or app to set up.');
+    expect(text).not.toMatch(/passkey/i);
+    expect(() => createSesInviteMailer({ from: 'Example <sign-in@yokum.app>', site: { siteName: 'Example', theme: 'personal', help: 'help@example.org', signIn: { mode: 'code' } as never } })).toThrow(/signIn.mode/);
+  });
+
   it('sends through SESv2 from the verified identity', async () => {
     const client = new SESv2Client({ region: 'us-east-1', credentials: { accessKeyId: 'x', secretAccessKey: 'y' } });
     const ses = mockClient(client);

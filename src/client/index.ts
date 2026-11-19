@@ -47,6 +47,8 @@ export {
   SHARED,
   STATUS,
   ERRORS,
+  SIMPLE_SIGN_IN,
+  SIMPLE_HELP_TOPICS,
   helpScreen,
   contactLines,
   team,
@@ -57,6 +59,18 @@ export {
   type HelpScreen,
   type Rich,
 } from './copy.js';
+export {
+  SIGN_IN_MODES,
+  SIGN_IN_MODE_LABEL,
+  SIMPLE_STAY_POLICY,
+  SignInConfigError,
+  normalizeSignIn,
+  stayWords,
+  type SignInMode,
+  type SignInSettings,
+  type SimpleStay,
+  type NormalizedSignIn,
+} from '../shared/sign-in-mode.js';
 export { Icon, ICON_NAMES, type IconName } from './icons.js';
 export { wafAwareFetch, postAccountForm, type PostOutcome } from './account-creation-client.js';
 // The families as themes (auth-kit/themes), for the screens' `theme` prop.

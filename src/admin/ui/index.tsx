@@ -36,6 +36,7 @@ import { ADMIN_ROLE_RANK, OWNER_CHOICE_LABEL, ROLE_MATRIX, STANDARD_GROUPS, type
 import {
   PEOPLE_FORM_FIELDS as F,
   PENDING_REQUESTS_SHOWN,
+  INVITE_MANY_MAX,
   type AccessRequestList,
   type AccessRequestRow,
   type ActionResult,
@@ -727,6 +728,8 @@ export interface InviteFormProps {
   resourceAccessHref?: string;
   /** Shown under that note: the site's resource-access section, when it has one. */
   resourceAccess?: ReactNode;
+  /** `forms.inviteMany`: adds "Add several at once" under the form (`InviteManyForm`). */
+  inviteMany?: FormAction;
 }
 
 /**
@@ -745,7 +748,7 @@ export function InviteForm(props: InviteFormProps): ReactNode {
   const domains = (props.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
   const outside = domain !== '' && domains.length > 0 && !domains.includes(domain);
   const needsReason = roleRank(role) >= ADMIN_ROLE_RANK['admin-content-people'];
-  return (
+  const form = (
     <form action={run} className="ak-invite">
       <label className="ak-field">
         <span>Email</span>
@@ -785,6 +788,73 @@ export function InviteForm(props: InviteFormProps): ReactNode {
       <ActionResultMessage result={result} {...(props.stepUpHref !== undefined && { stepUpHref: props.stepUpHref })} />
     </form>
   );
+  if (!props.inviteMany) return form;
+  return (
+    <>
+      {form}
+      <InviteManyForm action={props.inviteMany} {...(props.appRoles !== undefined && { appRoles: props.appRoles })} {...(props.inviteDomains !== undefined && { inviteDomains: props.inviteDomains })} />
+    </>
+  );
+}
+
+export interface InviteManyFormProps {
+  /** `forms.inviteMany`. */
+  action: FormAction;
+  /** The app's own roles, offered after Member. */
+  appRoles?: readonly string[];
+  /** Usual invite domains: the confirmation box says addresses outside them need checking. */
+  inviteDomains?: readonly string[];
+}
+
+/**
+ * "Add several at once" (ADR 0029): paste up to 50 addresses from a list, and give them all Member
+ * or one of the site's own roles. Admin roles are one person at a time (a reason, a recent sign-in).
+ * Each address gets the ordinary invite; the result names any that already had an account.
+ */
+export function InviteManyForm(props: InviteManyFormProps): ReactNode {
+  const [result, run, pending] = useActionState(props.action, null);
+  const [text, setText] = useState('');
+  const [role, setRole] = useState<string>(MEMBER_ROLE);
+  const count = countAddresses(text);
+  const memberOption = roleOptions([]).find((o) => o.role === MEMBER_ROLE);
+  const options: RolePickerOption[] = [...(memberOption ? [{ ...memberOption, available: true }] : []), ...(props.appRoles ?? []).map(appRoleOption)];
+  const domains = (props.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
+  return (
+    <details className="ak-invite-many">
+      <summary>Add several at once</summary>
+      <form action={run} className="ak-invite">
+        <label className="ak-field">
+          <span>Email addresses</span>
+          <small className="ak-muted">Paste up to {INVITE_MANY_MAX}, one per line or separated by commas. “Name &lt;address&gt;” works too.</small>
+          <textarea name={F.emails} required rows={6} autoComplete="off" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} />
+        </label>
+        {options.length > 1 ? (
+          <RolePicker name={F.role} options={options} value={role} onChange={setRole} legend="Role for everyone in the list" />
+        ) : (
+          <>
+            <input type="hidden" name={F.role} value={MEMBER_ROLE} />
+            <p className="ak-note ak-muted">Everyone in the list joins as Member. Give admin roles one person at a time.</p>
+          </>
+        )}
+        {domains.length > 0 ? (
+          <label className="ak-field ak-warn">
+            <input type="checkbox" name={F.confirmOutsideDomain} />
+            <span>Some addresses may be outside the usual domains ({domains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. I’ve checked them.</span>
+          </label>
+        ) : null}
+        <button type="submit" className="ak-button ak-button-primary" disabled={pending || count === 0}>
+          {pending ? 'Sending…' : count > 0 ? `Send ${count} ${count === 1 ? 'invite' : 'invites'}` : 'Send invites'}
+        </button>
+        <ActionResultMessage result={result} />
+      </form>
+    </details>
+  );
+}
+
+/** About how many addresses the pasted text holds (the server does the real check). */
+function countAddresses(text: string): number {
+  const found = text.replace(/[^<>\n]*<([^<>]*)>/g, ' $1 ').split(/[\s,;]+/).filter((t) => t.includes('@'));
+  return new Set(found.map((t) => t.toLowerCase())).size;
 }
 
 // ---- Lost passkey -------------------------------------------------------------------------------

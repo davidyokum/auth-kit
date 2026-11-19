@@ -1,3 +1,4 @@
+import { type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider';
 import type { AuthUser, ServerAuth } from '../server/auth.js';
 import { ForbiddenError } from '../server/errors.js';
@@ -57,6 +58,10 @@ import {
   type DeleteUserInput,
   type FormAction,
   type InviteInput,
+  type InviteManyInput,
+  type InviteManyResult,
+  type InviteManySkip,
+  INVITE_MANY_MAX,
   MEMBER_ROLE,
   PEOPLE_FORM_FIELDS,
   type PeopleList,
@@ -83,6 +88,12 @@ export interface PeopleAdminConfig<G extends string = string, C extends string =
   signInUrl: string;
   /** Default `emailed-code` (everyday pools). The Tier 3 admin pool uses `temporary-password`. */
   inviteMode?: InviteMode;
+  /**
+   * How people sign in (ADR 0029), the same `signIn` setting the preset gets: a Simple site's invites
+   * say the emailed code is all there is. Default: whatever the mailer says (`createSesInviteMailer`'s
+   * `site.signIn`), else Full.
+   */
+  signIn?: SignInSettings;
   /**
    * Sends the branded invite. Required in `emailed-code` mode. `createSesInviteMailer` also sends the
    * owner's alerts (a Super admin grant, an ownership transfer), so it serves as `ownerAlerts` too,
@@ -153,6 +164,13 @@ export interface PeopleActions {
   listPeople(): Promise<PeopleList>;
   /** AdminCreateUser with no password and no `email_verified`; AdminAddUserToGroup; the invite email. */
   invite(input: InviteInput): Promise<ActionResult>;
+  /**
+   * "Add several at once" (ADR 0029): up to `INVITE_MANY_MAX` pasted addresses, as Member or an app
+   * role, each the ordinary invite (its own checks, audit entry, and email). Nothing is sent when any
+   * address isn't one, or when one is outside `inviteDomains` without `confirmOutsideDomain`. An
+   * address that already has an account is skipped and named; a failure stops the rest.
+   */
+  inviteMany(input: InviteManyInput): Promise<InviteManyResult>;
   /** Sends the invite again. Never resets an account; only for an invite nobody has used. */
   resend(input: TargetInput): Promise<ActionResult>;
   /** AdminRemoveUserFromGroup / AdminAddUserToGroup, with a reason; promotions need a recent sign-in. Never grants `owner`. */
@@ -205,6 +223,8 @@ export interface PeopleActions {
 
 export interface PeopleFormActions {
   invite: FormAction;
+  /** `emails` (the pasted text), `role`, and `confirmOutsideDomain`. */
+  inviteMany: FormAction;
   approveRequest: FormAction;
   declineRequest: FormAction;
   /** Every `id` field in the form, and `reason`. */
@@ -287,6 +307,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   if (signInUrl.protocol !== 'https:' && !(signInUrl.protocol === 'http:' && localHost)) {
     throw new Error('auth-kit: signInUrl must use https (http only for localhost).');
   }
+  const signInMode = config.signIn !== undefined ? normalizeSignIn(config.signIn, 2, 'createPeopleActions signIn').mode : undefined;
   const now = config.now ?? Date.now;
   const retentionDays = config.deleteRetentionDays ?? ADMIN_POLICY.deleteRetentionDays;
   const maxPeople = config.maxPeople ?? ADMIN_POLICY.maxPeople;
@@ -597,6 +618,94 @@ export function createPeopleActions<G extends string, C extends string>(config: 
     return inviteAs(acting_, fields, { auditAction });
   }
 
+  // ---- invite several -------------------------------------------------------------------------
+
+  /** The addresses in pasted text: `Name <address>` gives the address; separators are commas, semicolons, and white space. */
+  function addressesOf(value: unknown): string[] {
+    const pieces = typeof value === 'string' ? [value] : Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : null;
+    if (!pieces) throw new InputError('Paste the email addresses to invite.');
+    const raw = pieces
+      .join('\n')
+      .replace(/[^<>\n]*<([^<>]*)>/g, ' $1 ')
+      .split(/[\s,;]+/)
+      .map((t) => t.trim())
+      .filter((t) => t !== '');
+    if (raw.length === 0) throw new InputError('Paste the email addresses to invite.');
+    const bad: string[] = [];
+    const emails: string[] = [];
+    for (const token of raw) {
+      try {
+        const email = emailOf(token);
+        if (!emails.includes(email)) emails.push(email);
+      } catch {
+        bad.push(token.slice(0, 60));
+      }
+    }
+    if (bad.length > 0) throw new InputError(`${bad.length === 1 ? 'This isn’t an email address' : 'These aren’t email addresses'}: ${bad.slice(0, 5).join(', ')}${bad.length > 5 ? `, and ${bad.length - 5} more` : ''}. Fix ${bad.length === 1 ? 'it' : 'them'}, then send again. Nothing was sent.`);
+    if (emails.length > INVITE_MANY_MAX) throw new InputError(`Add at most ${INVITE_MANY_MAX} people at a time (that list has ${emails.length}). Nothing was sent.`);
+    return emails;
+  }
+
+  async function inviteMany(input: InviteManyInput): Promise<InviteManyResult> {
+    const auditAction = PEOPLE_AUDIT_ACTIONS.invite;
+    let acting_: Acting<C>;
+    try {
+      acting_ = await acting(PEOPLE_ACTION_CAPABILITY.invite);
+    } catch (error) {
+      await logForbidden(auditAction, error);
+      return authFailure(error) ?? fail('unavailable', describeAwsError(error));
+    }
+    let emails: string[], role: string, confirmOutside: boolean;
+    try {
+      const raw = record(input);
+      emails = addressesOf(raw.emails);
+      role = raw.role === undefined || raw.role === '' ? MEMBER_ROLE : typeof raw.role === 'string' ? raw.role : '';
+      if (!isKnownRole(role, groupsKnown())) throw new InputError('Choose a role this site has.');
+      if (roleRank(role) > 0) throw new InputError(`Add several at once gives Member or one of the site’s own roles. Invite ${roleLabel(role)}s one at a time: that role needs a reason and a recent sign-in.`);
+      confirmOutside = checked(raw.confirmOutsideDomain);
+    } catch (error) {
+      return fail('invalid', error instanceof InputError ? error.message : 'That request is invalid.');
+    }
+    const outside = emails.filter((e) => outsideDomains(e, inviteDomains));
+    if (outside.length > 0 && !confirmOutside) {
+      return fail(
+        'refused',
+        `${outside.length === 1 ? `${outside[0]} is` : `${outside.length} addresses are`} outside this site's usual domains (${inviteDomains.join(', ')})${outside.length > 1 ? `: ${outside.slice(0, 5).join(', ')}${outside.length > 5 ? ', …' : ''}` : ''}. An invite to a mistyped address is a live account for whoever owns that inbox. Check them, then confirm to send. Nothing was sent.`,
+        { guardrail: 'domain' },
+      );
+    }
+    const invited: string[] = [];
+    const skipped: InviteManySkip[] = [];
+    let stopped = false;
+    for (const email of emails) {
+      if (stopped) {
+        skipped.push({ email, status: 'not-sent', reason: 'Not sent: it stopped before this one.' });
+        continue;
+      }
+      const result = await inviteAs(acting_, { email, role }, { auditAction });
+      if (result.ok) invited.push(email);
+      else if (result.code === 'refused' && result.guardrail === 'exists') skipped.push({ email, status: 'exists', reason: 'Already has an account.' });
+      else if (result.code === 'refused') skipped.push({ email, status: 'refused', reason: result.error });
+      else {
+        skipped.push({ email, status: 'failed', reason: result.error });
+        stopped = true;
+      }
+    }
+    const named = (list: readonly InviteManySkip[]) => list.slice(0, 5).map((s) => s.email).join(', ') + (list.length > 5 ? `, and ${list.length - 5} more` : '');
+    const exists = skipped.filter((s) => s.status === 'exists');
+    const others = skipped.filter((s) => s.status !== 'exists');
+    const tail = [
+      exists.length > 0 ? `${exists.length === 1 ? 'This address already has' : `${exists.length} already have`} an account: ${named(exists)}.` : '',
+      others.length > 0 ? `${others.length === 1 ? 'One wasn’t' : `${others.length} weren’t`} invited: ${named(others)}. The Activity page says why.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (invited.length === 0) {
+      return { ...fail(stopped ? 'unavailable' : 'refused', `Nobody was invited. ${tail}`.trim()), invited, skipped };
+    }
+    return { ok: true, message: `Sent ${invited.length} ${invited.length === 1 ? 'invite' : 'invites'} as ${roleLabel(role)}.${tail ? ` ${tail}` : ''}`, invited, skipped };
+  }
+
   /**
    * The invite's checks and audited calls, shared by the invite form and an approved access request
    * (which is the ordinary invite: same guardrails, same account steps, the approved wording).
@@ -698,6 +807,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               expiresAt,
               ...(config.theme !== undefined && { theme: config.theme }),
               ...(helpEmail !== undefined && { helpEmail }),
+              ...(signInMode !== undefined && { signInMode }),
               invitedBy,
               roleLabel: roleLabel(role),
               ...(opts.approved && { approved: true }),
@@ -1011,6 +1121,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
               siteName: config.siteName,
               signInUrl: signInUrl.toString(),
               expiresAt,
+              ...(signInMode !== undefined && { signInMode }),
             }),
           );
         } else {
@@ -1558,6 +1669,11 @@ export function createPeopleActions<G extends string, C extends string>(config: 
         confirmOutsideDomain: field(d, F.confirmOutsideDomain) !== undefined,
       });
     },
+    inviteMany: (_prev, data) => {
+      const d = formOf(data);
+      if (!d) return badForm();
+      return inviteMany({ emails: field(d, F.emails) ?? '', role: field(d, F.role) ?? '', confirmOutsideDomain: field(d, F.confirmOutsideDomain) !== undefined });
+    },
     resend: (_prev, data) => (formOf(data) ? resend(targetFrom(data) as TargetInput) : badForm()),
     changeRole: (_prev, data) => {
       const d = formOf(data);
@@ -1582,6 +1698,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
   return Object.freeze({
     listPeople,
     invite,
+    inviteMany,
     resend,
     changeRole,
     transferOwnership,

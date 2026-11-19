@@ -724,6 +724,81 @@ describe('deleteUser', () => {
   });
 });
 
+describe('add several at once (inviteMany, ADR 0029)', () => {
+  it('invites each pasted address as Member, each the ordinary invite with its own audit entry and email', async () => {
+    const t = setup({ actor: ADMIN });
+    const result = await t.people.inviteMany({ emails: 'Ada Lovelace <Ada@Example.org>, grace@example.org;\n\nkatherine@example.org  ada@example.org' });
+    expect(result).toMatchObject({ ok: true, message: 'Sent 3 invites as Member.', invited: ['ada@example.org', 'grace@example.org', 'katherine@example.org'], skipped: [] });
+    expect(t.sent.map((m) => m.email)).toEqual(['ada@example.org', 'grace@example.org', 'katherine@example.org']);
+    expect(t.auditLog.rows.filter((r) => r.action === 'people.invite' && r.phase === 'result')).toHaveLength(3);
+    for (const email of ['ada@example.org', 'grace@example.org', 'katherine@example.org']) expect([...t.pool.users.find((u) => u.email === email)!.groups]).toEqual([]);
+  });
+
+  it('skips and names an address that already has an account, and invites the rest', async () => {
+    const t = setup({ actor: ADMIN });
+    t.pool.add({ sub: 'ada', email: 'ada@example.org', emailVerified: true });
+    const result = await t.people.inviteMany({ emails: ['ada@example.org', 'grace@example.org'] });
+    expect(result).toMatchObject({ ok: true, invited: ['grace@example.org'], skipped: [{ email: 'ada@example.org', status: 'exists' }] });
+    expect(result.ok && result.message).toBe('Sent 1 invite as Member. This address already has an account: ada@example.org.');
+  });
+
+  it('sends nothing when any entry isn’t an address, or there are too many', async () => {
+    const t = setup({ actor: ADMIN });
+    expect(await t.people.inviteMany({ emails: 'ada@example.org, not-an-address, grace@' })).toMatchObject({ ok: false, code: 'invalid', error: 'These aren’t email addresses: not-an-address, grace@. Fix them, then send again. Nothing was sent.' });
+    expect(await t.people.inviteMany({ emails: '' })).toMatchObject({ ok: false, code: 'invalid' });
+    const many = Array.from({ length: 51 }, (_, i) => `p${i}@example.org`).join('\n');
+    expect(await t.people.inviteMany({ emails: many })).toMatchObject({ ok: false, code: 'invalid', error: 'Add at most 50 people at a time (that list has 51). Nothing was sent.' });
+    expect(t.pool.writes()).toEqual([]);
+    expect(t.sent).toEqual([]);
+  });
+
+  it('gives Member or an app role only: admin roles are one person at a time', async () => {
+    const t = setup({ actor: OWNER });
+    expect(await t.people.inviteMany({ emails: 'ada@example.org', role: 'admin-view' })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(await t.people.inviteMany({ emails: 'ada@example.org', role: 'superadmin' })).toMatchObject({ ok: false, code: 'invalid' });
+    expect(t.pool.writes()).toEqual([]);
+    expect(await t.people.inviteMany({ emails: 'rev@example.org', role: 'reviewer' })).toMatchObject({ ok: true, invited: ['rev@example.org'] });
+  });
+
+  it('asks before inviting outside the usual domains, naming the addresses, and sends nothing until confirmed', async () => {
+    const t = setup({ actor: ADMIN, config: { inviteDomains: ['example.org'] } });
+    const refused = await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org' });
+    expect(refused).toMatchObject({ ok: false, guardrail: 'domain' });
+    expect(!refused.ok && refused.error).toMatch(/^grace@exmaple.org is outside this site's usual domains \(example.org\)\..*Nothing was sent\.$/);
+    expect(t.pool.writes()).toEqual([]);
+    expect(await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org', confirmOutsideDomain: true })).toMatchObject({ ok: true, invited: ['ada@example.org', 'grace@exmaple.org'] });
+  });
+
+  it('needs people.manage, like one invite', async () => {
+    const t = setup({ actor: MEMBER });
+    expect(await t.people.inviteMany({ emails: 'ada@example.org' })).toMatchObject({ ok: false, code: 'forbidden' });
+    expect(t.pool.writes()).toEqual([]);
+  });
+
+  it('stops at a failure and says which were not sent', async () => {
+    const t = setup({ actor: ADMIN });
+    t.failMail();
+    const result = await t.people.inviteMany({ emails: 'ada@example.org grace@example.org' });
+    expect(result).toMatchObject({ ok: false, invited: [], skipped: [{ email: 'ada@example.org', status: 'failed' }, { email: 'grace@example.org', status: 'not-sent' }] });
+    expect(t.sent.map((m) => m.email)).toEqual([]);
+  });
+
+  it('the form adapter reads emails, role, and confirmOutsideDomain', async () => {
+    const t = setup({ actor: ADMIN });
+    const data = new FormData();
+    data.set('emails', 'ada@example.org\ngrace@example.org');
+    data.set('role', 'member');
+    expect(await t.people.forms.inviteMany(null, data)).toMatchObject({ ok: true, message: 'Sent 2 invites as Member.' });
+  });
+
+  it('a Simple site’s invites say so (signIn, ADR 0029)', async () => {
+    const t = setup({ actor: ADMIN, config: { signIn: { mode: 'simple', stay: 30 } } });
+    await t.people.invite({ email: 'ada@example.org', role: 'member' });
+    await t.people.inviteMany({ emails: 'grace@example.org' });
+    expect(t.sent.map((m) => m.signInMode)).toEqual(['simple', 'simple']);
+  });
+});
+
 describe('invite expiry sweep', () => {
   function seedInvites(pool: ReturnType<typeof fakeUserPool>) {
     pool.add({ sub: 'old', email: 'old@example.org', emailVerified: false, createdAt: new Date(NOW - 8 * DAY) }, 'admin-content');

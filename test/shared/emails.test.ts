@@ -90,6 +90,14 @@ describe('the words (Card Studio mailHTML; REPORT §5.2)', () => {
     expect(email.replyTo).toEqual(['jordan@example.org']);
   });
 
+  it('a Simple site’s invite (ADR 0029) says the emailed code is all there is', () => {
+    const email = inviteEmail(OSBM, { email: 'sam@example.org', expiresAt: AT, signInMode: 'simple' });
+    expect(email.text).toContain('2. Check that it shows sam@example.org, then choose Email me a code.');
+    expect(email.text).toContain('3. Enter the 8-digit code we email you. That’s all: there’s no password or app to set up.');
+    expect(email.text).not.toMatch(/passkey|authenticator/i);
+    expect(inviteEmail(OSBM, { email: 'sam@example.org', expiresAt: AT, signInMode: 'full' }).text).toContain('then set up a passkey');
+  });
+
   it('the approved request is the invite with the approver (§5.2j)', () => {
     const email = inviteEmail(OSBM, { email: 'sam@example.org', expiresAt: AT, invitedBy: { name: 'Jordan Lee' }, roleLabel: 'Member', approved: true });
     expect(email.subject).toBe('Jordan Lee approved your request for Example Reports');

@@ -349,3 +349,27 @@ describe('MyAccount self-service (sign-up sites)', () => {
     expect(screen.queryByLabelText('Type your email address to confirm')).toBeNull();
   });
 });
+
+describe('MyAccount on a Simple site (ADR 0029)', () => {
+  it('says how the person signs in and how long a sign-in lasts here, with no passkey, authenticator, or password sections, and reads none of them', async () => {
+    const { loadFactors } = setup({ configured: ['EMAIL_OTP'], mfa: [] }, { signIn: { mode: 'simple', stay: 30 } });
+    expect(await within(section('Email')).findByText('ada@example.org')).toBeTruthy();
+    const signingIn = section('How you sign in');
+    expect(within(signingIn).getByText('You sign in with a code we email you. There’s nothing else to set up.')).toBeTruthy();
+    expect(within(signingIn).getByText('You stay signed in on this device for 30 days.')).toBeTruthy();
+    for (const name of ['Passkeys', 'Authenticator app', 'Password']) expect(screen.queryByRole('region', { name })).toBeNull();
+    expect(section('Sign out everywhere')).toBeTruthy();
+    expect(document.querySelector('[data-auth-kit="my-account"]')!.textContent).not.toMatch(/passkey|password|authenticator/i);
+    expect(loadFactors).not.toHaveBeenCalled();
+    expect(auth.listWebAuthnCredentials).not.toHaveBeenCalled();
+    expect(auth.fetchMFAPreference).not.toHaveBeenCalled();
+  });
+
+  it('words each stay', async () => {
+    setup({ configured: ['EMAIL_OTP'], mfa: [] }, { signIn: { mode: 'simple', stay: 'browser' } });
+    expect(await screen.findByText('You stay signed in on this device until you quit your browser.')).toBeTruthy();
+    cleanup();
+    setup({ configured: ['EMAIL_OTP'], mfa: [] }, { signIn: { mode: 'simple', stay: 1 } });
+    expect(await screen.findByText('You stay signed in on this device for 1 day.')).toBeTruthy();
+  });
+});

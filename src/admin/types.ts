@@ -161,6 +161,36 @@ export type DeclineRequestsResult = ActionResult & {
   skipped?: readonly DeclineRequestsSkip[];
 };
 
+/** The most addresses one "Add several at once" sends (`inviteMany`). */
+export const INVITE_MANY_MAX = 50;
+
+/**
+ * "Add several at once" (ADR 0029): addresses pasted from a list, one role for all of them. Only
+ * Member or an app role: admin roles need a reason and a recent sign-in, one person at a time.
+ */
+export interface InviteManyInput {
+  /** The pasted text (addresses separated by commas, semicolons, spaces, or new lines; `Name <address>` works too), or a list. */
+  emails: string | readonly string[];
+  /** Member (the default) or one of the app's own roles. */
+  role?: string;
+  /** Required when any address is outside `inviteDomains`. */
+  confirmOutsideDomain?: boolean;
+}
+
+/** Why "Add several at once" didn't invite an address. */
+export interface InviteManySkip {
+  email: string;
+  /** `exists`: it already has an account. `refused`: a guardrail said no. `failed`: the calls failed (the Activity page has the details). `not-sent`: it stopped before this one. */
+  status: 'exists' | 'refused' | 'failed' | 'not-sent';
+  reason: string;
+}
+
+/** What "Add several at once" did: who was invited, and who wasn't and why. */
+export type InviteManyResult = ActionResult & {
+  invited?: readonly string[];
+  skipped?: readonly InviteManySkip[];
+};
+
 export interface InviteInput {
   email: string;
   /** An admin role (never `owner`), an app role, or `member` for no group. */
@@ -212,6 +242,8 @@ export const PEOPLE_FORM_FIELDS = {
   reason: 'reason',
   confirmEmail: 'confirmEmail',
   confirmOutsideDomain: 'confirmOutsideDomain',
+  /** "Add several at once": the pasted addresses. */
+  emails: 'emails',
 } as const;
 
 export { MEMBER_ROLE } from '../shared/policy.js';
