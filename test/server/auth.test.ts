@@ -258,8 +258,8 @@ describe('requireUser and the authenticator rule', () => {
     });
   });
 
-  it('caches a passing check per token and re-checks a failing one after 30 seconds', async () => {
-    const { auth, issuer, cognito, clock } = harness();
+  it('caches a passing check per token, and never an unfinished setup (it counts on the very next request)', async () => {
+    const { auth, issuer, cognito } = harness();
     const token = issuer.mintAccessToken({ sub: 'c' });
     await auth.requireUser({ request: bearer(token) });
     await auth.requireUser({ request: bearer(token) });
@@ -269,9 +269,21 @@ describe('requireUser and the authenticator rule', () => {
     const pending = issuer.mintAccessToken({ sub: 'n' });
     await rejection(auth.requireUser({ request: bearer(pending) }));
     cognito.setFactors('n', { configured: ['PASSWORD', 'SOFTWARE_TOKEN'], mfa: ['SOFTWARE_TOKEN_MFA'] });
-    await rejection(auth.requireUser({ request: bearer(pending) })); // still cached
-    clock.now += 31_000;
+    // Same token, no time passed: the authenticator added a moment ago already counts.
     await expect(auth.requireUser({ request: bearer(pending) })).resolves.toBeTruthy();
+  });
+
+  it('a first passkey counts on the next request with the same token (no stale "first-credential" bounce)', async () => {
+    const { auth, issuer, cognito } = harness();
+    cognito.setFactors('p', { configured: ['EMAIL_OTP'], mfa: [] });
+    const token = issuer.mintAccessToken({ sub: 'p' });
+    const first = await rejection(auth.requireUser({ request: bearer(token) }));
+    expect(first).toBeInstanceOf(FirstCredentialRequiredError);
+    // The chooser page itself lets the person in while they set it up.
+    await expect(auth.requireUser({ request: bearer(token), allowFirstCredentialEnrollment: true })).resolves.toBeTruthy();
+    cognito.setFactors('p', { configured: ['EMAIL_OTP', 'WEB_AUTHN'], mfa: [] });
+    await expect(auth.requireUser({ request: bearer(token) })).resolves.toBeTruthy();
+    expect(cognito.calls.filter((c) => c.method === 'getUserAuthFactors')).toHaveLength(3);
   });
 
   it('a fresh token (new jti) bypasses the cache, as after enrollment plus a forced refresh', async () => {

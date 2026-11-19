@@ -100,6 +100,12 @@ export const SIGN_IN = {
   chooseFirstTimeNext: 'Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.',
   /** The whole first-time advice as one sentence (`chooseFirstTimeLead` and `chooseFirstTimeNext`). */
   chooseFirstTime: 'First time signing in? Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.',
+  /**
+   * The passkey screen after the prompt closed or found nothing, where this browser remembers no passkey
+   * for the address (beside `chooseFirstTimeLead`): someone signing in for the first time has none yet.
+   * Said for every such address alike, so it tells nobody whether an account exists (ADR 0018).
+   */
+  passkeyFirstTimeNext: 'You don’t have a passkey yet. Choose Email me a code, and you’ll set one up after.',
   choosePasskey: 'Use a passkey',
   choosePassword: 'Use a password',
   chooseCode: 'Email me a code',
@@ -197,6 +203,9 @@ export const FIRST_VISIT = {
   /** The enrollment step after a password sign-in with no authenticator yet. */
   addTotpAfterPassword: 'You sign in with a password, so this site also asks for a code from an authenticator app. It only takes a minute.',
   addTotpSubNoQr: 'Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows.',
+  /** After "Create a password": the password is held until the authenticator's first code checks out. */
+  addTotpThenPassword: 'Scan the code with your app or password manager, then enter the 6-digit code it shows. Your password is saved once the code checks out.',
+  addTotpThenPasswordNoQr: 'Add this setup key to your authenticator app or password manager, then enter the 6-digit code it shows. Your password is saved once the code checks out.',
   /** Under the setup step's intro: once an authenticator is on, Cognito stops emailing sign-in codes. */
   totpReplacesEmail: 'Once it’s added, your sign-in codes come from this app, not by email.',
   cantScan: 'Can’t scan it? Enter this setup key in your app instead.',
@@ -206,6 +215,13 @@ export const FIRST_VISIT = {
   copied: 'Setup key copied.',
   copyFailed: 'Couldn’t copy here. Select the key and copy it instead.',
   openSetupLink: 'On this device? Open the setup link.',
+  /** Under the setup form (default mode): the only way to replace a key already shown. */
+  newSetupKeyLead: 'Scanned an older code, or lost this one?',
+  newQrCode: 'Get a new QR code',
+  newSetupKey: 'Get a new setup key',
+  /** The code checked out; the authenticator is being turned on (or the held password saved). */
+  codeChecked: 'Your code checked out. We’re finishing your authenticator setup.',
+  finishingSetup: 'Finishing your authenticator setup…',
 
   doneHeading: 'You’re set up',
   donePasskey: (c: CopyContext) => `Next time, choose your passkey when you sign in to ${c.siteName}.`,
@@ -498,7 +514,7 @@ export const MY_ACCOUNT = {
   setUpHeading: 'Set up your authenticator',
   replaceHeading: 'Replace your authenticator',
   nowAddHeading: 'Now add your authenticator',
-  nowAddIntro: 'You sign in with a password now, so this site also asks for a code from an authenticator app.',
+  nowAddIntro: 'A password here always comes with a code from an authenticator app. Your password is saved once the code checks out.',
   totpOn: 'On. Sign-in with your password also asks for a 6-digit code from it.',
   totpOffNeeded: 'Off. You sign in with a password, so set one up now.',
   totpOff: 'Off. You only need one if you sign in with a password.',
@@ -514,7 +530,7 @@ export const MY_ACCOUNT = {
   changePassword: 'Change password',
   changePasswordHeading: 'Change your password',
   setPassword: 'Set a password',
-  setPasswordIntro: 'After this you’ll add an authenticator app: sign-in with a password always asks for its code too.',
+  setPasswordIntro: 'Next you’ll add an authenticator app: sign-in with a password always asks for its code too. The password is saved once that’s done.',
   savePassword: 'Save password',
   currentPasswordLabel: 'Current password',
   newPasswordLabel: 'New password',
@@ -556,6 +572,7 @@ export const STATUS = {
   passkeyRemoved: 'Passkey removed.',
   authenticatorOn: 'Your authenticator is on.',
   passwordSaved: 'Password saved.',
+  passwordAndAuthenticatorOn: 'Password saved, and your authenticator is on.',
   passwordChanged: 'Password changed.',
   /** After a notice the site's route confirmed it sent (register A10). */
   passkeySavedEmailed: 'Passkey saved. We’ve emailed you a note about this.',
@@ -585,6 +602,9 @@ export const ERRORS = {
   passkeyRemovalUnconfirmed: 'We couldn’t confirm you have another way to sign in, so this passkey stays for now. Try again in a moment.',
   wrongPassword: 'That email address and password don’t match. Try again, or use another way to sign in.',
   wrongTotp: 'That code didn’t work. Codes change every 30 seconds, so enter the newest one.',
+  /** Setting up an authenticator: an entry scanned from an earlier key gives codes that never match. */
+  wrongTotpSetup:
+    'That code didn’t work. Enter the newest code from the entry you added with the QR code or setup key on this screen. If you scanned an earlier code, remove that entry. Then scan this one.',
   wrongEmailCode: (c: Pick<CopyContext, 'siteName'>) => `That code didn’t work. Check it against the newest email from ${c.siteName}.`,
   expiredCode: 'That code has expired. Ask for a new one.',
   sessionExpired: (c: Pick<CopyContext, 'codeLifetimeMinutes'>) => `That took longer than ${c.codeLifetimeMinutes} minutes, so we stopped the sign-in to keep your account safe. Start again.`,

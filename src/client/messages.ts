@@ -106,7 +106,7 @@ export function describeAuthError(error: unknown, context: AuthErrorContext = 's
     case 'EnableSoftwareTokenMFAException':
       return info(
         'wrong-code',
-        context === 'totp' || context === 'authenticator-setup' ? ERRORS.wrongTotp : context === 'code' ? wrongEmailCode : 'That code didn’t work. Check it and try again.',
+        context === 'authenticator-setup' ? ERRORS.wrongTotpSetup : context === 'totp' ? ERRORS.wrongTotp : context === 'code' ? wrongEmailCode : 'That code didn’t work. Check it and try again.',
         name,
       );
     case 'ExpiredCodeException':

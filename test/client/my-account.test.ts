@@ -187,16 +187,78 @@ describe('MyAccount', () => {
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Password' }));
   });
 
-  it('sets a first password, then goes straight to the authenticator', async () => {
+  it('a first password waits for the authenticator: the code checks, then the password saves, then the authenticator turns on', async () => {
+    const order: string[] = [];
+    auth.verifyTOTPSetup.mockImplementation(() => {
+      order.push('verifyTOTPSetup');
+      return Promise.resolve();
+    });
+    changePasswordWithoutPrevious.mockImplementation(() => {
+      order.push('ChangePassword');
+      return Promise.resolve();
+    });
+    auth.updateMFAPreference.mockImplementation(() => {
+      order.push('updateMFAPreference');
+      return Promise.resolve();
+    });
     const { user } = setup({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] });
     expect(await screen.findByText(/You don’t have a password/)).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Set a password' }));
     await user.type(screen.getByLabelText('New password'), 'fourteen chars{Enter}');
     expect(screen.getAllByRole('alert').some((a) => /at least 15/.test(a.textContent ?? ''))).toBe(true);
     await user.type(screen.getByLabelText('New password'), '!{Enter}');
-    await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('fourteen chars!'));
     expect(await screen.findByRole('heading', { name: 'Now add your authenticator' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    // Nothing saved yet: leaving here leaves no password without an authenticator.
+    expect(changePasswordWithoutPrevious).not.toHaveBeenCalled();
+    await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
+    await waitFor(() => expect(order).toEqual(['verifyTOTPSetup', 'ChangePassword', 'updateMFAPreference']));
+    expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('fourteen chars!');
+    expect(await screen.findByText('Password saved, and your authenticator is on.')).toBeTruthy();
+  });
+
+  it('cancelling the authenticator after "Set a password" saves no password', async () => {
+    const { user } = setup({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] });
+    await user.click(await screen.findByRole('button', { name: 'Set a password' }));
+    await user.type(screen.getByLabelText('New password'), 'a long enough password{Enter}');
+    await screen.findByRole('heading', { name: 'Now add your authenticator' });
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('button', { name: 'Set a password' })).toBeTruthy();
+    expect(changePasswordWithoutPrevious).not.toHaveBeenCalled();
+    expect(auth.updateMFAPreference).not.toHaveBeenCalled();
+  });
+
+  it('a password Cognito refuses after the code checked goes back to the password, and keeps the checked code', async () => {
+    changePasswordWithoutPrevious.mockRejectedValueOnce(Object.assign(new Error('Password does not conform to policy'), { name: 'InvalidPasswordException' }));
+    const { user } = setup({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: [] });
+    await user.click(await screen.findByRole('button', { name: 'Set a password' }));
+    await user.type(screen.getByLabelText('New password'), 'a long enough password{Enter}');
+    await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
+    expect(await screen.findByLabelText('New password')).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole('alert').some((a) => /wasn’t accepted/.test(a.textContent ?? ''))).toBe(true));
+    expect(auth.updateMFAPreference).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText('New password'), 'another long password{Enter}');
+    // No second code: the kept setup finishes by itself.
+    await waitFor(() => expect(auth.updateMFAPreference).toHaveBeenCalledTimes(1));
+    expect(auth.verifyTOTPSetup).toHaveBeenCalledTimes(1);
+    expect(auth.setUpTOTP).toHaveBeenCalledTimes(1);
+    expect(changePasswordWithoutPrevious).toHaveBeenLastCalledWith('another long password');
+  });
+
+  it('with an authenticator already on, "Set a password" saves at once', async () => {
+    auth.fetchMFAPreference.mockResolvedValue({ enabled: ['TOTP'], preferred: 'TOTP' });
+    const { user } = setup({ configured: ['WEB_AUTHN', 'EMAIL_OTP'], mfa: ['SOFTWARE_TOKEN_MFA'] });
+    await user.click(await screen.findByRole('button', { name: 'Set a password' }));
+    await user.type(screen.getByLabelText('New password'), 'a long enough password{Enter}');
+    await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('a long enough password'));
+    expect(auth.setUpTOTP).not.toHaveBeenCalled();
+  });
+
+  it('adding a passkey refreshes the session, so the server sees it on the next request', async () => {
+    auth.listWebAuthnCredentials.mockResolvedValue({ credentials: [] });
+    const { user } = setup({ configured: ['EMAIL_OTP'], mfa: [] });
+    await user.click(await screen.findByRole('button', { name: 'Add a passkey' }));
+    await waitFor(() => expect(auth.associateWebAuthnCredential).toHaveBeenCalled());
+    await waitFor(() => expect(auth.fetchAuthSession).toHaveBeenCalledWith({ forceRefresh: true }));
   });
 
   it('signs out everywhere, then leaves', async () => {

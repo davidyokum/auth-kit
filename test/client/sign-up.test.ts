@@ -305,10 +305,11 @@ describe('SignUp: the code and after', () => {
     await heading('Create a password');
     window.localStorage.clear();
     await user.type(screen.getByLabelText('New password'), 'a brand new long password{Enter}');
-    await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('a brand new long password'));
     await heading('Add an authenticator app');
+    expect(changePasswordWithoutPrevious).not.toHaveBeenCalled();
     await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
     await heading('You’re set up');
+    expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('a brand new long password');
     expect(screen.getByText('Your account starts as a member of Example Reports. Jordan Lee can give you more access if you need it.')).toBeTruthy();
     expect(screen.getByText('We’ve emailed you a note about how you’ll sign in next time.')).toBeTruthy();
     expect(root().querySelector('[data-auth-kit-slot="footer"]')!.textContent).toBe('This site is managed by the NC Office of State Budget and Management');

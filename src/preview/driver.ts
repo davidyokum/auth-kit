@@ -71,6 +71,12 @@ export function previewDriver(options: PreviewDriverOptions): ClientDriver {
     registerPasskey: refused<void>('registerPasskey'),
     setFirstPassword: refused<void>('setFirstPassword'),
     enrollAuthenticator: refused<never>('enrollAuthenticator'),
+    checkAuthenticatorCode: refused<void>('checkAuthenticatorCode'),
+    turnOnAuthenticator: refused<void>('turnOnAuthenticator'),
+    // No setup is ever in progress here, and none is kept.
+    readAuthenticatorProgress: () => null,
+    saveAuthenticatorProgress: ignored('saveAuthenticatorProgress'),
+    clearAuthenticatorProgress: ignored('clearAuthenticatorProgress'),
     saveName: refused<void>('saveName'),
     decoyPasskeyPrompt: refused<never>('decoyPasskeyPrompt'),
     sendAccountNotice: refused<boolean>('sendAccountNotice'),

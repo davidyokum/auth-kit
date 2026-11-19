@@ -4,7 +4,17 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 ## [Unreleased] (planned 0.1.20-alpha.1)
 
-Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. Pre-release. No breaking changes: every site stays Full until it sets `signIn`.
+Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. And a first sign-in that can't trap anyone halfway through setting up a passkey or a password ([ADR 0002](docs/decisions/0002-mfa-optional-app-enforced-totp.md), amended 2026-11-19). Pre-release. No breaking changes: every site stays Full until it sets `signIn`.
+
+### Fixed
+
+A real first sign-in on a deployed 0.1.19 site ended in a loop between the passkey and authenticator screens. Each of these could wedge someone; none can now.
+
+- **No password without an authenticator, ever.** `ChooseFirstCredential` and My account's "Set a password" saved the password first and then asked for the authenticator. Anyone who stopped there (a reload, a link, a change of mind, even with a passkey already saved) had a password without an authenticator, so every page sent them to `/account/authenticator`. Now the password is held on the screen until the authenticator's first code checks out (`verifyTOTPSetup`), then saved, then the authenticator is turned on (`updateMFAPreference`, tried twice). Stopping before the code checks out saves nothing; the authenticator step has "Back" (the chooser) or "Cancel" (My account). If Cognito refuses the password after the code checked out, the person picks another and isn't asked for a second code. The authenticator step says "Your password is saved once the code checks out" (`FIRST_VISIT.addTotpThenPassword`, `addTotpThenPasswordNoQr`; `MY_ACCOUNT.nowAddIntro` and `setPasswordIntro` reworded; My account's button reads "Continue" until then).
+- **A scanned setup key stays valid.** `AuthenticatorSetup` called `setUpTOTP` on every mount, and each call replaces the account's pending key in Cognito. Scanning the QR code, then landing on another setup screen (a redirect, a reload), silently replaced it: the scanned entry's codes then failed every time. The key is now kept for the tab (sessionStorage, keyed by the account's `sub`, for 30 minutes; removed once the authenticator is on), so every setup screen shows the same one. "Get a new QR code" ("Get a new setup key" without a QR code) is the only way to replace it. A wrong code during setup says to check the entry came from the key on screen (`ERRORS.wrongTotpSetup`).
+- **A new passkey counts on the next page.** `registerPasskey` now refreshes the session (a failed refresh doesn't fail the saved passkey), and `requireUser` caches only "nothing to set up" (it cached "first credential" and "authenticator" for 30 seconds per token, so someone who saved a passkey and moved on within 30 seconds was sent back to the chooser). An unfinished setup is read from Cognito on every request.
+- **The passkey window opens from the click.** "Create a passkey", its "Try again", and "Use a passkey instead" call `registerPasskey` inside the click, not in an effect after the next render, so Safari and the phone (hybrid) option keep the user activation WebAuthn needs.
+- **"We didn't get a passkey" says what a first sign-in needs.** Where the browser remembers no passkey for the address, the passkey screen adds "First time signing in? You don't have a passkey yet. Choose Email me a code, and you'll set one up after." (`SIGN_IN.passkeyFirstTimeNext`), above the "Email me a code" button that already leads there. It depends only on this browser, so it tells nobody whether an account exists (ADR 0018).
 
 ### Changed
 
@@ -12,6 +22,7 @@ Simple sign-in: a site can choose "Simple: code only", an emailed code every tim
 
 ### Added
 
+- **`AuthenticatorSetup` `beforeTurningOn`**: a step that runs after the code checks out and before the authenticator is turned on (the held first password). If it throws, the authenticator stays off and the next try runs it again without another code. `checkAuthenticatorCode` and `turnOnAuthenticator` (`auth-kit/client` internals behind the driver) are the two halves of `enrollAuthenticator`'s `verify`, which is unchanged.
 - **`signIn`**, one setting for how people sign in: `{ mode: 'full' }` (the default) or `{ mode: 'simple', stay }`, where `stay` is `'browser'` or a whole number of days (1 to the tier's ceiling; default 30). Pass the same value to the preset (`authOptions.signIn`), `createServerAuth`, `<SignIn>`, `<MyAccount>`, `createSesInviteMailer`'s `site`, and `createPeopleActions`.
   - **The preset:** on Simple, the emailed code is the only way in: the sign-in policy lists `PASSWORD` and `EMAIL_OTP` (Cognito refuses a policy without PASSWORD), but recovery is admin-only and MFA is OFF, so nobody can set a password or enrol an authenticator. There are no WebAuthn settings, and the app client's refresh token lasts the `stay` (12 hours for `'browser'`). It refuses `refreshTokenMinutes` alongside it, an admin pool, and `accountCreation` `domains` or `open`. `applyAuthStandard` returns `signInMode`.
   - **The server:** on Simple, `requireFirstCredential` defaults to off, and `true` is refused. `poolConfigFromAmplifyOutputs` now reads the deployed pool's mode (`poolSignInMode`, from `mfa_configuration`: NONE is Simple), and `createServerAuth` refuses a `signIn` that doesn't match it (`poolSignInModeFromAmplifyOutputs`).
@@ -26,7 +37,9 @@ Simple sign-in: a site can choose "Simple: code only", an emailed code every tim
 
 ### Migration
 
-Nothing for a Full site. To make a site Simple: set `signIn` in each place above, pass `signInSession(signIn, tier)`'s minutes to `configureAuthClient` and `amplifyCookieRuntimeOptions` (and `cookies: 'browser'` with `stay: 'browser'`), drop the `/account/sign-in-method` and authenticator setup pages, and deploy. A Full site can't move to Simple (an account with an authenticator app couldn't sign in; the template's build refuses it, and the preset can't see the deployed pool to); a Simple site moves to Full by changing the setting and deploying.
+The template's `/account/authenticator` is now auth-kit's card on the backdrop (`AuthScene` and `AuthCard`) with "Sign out everywhere" (`onCancel`, `cancelLabel={MY_ACCOUNT.signOut}`), and `app/globals.css` hides the site header on every `AuthScene` page (`body:has(.auth-scene) > .site-header { display: none; }`): copy both from the template. An account that already has a password without an authenticator still goes to that page until it adds one; its key now stays the same across reloads.
+
+Nothing else for a Full site. To make a site Simple: set `signIn` in each place above, pass `signInSession(signIn, tier)`'s minutes to `configureAuthClient` and `amplifyCookieRuntimeOptions` (and `cookies: 'browser'` with `stay: 'browser'`), drop the `/account/sign-in-method` and authenticator setup pages, and deploy. A Full site can't move to Simple (an account with an authenticator app couldn't sign in; the template's build refuses it, and the preset can't see the deployed pool to); a Simple site moves to Full by changing the setting and deploying.
 
 ## [0.1.19-alpha.1] - 2026-11-19
 

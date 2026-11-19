@@ -28,5 +28,7 @@ export const fetchAuthFactors: () => Promise<ClientAuthFactors> = refused;
 export const registerPasskey: () => Promise<void> = refused;
 export const setFirstPassword: (password: string) => Promise<void> = refused;
 export const enrollAuthenticator: (input: { issuer: string; accountName?: string; deviceName?: string }) => Promise<AuthenticatorEnrollment> = refused;
+export const checkAuthenticatorCode: (code: string, deviceName?: string) => Promise<void> = refused;
+export const turnOnAuthenticator: () => Promise<void> = refused;
 export const fetchAccountEmail: () => Promise<string | undefined> = refused;
 export const saveName: (input: { givenName: string; familyName: string }) => Promise<void> = refused;

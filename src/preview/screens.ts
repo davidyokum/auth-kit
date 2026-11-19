@@ -286,7 +286,8 @@ const SCREENS: readonly ScreenDef[] = [
     group: 'first-visit',
     component: 'sign-in',
     states: [state('', 'Setup key shown')],
-    place: (r) => chooser(r, { stage: 'add-totp' }, setupKey),
+    // The password chosen a step before is held, not saved, until the code checks out (ADR 0002, amended 2026-11-19).
+    place: (r) => chooser(r, { stage: 'add-totp', password: SAMPLE_PASSWORD }, setupKey),
   },
   {
     id: 'done',
@@ -480,6 +481,8 @@ const COMMON: Readonly<Record<string, Target>> = {
   terms: LINK,
   'open-setup-link': LINK,
   'copy-setup-key': null,
+  // "Get a new QR code" replaces the key on screen: the same screen, with a new key (the preview's sample stays).
+  'new-setup-key': null,
   'continue-to-site': SIGNED_IN,
   'sign-in': to('email'),
   'sign-in-again': to('email'),
@@ -510,7 +513,7 @@ const BY_SCREEN: Readonly<Record<string, Readonly<Record<string, Target | ((r: R
   'first-credential': { 'create-passkey': to('create-passkey'), 'use-password': to('create-password') },
   'create-passkey': { 'try-again': to('create-passkey'), 'use-password': to('create-password') },
   'create-password': { 'submit-new-password': to('totp-setup'), 'use-passkey': to('create-passkey') },
-  'totp-setup': { 'submit-authenticator-code': to('done', 'password') },
+  'totp-setup': { 'submit-authenticator-code': to('done', 'password'), back: (r) => (r.passkeysEnabled ? to('first-credential') : to('create-password')) },
   'request-access': { 'send-request': to('request-access', 'sent'), 'back-to-sign-in': to('email') },
   // A help screen's "Send a new code" sends one as "Email me a code" does: a first code, not a resend.
   help: { 'resend-code': to('email-code'), back: to('trouble') },

@@ -1,7 +1,8 @@
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useId, useRef, useState } from 'react';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
 import { tagged, useDriver } from './driver.js';
 import { ERRORS, FIRST_VISIT, SIGN_IN, STATUS } from './copy.js';
+import { describeAuthError } from './messages.js';
 import { Icon } from './icons.js';
 import { SIGN_IN_AUTOCOMPLETE, newPasswordProblem } from './ladder.js';
 import type { PasswordCheckOptions } from './PasswordForm.js';
@@ -69,18 +70,24 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
   const level = props.headingLevel ?? 2;
   const rootRef = useRef<HTMLDivElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
-  // A held chooser (preview mode) shows the passkey screen as it is once the browser's window opened:
-  // the first window counts as started, so none opens.
-  const started = useRef(driver.held ? 1 : 0);
+  // The password the person chose, held until the authenticator's code checks out (ADR 0002, 2026-11-19
+  // amendment): saving it first would leave a password without an authenticator if they stopped there,
+  // and every page would then send them to authenticator setup.
+  // A chooser placed at the authenticator step (preview mode) holds the password it was given.
+  const heldPassword = useRef<string | null>(init?.stage === 'add-totp' ? (init.password ?? null) : null);
+  const passwordSaved = useRef(false);
   useFocusOnViewChange(rootRef, stage);
   const { set } = fb;
 
-  // The passkey screen opens the browser's window as soon as it shows (the window is the step).
-  const [passkeyAttempt, setPasskeyAttempt] = useState(0);
-  useEffect(() => {
-    if (stage !== 'create-passkey' || started.current === passkeyAttempt + 1) return;
-    started.current = passkeyAttempt + 1;
+  /**
+   * "Create a passkey" (and its Try again): the browser's window opens from the click itself, inside
+   * the gesture, so Safari and the phone (hybrid) option keep the user activation WebAuthn needs.
+   */
+  function createPasskey() {
+    if (fb.busy) return;
+    setStage('create-passkey');
     setPasskeyFailed(false);
+    set({ error: null, field: null, status: null });
     void fb.run(driver.registerPasskey, { context: 'passkey-register' }).then((result) => {
       if (result.ok) {
         set({ status: STATUS.passkeySaved });
@@ -91,8 +98,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         setPasskeyFailed(true);
       }
     });
-    // fb.run, set, and the driver are stable; onDone is read when the prompt finishes.
-  }, [stage, passkeyAttempt]);
+  }
 
   function go(next: Stage) {
     set({ error: null, field: null, status: null });
@@ -116,13 +122,36 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
       return;
     }
     set({ busy: false, status: null });
-    const result = await fb.run(() => driver.setFirstPassword(password), { context: 'set-password', busyStatus: STATUS.saving });
-    if (result.ok) {
-      setPassword('');
-      go('add-totp');
-    } else {
-      set({ field: 'password' });
+    // Nothing is saved yet: the password waits for the authenticator's code.
+    heldPassword.current = password;
+    passwordSaved.current = false;
+    setPassword('');
+    go('add-totp');
+  }
+
+  /**
+   * Runs after the authenticator's code checks out and before it's turned on. Safe to repeat: a
+   * password already saved isn't saved again. Cognito refusing the password (its own policy, or a
+   * breached password) takes the person back to choose another; the checked code is kept, so they
+   * aren't asked for one again.
+   */
+  async function saveHeldPassword(): Promise<void> {
+    if (passwordSaved.current) return;
+    const held = heldPassword.current;
+    if (held === null) throw new Error('auth-kit: no password to save');
+    try {
+      await driver.setFirstPassword(held);
+    } catch (error) {
+      const info = describeAuthError(error, 'set-password');
+      if (info.kind === 'password-rejected') {
+        heldPassword.current = null;
+        setStage('create-password');
+        set({ error: info.message, field: 'password', status: null, busy: false });
+      }
+      throw error;
     }
+    passwordSaved.current = true;
+    heldPassword.current = null;
   }
 
   let body: ReactNode;
@@ -132,7 +161,16 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         issuer={props.issuer}
         {...(props.accountName !== undefined && { accountName: props.accountName })}
         headingLevel={level}
+        intro={props.renderQrCode === false ? FIRST_VISIT.addTotpThenPasswordNoQr : FIRST_VISIT.addTotpThenPassword}
+        beforeTurningOn={saveHeldPassword}
         onDone={() => props.onDone('password')}
+        // Nothing is saved until the code checks out, so going back is safe: the password is dropped.
+        onCancel={driver.act('back', () => {
+          if (passwordSaved.current) return;
+          heldPassword.current = null;
+          go(passkeysEnabled ? 'choose' : 'create-password');
+        })}
+        cancelLabel={SIGN_IN.back}
         {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
         classNames={classNames}
       />
@@ -167,7 +205,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
           </Button>
         </Actions>
         {passkeysEnabled ? (
-          <AltLinks links={[{ icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: driver.act('use-passkey', () => go('create-passkey')), disabled: fb.busy }]} classNames={classNames} />
+          <AltLinks links={[{ icon: 'fingerprint', label: SIGN_IN.usePasskey, onClick: driver.act('use-passkey', createPasskey), disabled: fb.busy }]} classNames={classNames} />
         ) : null}
         <StatusRegion status={fb.status} classNames={classNames} />
       </form>
@@ -182,7 +220,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
         <Text classNames={classNames}>{FIRST_VISIT.createPasskeySub}</Text>
         {passkeyFailed ? null : <Wait label={FIRST_VISIT.waitingForDevice} classNames={classNames} />}
         <Actions classNames={classNames}>
-          <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={driver.act('try-again', () => setPasskeyAttempt((n) => n + 1))}>
+          <Button variant="secondary" disabled={fb.busy} classNames={classNames} onClick={driver.act('try-again', createPasskey)}>
             {SIGN_IN.tryAgain}
           </Button>
         </Actions>
@@ -205,7 +243,7 @@ export function ChooseFirstCredential(props: ChooseFirstCredentialProps) {
             {FIRST_VISIT.passkeyOption} <span>{FIRST_VISIT.recommended}</span>
           </h2>
           <p>{FIRST_VISIT.passkeyOptionText}</p>
-          <Button classNames={classNames} onClick={driver.act('create-passkey', () => go('create-passkey'))}>
+          <Button classNames={classNames} onClick={driver.act('create-passkey', createPasskey)}>
             {FIRST_VISIT.createPasskey}
           </Button>
         </section>
