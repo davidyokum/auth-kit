@@ -96,7 +96,8 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] [data-auth-kit-slot="error"]:empty, [data-auth-kit] [data-auth-kit-slot="status"]:empty) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 :where([data-auth-kit] [data-auth-kit-slot="error"]) { color: var(--ak-error, #b42318); font-weight: 600; }
 :where([data-auth-kit] [data-auth-kit-sr]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-:where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-words], [data-auth-kit-site-name="never"] [data-auth-kit-site-words]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-heading="full"], [data-auth-kit-site-name="never"] [data-auth-kit-site-heading="full"]) { display: block !important; position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+:where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-heading="short"], [data-auth-kit-site-name="never"] [data-auth-kit-site-heading="short"]) { display: inline !important; }
 :where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-full], [data-auth-kit-site-name="never"] [data-auth-kit-site-full]) { display: none !important; }
 :where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-short], [data-auth-kit-site-name="never"] [data-auth-kit-site-short]) { display: inline !important; }
 /* The recommended way in (register A5a): filled like the primary button, a glowing fingerprint, a "Recommended" pill. After the generic icon and row rules, so it wins at equal (zero) specificity. */

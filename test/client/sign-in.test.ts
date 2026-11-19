@@ -322,7 +322,11 @@ describe('the card', () => {
     setup();
     // The heading's accessible name is the whole sentence whatever the page shows.
     const h = screen.getByRole('heading', { name: 'Sign in to Example Reports', level: 1 });
-    expect(h.querySelector('[data-auth-kit-site-words]')?.textContent).toBe('to Example Reports');
+    expect(h.querySelector('[data-auth-kit-site-heading="full"]')?.textContent).toBe('Sign in to Example Reports');
+    const shortHeading = h.querySelector<HTMLElement>('[data-auth-kit-site-heading="short"]');
+    expect(shortHeading?.textContent).toBe('Sign in');
+    expect(shortHeading?.getAttribute('aria-hidden')).toBe('true');
+    expect(shortHeading?.style.display).toBe('none');
     expect(root().getAttribute('data-auth-kit-site-name')).toBe('auto');
     // "New here?" waits, hidden, for a page that shows the name (auth-kit's styles reveal it).
     const short = root().querySelector<HTMLElement>('[data-auth-kit-slot="access"] [data-auth-kit-site-short]');

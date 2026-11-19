@@ -45,7 +45,6 @@ const GROUPS: Record<string, Record<string, unknown>> = Object.fromEntries(
  */
 const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'SIGN_IN.heading': (c) => [[c]],
-  'SIGN_IN.headingSiteWords': (c) => [[c]],
   'SIGN_IN.totpSub': (c) => [[c]],
   'SIGN_IN.codeSub': (c) => [[c, EMAIL]],
   'SIGN_IN.codeResent': () => [['2:05 PM']],
@@ -411,8 +410,7 @@ describe('Card Studio v4’s words', () => {
 
   it('sign in', () => {
     expect(copy.SIGN_IN.heading(personal)).toBe('Sign in to Example Reports');
-    // The short heading and its site words make the full one (a backdrop that letters the name).
-    expect(`${copy.SIGN_IN.headingShort} ${copy.SIGN_IN.headingSiteWords(personal)}`).toBe(copy.SIGN_IN.heading(personal));
+    expect(copy.SIGN_IN.headingShort).toBe('Sign in');
     expect(copy.SIGN_IN.reauthHeading).toBe('Confirm it’s you');
     expect(copy.SIGN_IN.continue).toBe('Continue');
     expect(copy.SIGN_IN.signIn).toBe('Sign in');

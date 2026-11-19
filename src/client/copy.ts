@@ -57,12 +57,10 @@ export function plain(line: Rich): string {
 export const SIGN_IN = {
   heading: (c: CopyContext) => `Sign in to ${c.siteName}`,
   /**
-   * The heading in two parts, for a page that already shows the site's name (a backdrop that letters
-   * it, `siteNameOnCard`): "Sign in" on screen, and "to {Site}" kept for screen readers. Joined by
-   * a space, they are `heading`.
+   * `heading` on a page that already shows the site's name (a backdrop that letters it,
+   * `siteNameOnCard`): shown to the eye, while screen readers still hear `heading`.
    */
   headingShort: 'Sign in',
-  headingSiteWords: (c: CopyContext) => `to ${c.siteName}`,
   reauthHeading: 'Confirm it’s you',
   reauthNote: 'For your security, sign in again to continue.',
   emailLabel: 'Email address',

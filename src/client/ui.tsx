@@ -405,13 +405,22 @@ export interface CardBottom {
  */
 export type SiteNameOnCard = 'auto' | 'always' | 'never';
 
-/** "Sign in to {Site}": the site's words drop out of sight (never out of the heading) where the page shows the name. */
-export function SiteHeadingWords(props: { short: string; siteWords: string }) {
+/**
+ * "Sign in to {Site}", or just "Sign in" where the page shows the name: the full heading then stays
+ * for screen readers (out of sight), and the short one is shown to the eye only (`aria-hidden`).
+ * Without a backdrop that letters the name, the full heading is one plain run of text, as before.
+ */
+export function SiteHeadingWords(props: { full: string; short: string }) {
   return (
-    <span>
-      {props.short}{' '}
-      <span data-auth-kit-site-words="">{props.siteWords}</span>
-    </span>
+    <>
+      {/* display: contents: no box of its own, so the heading lays out exactly as plain text did. */}
+      <span data-auth-kit-site-heading="full" style={{ display: 'contents' }}>
+        {props.full}
+      </span>
+      <span data-auth-kit-site-heading="short" aria-hidden="true" style={{ display: 'none' }}>
+        {props.short}
+      </span>
+    </>
   );
 }
 
@@ -422,7 +431,9 @@ export function SiteHeadingWords(props: { short: string; siteWords: string }) {
 export function SiteNamedWords(props: { full: ReactNode; short: ReactNode }) {
   return (
     <>
-      <span data-auth-kit-site-full="">{props.full}</span>
+      <span data-auth-kit-site-full="" style={{ display: 'contents' }}>
+        {props.full}
+      </span>
       <span data-auth-kit-site-short="" style={{ display: 'none' }}>
         {props.short}
       </span>

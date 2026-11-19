@@ -547,7 +547,7 @@ export function SignIn(props: SignInProps) {
   }
 
   const busy = fb.busy;
-  const title = props.reauth ? SIGN_IN.reauthHeading : <SiteHeadingWords short={SIGN_IN.headingShort} siteWords={SIGN_IN.headingSiteWords(c)} />;
+  const title = props.reauth ? SIGN_IN.reauthHeading : <SiteHeadingWords full={SIGN_IN.heading(c)} short={SIGN_IN.headingShort} />;
   const reauthNote = props.reauth ? <Text classNames={classNames}>{SIGN_IN.reauthNote}</Text> : null;
   const summaryField = fb.field === 'email' ? ids.email : fb.field === 'secret' ? ids.password : fb.field === 'code' ? ids.code : fb.field === 'new-password' ? ids.newPassword : undefined;
   const summary = <ErrorSummary error={fb.error} fieldId={summaryField} classNames={classNames} />;
