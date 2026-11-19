@@ -74,6 +74,12 @@ export interface StyleInstance {
   /** Helpers `draw` calls every frame, listed so the allocation check (tests) reads them too. */
   readonly hot?: readonly unknown[];
   readonly destroy?: () => void;
+  /**
+   * Styles that letter the site's name (`letters: 'site-name'`): whether this instance draws it at
+   * this size. False when the name was left out (no band around the card had room) or none was given.
+   * Read once after `create`; it never changes for an instance.
+   */
+  readonly siteNameShown?: () => boolean;
 }
 
 /** One released version of a style, type-erased for the registry (see `defineVersion`). */
@@ -222,6 +228,12 @@ export interface BackdropStyleModule<Id extends string = string> {
   readonly versions: readonly StyleVersion[];
   /** Styles that show one subject at a time: what can rotate. */
   readonly subjects?: StyleSubjects;
+  /**
+   * `'site-name'`: the art letters the site's name (Yokum magnetic), so the card in front of it may
+   * leave the name out of its visible heading (`data-backdrop-site-name`; the card keeps it for screen
+   * readers). Each instance says whether it really drew it (`StyleInstance.siteNameShown`).
+   */
+  readonly letters?: 'site-name';
 }
 
 /** Declares a style module (checks its versions are 1, 2, 3, ... in order). */

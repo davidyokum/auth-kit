@@ -47,6 +47,13 @@ export interface BackdropOptions extends BackdropArtOptions {
   /** Called once, after the first frame is drawn. */
   onReady?: () => void;
   /**
+   * For a style that letters the site's name (`letters: 'site-name'`, Yokum magnetic): called with
+   * `true` once the art shows the name, and with `false` when it can't (no room at this size, no name,
+   * the style's code failed to load) or when a style without it takes over. Called again only when the
+   * answer changes. `<Backdrop>` uses it to mark its root `data-backdrop-site-name="shown"`.
+   */
+  onSiteName?: (shown: boolean) => void;
+  /**
    * Draw the still frame on a slow device (register E6): Save-Data, 2 GB of memory or less, or frames
    * over `frameBudgetMs`. Default true.
    */
@@ -87,6 +94,8 @@ export interface BackdropController {
   /** Changes options in place (a new style or seed redraws at once). */
   update(options: Partial<BackdropOptions>): void;
   stats(): BackdropStats;
+  /** Whether the art shows the site's name right now (`onSiteName`); false while its code is loading. */
+  siteNameShown(): boolean;
   /** Stops everything and removes every listener. */
   destroy(): void;
 }
@@ -151,6 +160,8 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let invalidUntil = 0;
   let resizeTimer: number | null = null;
   let ready = false;
+  /** The last answer given to `onSiteName` (null: none yet). */
+  let siteNameReported: boolean | null = null;
 
   const pointer: { x: number; y: number; strength: number } = { x: NO_POINTER.x, y: NO_POINTER.y, strength: 0 };
   const raw = { x: 0, y: 0, inside: false, lastMove: -Infinity };
@@ -233,7 +244,10 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
         },
         () => {
           // The card never depends on the art: no backdrop, the page's own background.
-          if (art === loading) loadFailed = true;
+          if (art === loading) {
+            loadFailed = true;
+            reportSiteName();
+          }
         },
       );
       return false;
@@ -269,7 +283,23 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     if (surface.height !== bh) surface.height = bh;
     ctx = surface.getContext('2d', { alpha: false });
     if (!ctx) unsupported = true;
+    reportSiteName();
     return !!ctx;
+  }
+
+  /** Whether this instance letters the site's name (a style that declares it, and drew it at this size). */
+  function siteNameShown(): boolean {
+    if (destroyed || unsupported || !instance || art.module.letters !== 'site-name') return false;
+    return instance.siteNameShown?.() === true;
+  }
+
+  function reportSiteName(): void {
+    const shown = siteNameShown();
+    if (shown === siteNameReported) return;
+    // A style that never letters the name has nothing to say until something changes.
+    if (siteNameReported === null && !shown && art.module.letters !== 'site-name') return;
+    siteNameReported = shown;
+    options.onSiteName?.(shown);
   }
 
   function draw(dt: number): void {
@@ -417,6 +447,13 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
 
   function onDown(event: PointerLike): void {
     onMove(event);
+    // A finger has no hover: it's there at once, so a quick tap (under 150 ms) still touches what's
+    // under it, where a mouse eases in as it arrives.
+    if (event.pointerType === 'touch' && raw.inside && !still()) {
+      pointer.x = raw.x;
+      pointer.y = raw.y;
+      pointer.strength = 1;
+    }
     if (!instance?.tap || still() || destroyed || !raw.inside) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     const element = event.target as Element | null;
@@ -538,6 +575,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
       if (artChanged || changed('reducedMotion') || changed('stillOnSlowDevices') || changed('pixelRatio') || changed('maxPixelRatio') || previous.card !== options.card) rebuildAndDraw();
       else refresh();
     },
+    siteNameShown,
     stats() {
       return {
         style: art.module.id,

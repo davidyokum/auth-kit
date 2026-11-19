@@ -423,6 +423,58 @@ describe('register E3: subjects rotate per visit; the seed locks the look; the s
     expect(() => setup({ style: 'star-chart', seed: 'x', subject: { set: 'zodiac' } })).toThrow(/no subject set "zodiac"/);
   });
 
+  it('says whether the art letters the site’s name, so the card can leave it out of sight', () => {
+    const CARD = { x: 210, y: 220, width: 380, height: 240 };
+    const answers: boolean[] = [];
+    const lettered = setup({ style: 'yokum-magnetic', seed: 'name', siteName: 'Example Reports', card: CARD, onSiteName: (shown: boolean) => answers.push(shown) });
+    expect(answers).toEqual([true]);
+    expect(lettered.controller.siteNameShown()).toBe(true);
+    // Reduced motion still draws the name (one still picture with every letter home).
+    const still: boolean[] = [];
+    const host = new FakeHost();
+    host.reduced = true;
+    setup({ style: 'yokum-magnetic', seed: 'name', siteName: 'Example Reports', card: CARD, onSiteName: (shown: boolean) => still.push(shown) }, host);
+    expect(still).toEqual([true]);
+    // No room around the card for the title (the default card fills this canvas): false.
+    const cramped: boolean[] = [];
+    setup({ style: 'yokum-magnetic', seed: 'name', siteName: 'Example Reports', onSiteName: (shown: boolean) => cramped.push(shown) });
+    expect(cramped).toEqual([false]);
+    // No name: false. A style that never letters it says nothing...
+    const unnamed: boolean[] = [];
+    setup({ style: 'yokum-magnetic', seed: 'name', card: CARD, onSiteName: (shown: boolean) => unnamed.push(shown) });
+    expect(unnamed).toEqual([false]);
+    const other: boolean[] = [];
+    const plain = setup({ style: 'aurora', seed: 'name', siteName: 'Example Reports', card: CARD, onSiteName: (shown: boolean) => other.push(shown) });
+    expect(other).toEqual([]);
+    expect(plain.controller.siteNameShown()).toBe(false);
+    // ...until it takes over from one that did, and the answer changes back.
+    lettered.controller.update({ style: 'aurora' });
+    expect(answers).toEqual([true, false]);
+    lettered.controller.update({ style: 'yokum-magnetic' });
+    expect(answers).toEqual([true, false, true]);
+    lettered.controller.update({ seed: 'another' });
+    expect(answers).toEqual([true, false, true]);
+  });
+
+  it('a finger is there at once: a quick tap reaches the art without easing in', () => {
+    const { canvas, host } = setup({ style: 'yokum-magnetic', seed: 'name', siteName: 'Example Reports', card: { x: 210, y: 220, width: 380, height: 240 } });
+    host.advance(2000);
+    // A fallen letter is drawn turned (rotate); letters at home never are.
+    const ctx = canvas.getContext('2d') as unknown as { rotate: (a: number) => void };
+    const rotate = ctx.rotate.bind(ctx);
+    let turned = 0;
+    ctx.rotate = (a: number) => {
+      turned++;
+      rotate(a);
+    };
+    // A 16 ms tap on the title's first word, lifted before the next frame.
+    host.pointer?.down(event(300, 110, { pointerType: 'touch' }));
+    host.advance(1000 / 60);
+    host.pointer?.up(event(300, 110, { pointerType: 'touch' }));
+    host.advance(500);
+    expect(turned).toBeGreaterThan(0);
+  });
+
   it('loads each style on first use: waiting until its code arrives, then drawing', async () => {
     const { controller } = setup({ style: 'star-chart', seed: 'lazy', subject: { rotation: 'fixed', key: 'Cyg' } });
     // Preloaded in tests, so it draws at once; the lazy path is in lazy.test.ts.

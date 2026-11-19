@@ -18,8 +18,8 @@ const standalone = join(root, 'src', 'preview', 'standalone');
 
 /** Budgets (bytes, minified): the card's file stays small; the styles file carries the map data. */
 const BUDGET = {
-  // React DOM alone is about 206 KB of this.
-  'auth-kit-preview.js': { min: 420_000, gzip: 140_000 },
+  // React DOM alone is about 206 KB of this. Raised from 420,000 in 0.1.17 (the site-name heading, ~2 KB).
+  'auth-kit-preview.js': { min: 430_000, gzip: 140_000 },
   'auth-kit-preview-backdrops.js': { min: 900_000, gzip: 450_000 },
 };
 

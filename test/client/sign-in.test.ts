@@ -59,7 +59,14 @@ const findSummary = () => screen.findByRole('alert');
 /** The error repeated by the field. */
 const inlineError = (field: HTMLElement) => document.getElementById(`${field.id}-error`)?.textContent ?? null;
 const submitButtons = () => [...root().querySelectorAll('button[type="submit"]')].map((b) => b.textContent);
-const slotText = (name: string) => root().querySelector(`[data-auth-kit-slot="${name}"]`)?.textContent ?? null;
+/** A slot's words as shown when nothing behind the card letters the site's name (the "New here?" twin is hidden). */
+const slotText = (name: string) => {
+  const el = root().querySelector(`[data-auth-kit-slot="${name}"]`);
+  if (!el) return null;
+  const copy = el.cloneNode(true) as Element;
+  copy.querySelectorAll('[data-auth-kit-site-short]').forEach((n) => n.remove());
+  return copy.textContent;
+};
 const noticeSent = () => vi.fn<typeof fetch>(() => Promise.resolve(Response.json({ ok: true })));
 const emailField = () => screen.getByLabelText<HTMLInputElement>('Email address');
 // Buttons with screen-reader-only words ("Change<span> email address</span>"). Browsers keep the
@@ -309,6 +316,30 @@ describe('the card', () => {
     expect(card().style.getPropertyValue('--ak-surface')).toBe('#ffffff');
     expect(card().style.getPropertyValue('--ak-edge')).toMatch(/^#[0-9a-f]{6}$/);
     expect(card().contains(screen.getByRole('heading', { name: 'Sign in to Example Reports' }))).toBe(true);
+  });
+
+  it('names the site so a backdrop that letters it can hide the words, never from screen readers', () => {
+    setup();
+    // The heading's accessible name is the whole sentence whatever the page shows.
+    const h = screen.getByRole('heading', { name: 'Sign in to Example Reports', level: 1 });
+    expect(h.querySelector('[data-auth-kit-site-heading="full"]')?.textContent).toBe('Sign in to Example Reports');
+    const shortHeading = h.querySelector<HTMLElement>('[data-auth-kit-site-heading="short"]');
+    expect(shortHeading?.textContent).toBe('Sign in');
+    expect(shortHeading?.getAttribute('aria-hidden')).toBe('true');
+    expect(shortHeading?.style.display).toBe('none');
+    expect(root().getAttribute('data-auth-kit-site-name')).toBe('auto');
+    // "New here?" waits, hidden, for a page that shows the name (auth-kit's styles reveal it).
+    const short = root().querySelector<HTMLElement>('[data-auth-kit-slot="access"] [data-auth-kit-site-short]');
+    expect(short?.textContent).toBe('New here? It’s invite-only.');
+    expect(short?.style.display).toBe('none');
+    expect(root().querySelector('[data-auth-kit-slot="access"] [data-auth-kit-site-full]')?.textContent).toBe('New to Example Reports? It’s invite-only.');
+    cleanup();
+    for (const value of ['always', 'never'] as const) {
+      setup({ siteNameOnCard: value });
+      expect(root().getAttribute('data-auth-kit-site-name')).toBe(value);
+      expect(screen.getByRole('heading', { name: 'Sign in to Example Reports', level: 1 })).toBeTruthy();
+      cleanup();
+    }
   });
 
   it('invite-only by default: the "Need access?" link opens who to ask', async () => {

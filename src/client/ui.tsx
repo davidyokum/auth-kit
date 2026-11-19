@@ -397,6 +397,50 @@ export interface CardBottom {
   extra?: ReactNode;
 }
 
+/**
+ * Where the card names the site, and a backdrop behind it may already show the name (`SignIn`'s
+ * `siteNameOnCard`): `auto` follows the backdrop (`data-backdrop-site-name="shown"` on an ancestor, set
+ * by `<Backdrop>` for a style that letters the name), `always` keeps the name on the card, `never`
+ * leaves it to the page. Only the words on screen change: screen readers always hear the name.
+ */
+export type SiteNameOnCard = 'auto' | 'always' | 'never';
+
+/**
+ * "Sign in to {Site}", or just "Sign in" where the page shows the name: the full heading then stays
+ * for screen readers (out of sight), and the short one is shown to the eye only (`aria-hidden`).
+ * Without a backdrop that letters the name, the full heading is one plain run of text, as before.
+ */
+export function SiteHeadingWords(props: { full: string; short: string }) {
+  return (
+    <>
+      {/* display: contents: no box of its own, so the heading lays out exactly as plain text did. */}
+      <span data-auth-kit-site-heading="full" style={{ display: 'contents' }}>
+        {props.full}
+      </span>
+      <span data-auth-kit-site-heading="short" aria-hidden="true" style={{ display: 'none' }}>
+        {props.short}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Two wordings of a line: `full` names the site, `short` doesn't ("New here?"). `short` shows only
+ * where the page already shows the name (auth-kit's styles); without them, `full` always shows.
+ */
+export function SiteNamedWords(props: { full: ReactNode; short: ReactNode }) {
+  return (
+    <>
+      <span data-auth-kit-site-full="" style={{ display: 'contents' }}>
+        {props.full}
+      </span>
+      <span data-auth-kit-site-short="" style={{ display: 'none' }}>
+        {props.short}
+      </span>
+    </>
+  );
+}
+
 /** The site's initials for the Monogram card style: the first letters of its first two words ("Example Reports" → "ER"), skipping small words. */
 export function monogramOf(siteName: string): string {
   const words = siteName.split(/\s+/).filter((w) => w && !/^(of|the|and|for|to|a|an|&)$/i.test(w));
@@ -418,6 +462,8 @@ export function Card(props: {
   theme: AuthTheme;
   /** The site's name: the Monogram style's badge. */
   siteName?: string;
+  /** Where the card names the site (`SignIn`'s `siteNameOnCard`). Default `always`. */
+  siteNameOnCard?: SiteNameOnCard;
   bottom?: CardBottom;
   troubleBelow?: (() => void) | null;
   rootRef?: Ref<HTMLDivElement>;
@@ -436,6 +482,7 @@ export function Card(props: {
       data-auth-kit-view={props.view}
       data-auth-kit-family={props.theme.family}
       data-auth-kit-style={style}
+      data-auth-kit-site-name={props.siteNameOnCard ?? 'always'}
       style={style === 'plain' ? themeCssVariables(props.theme) : undefined}
       {...slot(props.classNames, 'root', props.className)}
     >

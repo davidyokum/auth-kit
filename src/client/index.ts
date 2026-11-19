@@ -112,4 +112,4 @@ export { sendAccountNotice, type AccountNotices } from './notices.js';
 // SignUp, and MyAccount already set and clear it.
 export { rememberPasskey, forgetPasskey, hasPasskeyHint, passkeyHintSkipped, PASSKEY_HINT_SKIPS } from './passkey-hint.js';
 export { ACCOUNT_NOTICE_PATH, ACCOUNT_NOTICE_EVENTS, type AccountNoticeEvent } from '../shared/notices.js';
-export type { AuthKitClassNames, AuthKitSlot, StyleProps, HeadingLevel } from './ui.js';
+export type { AuthKitClassNames, AuthKitSlot, StyleProps, HeadingLevel, SiteNameOnCard } from './ui.js';

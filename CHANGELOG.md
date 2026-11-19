@@ -2,6 +2,25 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.17-alpha.1] - 2026-11-19
+
+On Yokum magnetic, where the art already letters the site's name, the card says just "Sign in". Pre-release. No breaking changes.
+
+### Changed
+
+- **The card leaves the site's name to a backdrop that letters it.** On the email step, "Sign in to {Site}" shows as "Sign in", and the account line's "New to {Site}?" as "New here?", while the art shows the name (Yokum magnetic with `siteName`). Screen readers still hear "Sign in to {Site}": the words stay in the heading, out of sight (`SIGN_IN.headingShort`; `ACCESS_LINE.newHere`, `inviteOnlyHere`). Where the art can't show the name (no room around the card, as on a 320-pixel phone; no `siteName`; the style's code didn't load), the card names the site as before. Needs auth-kit's styles (`authKitStyles`); without them the card always names the site.
+- **A finger is there at once.** On a touch screen the art no longer eases the pointer in, so a quick tap reaches what's under it: on Yokum magnetic a tap on a letter knocks it down (before, a tap under about 150 ms usually didn't).
+- **A swipe on the art plays with it.** On a touch screen, a one-finger swipe that starts on the art (not on the card or a control) no longer scrolls the page when the page has nothing to scroll, so a finger can sweep Yokum magnetic's letters as a mouse does. Swipes on the card, pinches, and pages taller than the screen scroll and zoom as before.
+
+### Added
+
+- **`SignIn`'s `siteNameOnCard`**: `auto` (default, as above), `always` (the card names the site whatever is behind it), or `never` (the page shows the name some other way).
+- **Backdrops say whether they show the site's name**: a style module's `letters: 'site-name'` (Yokum magnetic), its instance's `siteNameShown()`, `renderBackdrop`'s `onSiteName` and the controller's `siteNameShown()`. `<Backdrop>` and the preview's `renderBackdrop` mark their root `data-backdrop-site-name="shown"`, from the server's HTML on. Yokum magnetic v1 draws exactly as before (its frozen hash is unchanged).
+
+### Migration
+
+None: `npx auth-kit upgrade 0.1.17-alpha.1`. A site that wants the name on the card anyway passes `siteNameOnCard="always"`.
+
 ## [0.1.16-alpha.2] - 2026-11-14
 
 `auth-kit upgrade` says why npm refused, and refuses a lockfile that was already broken. Pre-release. No breaking changes.
