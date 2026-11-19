@@ -258,7 +258,12 @@ describe('describeAuthError', () => {
     const wrongTotp = 'That code didn’t work. Codes change every 30 seconds, so enter the newest one.';
     expect(describeAuthError(awsError('CodeMismatchException'), 'totp').message).toBe(wrongTotp);
     expect(describeAuthError(awsError('NotAuthorizedException', 'Invalid code'), 'totp').message).toBe(wrongTotp);
-    expect(describeAuthError(awsError('EnableSoftwareTokenMFAException'), 'authenticator-setup').message).toBe(wrongTotp);
+    // Setting one up: an entry scanned from an earlier key never matches, so say how to tell.
+    for (const name of ['EnableSoftwareTokenMFAException', 'CodeMismatchException']) {
+      expect(describeAuthError(awsError(name), 'authenticator-setup').message).toBe(
+        'That code didn’t work. Enter the newest code from the entry you added with the QR code or setup key on this screen. If you scanned an earlier code, remove that entry. Then scan this one.',
+      );
+    }
     expect(describeAuthError(awsError('ExpiredCodeException'), 'code').message).toBe('That code has expired. Ask for a new one.');
   });
 

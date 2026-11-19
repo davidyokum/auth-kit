@@ -830,6 +830,12 @@ export function SignIn(props: SignInProps) {
           <Text classNames={classNames}>{SIGN_IN.passkeySub}</Text>
           <Who lead={SIGN_IN.signingInAs} email={email.trim()} classNames={classNames} />
           {view.cancelled ? <Note classNames={classNames}>{ERRORS.passkeyCancelled}</Note> : fb.error ? null : <Wait label={SIGN_IN.waitingForPasskey} classNames={classNames} />}
+          {leadCode ? (
+            // A first sign-in has no passkey yet: say so, beside the button that starts one (2026-11-19).
+            <p {...slot(classNames, 'text')} data-auth-kit-first-time="">
+              <strong>{SIGN_IN.chooseFirstTimeLead}</strong> {SIGN_IN.passkeyFirstTimeNext}
+            </p>
+          ) : null}
           <Actions classNames={classNames}>
             {boldRetry ? (
               <Button disabled={busy} classNames={classNames} onClick={retry} data-auth-kit-recommended="">

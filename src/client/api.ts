@@ -284,6 +284,10 @@ export interface AuthenticatorEnrollment {
 /**
  * Starts (or replaces) the authenticator: `setUpTOTP`, then `verify` runs `verifyTOTPSetup`,
  * `updateMFAPreference({ totp: 'PREFERRED' })`, and a token refresh.
+ *
+ * Each `setUpTOTP` replaces the account's pending setup key in Cognito, so a key someone already
+ * scanned stops working. `AuthenticatorSetup` keeps its key across reloads and redirects for that
+ * reason, and only asks for a new one when the person chooses "Get a new QR code".
  */
 export async function enrollAuthenticator(input: { issuer: string; accountName?: string; deviceName?: string }): Promise<AuthenticatorEnrollment> {
   const details = await setUpTOTP();
@@ -292,14 +296,36 @@ export async function enrollAuthenticator(input: { issuer: string; accountName?:
     secret,
     otpauthUri: buildOtpauthUri({ secret, issuer: input.issuer, ...(input.accountName !== undefined && { accountName: input.accountName }) }),
     verify: async (code) => {
-      await verifyTOTPSetup({
-        code: normalizeCode(code),
-        ...(input.deviceName !== undefined && { options: { friendlyDeviceName: input.deviceName } }),
-      });
-      await updateMFAPreference({ totp: 'PREFERRED' });
-      await refreshSession();
+      await checkAuthenticatorCode(code, input.deviceName);
+      await turnOnAuthenticator();
     },
   };
+}
+
+/**
+ * The first half of turning the authenticator on: `verifyTOTPSetup` ties the pending setup key to the
+ * account. Until `turnOnAuthenticator`, sign-in doesn't ask for its codes and emailed codes keep
+ * working, so stopping here leaves the account as it was.
+ */
+export async function checkAuthenticatorCode(code: string, deviceName?: string): Promise<void> {
+  await verifyTOTPSetup({
+    code: normalizeCode(code),
+    ...(deviceName !== undefined && { options: { friendlyDeviceName: deviceName } }),
+  });
+}
+
+/**
+ * The second half: makes the checked authenticator the account's MFA (`updateMFAPreference`, tried
+ * twice, since a password saved just before it would otherwise be left without one), then new tokens.
+ */
+export async function turnOnAuthenticator(): Promise<void> {
+  try {
+    await updateMFAPreference({ totp: 'PREFERRED' });
+  } catch (error) {
+    if (errorName(error) === 'NotAuthorizedException' || errorName(error) === 'UserUnAuthenticatedException') throw error;
+    await updateMFAPreference({ totp: 'PREFERRED' });
+  }
+  await refreshSession();
 }
 
 /** True when the authenticator is turned on (Amplify `fetchMFAPreference`). */
@@ -321,9 +347,19 @@ export interface PasskeyInfo {
   relyingPartyId?: string;
 }
 
-/** Saves a passkey for the signed-in person (StartWebAuthnRegistration, the browser prompt, CompleteWebAuthnRegistration). */
+/**
+ * Saves a passkey for the signed-in person (StartWebAuthnRegistration, the browser prompt,
+ * CompleteWebAuthnRegistration), then new tokens, so the server re-reads the account's factors on the
+ * next request (a first passkey ends the first-credential step). The passkey is saved even if the
+ * refresh fails, so that failure isn't reported: the server doesn't cache an unfinished setup either.
+ */
 export async function registerPasskey(): Promise<void> {
   await associateWebAuthnCredential();
+  try {
+    await refreshSession();
+  } catch {
+    // The passkey is saved. The next page load re-reads the factors (auth-kit/server caches only "nothing to set up").
+  }
 }
 
 /** The signed-in person's own passkeys, every page. No admin API can list someone else's. */
@@ -353,7 +389,13 @@ export async function deletePasskey(id: string): Promise<void> {
 
 // ---- Passwords ----------------------------------------------------------------------------------
 
-/** The first password for someone who joined by emailed code (ChangePassword with no previous password). */
+/**
+ * The first password for someone who joined by emailed code (ChangePassword with no previous password).
+ *
+ * On an account without an authenticator, call it only once the authenticator's code has checked
+ * (`AuthenticatorSetup`'s `beforeTurningOn`, which `ChooseFirstCredential` and `MyAccount` use): a
+ * password without an authenticator sends every page to authenticator setup until one is added.
+ */
 export async function setFirstPassword(password: string): Promise<void> {
   await changePasswordWithoutPrevious(password);
   await refreshSession();

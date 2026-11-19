@@ -1,5 +1,6 @@
 - heading "Add an authenticator app" [level=1]
-- paragraph: Scan the code with your app or password manager, then enter the 6-digit code it shows.
+- paragraph: Scan the code with your app or password manager, then enter the 6-digit code it shows. Your password is saved once the code checks out.
+- paragraph: Once it’s added, your sign-in codes come from this app, not by email.
 - status
 - img "A sample QR code (it encodes nothing)"
 - paragraph: Can’t scan it? Enter this setup key in your app instead.
@@ -12,5 +13,9 @@
 - text: 6-digit code
 - textbox "6-digit code"
 - button "Continue"
+- button "Back"
+- paragraph:
+  - text: Scanned an older code, or lost this one?
+  - button "Get a new QR code"
 - status
 - paragraph: This site is managed by the NC Office of State Budget and Management

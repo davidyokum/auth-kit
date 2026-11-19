@@ -21,6 +21,7 @@ import { type SyntheticEvent, createContext, useContext } from 'react';
 import type { AccountNoticeEvent } from '../shared/notices.js';
 import {
   type AuthenticatorEnrollment,
+  checkAuthenticatorCode,
   completeNewPassword,
   confirmCode,
   confirmPassword,
@@ -38,7 +39,9 @@ import {
   type PasskeyAttachment,
   signInWithPasskey,
   signInWithPassword,
+  turnOnAuthenticator,
 } from './api.js';
+import { type AuthenticatorProgress, clearAuthenticatorProgress, readAuthenticatorProgress, saveAuthenticatorProgress } from './authenticator-progress.js';
 import { type PostOutcome, handOffEmail, postAccountForm, takeHandedOffEmail } from './account-creation-client.js';
 import type { BreachedPasswordCheck } from './breached.js';
 import type { FirstCredentialStage } from './ChooseFirstCredential.js';
@@ -68,6 +71,14 @@ export interface DriverEffects {
   readonly registerPasskey: () => Promise<void>;
   readonly setFirstPassword: (password: string) => Promise<void>;
   readonly enrollAuthenticator: (input: { issuer: string; accountName?: string; deviceName?: string }) => Promise<AuthenticatorEnrollment>;
+  /** `verifyTOTPSetup` alone: the code checks, the authenticator isn't on yet. */
+  readonly checkAuthenticatorCode: (code: string, deviceName?: string) => Promise<void>;
+  /** `updateMFAPreference({ totp: 'PREFERRED' })` and a token refresh. */
+  readonly turnOnAuthenticator: () => Promise<void>;
+  /** The authenticator setup in progress in this tab (sessionStorage, keyed by `sub`), so a reload keeps the key. */
+  readonly readAuthenticatorProgress: (userId: string) => AuthenticatorProgress | null;
+  readonly saveAuthenticatorProgress: (userId: string, progress: AuthenticatorProgress) => void;
+  readonly clearAuthenticatorProgress: (userId: string) => void;
   readonly fetchAccountEmail: () => Promise<string | undefined>;
   readonly saveName: (input: { givenName: string; familyName: string }) => Promise<void>;
   /** The passkey window for an account with no passkey (ADR 0018): the browser's WebAuthn prompt. */
@@ -204,6 +215,11 @@ export const LIVE_DRIVER: ClientDriver = Object.freeze({
   registerPasskey: () => registerPasskey(),
   setFirstPassword: (password: string) => setFirstPassword(password),
   enrollAuthenticator: (input: { issuer: string; accountName?: string; deviceName?: string }) => enrollAuthenticator(input),
+  checkAuthenticatorCode: (code: string, deviceName?: string) => checkAuthenticatorCode(code, deviceName),
+  turnOnAuthenticator: () => turnOnAuthenticator(),
+  readAuthenticatorProgress: (userId: string) => readAuthenticatorProgress(userId),
+  saveAuthenticatorProgress: (userId: string, progress: AuthenticatorProgress) => saveAuthenticatorProgress(userId, progress),
+  clearAuthenticatorProgress: (userId: string) => clearAuthenticatorProgress(userId),
   fetchAccountEmail: () => fetchAccountEmail(),
   saveName: (input: { givenName: string; familyName: string }) => saveName(input),
   decoyPasskeyPrompt: (options?: PasskeyPromptOptions) => decoyPasskeyPrompt(options),

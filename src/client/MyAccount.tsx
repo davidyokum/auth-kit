@@ -139,6 +139,11 @@ export function MyAccount(props: MyAccountProps) {
   const [editing, setEditing] = useState<'authenticator' | 'password' | 'authenticator-after-password' | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const lastEditing = useRef<typeof editing>(null);
+  // A first password on an account without an authenticator waits for the authenticator's code (ADR
+  // 0002, 2026-11-19 amendment): saved first, a setup abandoned halfway would leave a password without
+  // an authenticator, and every page would then send the person to authenticator setup.
+  const heldPassword = useRef<string | null>(null);
+  const passwordSaved = useRef(false);
 
   // Opening or closing an editor removes the button that had focus: move focus to the editor's
   // heading, and back to the section's heading when it closes.
@@ -190,6 +195,27 @@ export function MyAccount(props: MyAccountProps) {
       reloadPasskeys();
       reloadFactors();
     }
+  }
+
+  /** `AuthenticatorSetup`'s `beforeTurningOn` after "Set a password": safe to repeat. */
+  async function saveHeldPassword(): Promise<void> {
+    if (passwordSaved.current) return;
+    const held = heldPassword.current;
+    if (held === null) throw new Error('auth-kit: no password to save');
+    try {
+      await setFirstPassword(held);
+    } catch (error) {
+      const info = describeAuthError(error, 'set-password');
+      if (info.kind === 'password-rejected') {
+        // Choose another; the checked code is kept, so no second code is asked for.
+        heldPassword.current = null;
+        setEditing('password');
+        fb.set({ error: info.message, status: null });
+      }
+      throw error;
+    }
+    passwordSaved.current = true;
+    heldPassword.current = null;
   }
 
   async function signOutAll() {
@@ -297,13 +323,21 @@ export function MyAccount(props: MyAccountProps) {
           intro: MY_ACCOUNT.nowAddIntro,
         })}
         headingLevel={nextLevel(sub)}
+        {...(editing === 'authenticator-after-password' && { beforeTurningOn: saveHeldPassword })}
         onDone={() => {
+          const withPassword = editing === 'authenticator-after-password';
           setEditing(null);
-          fb.set({ status: STATUS.authenticatorOn });
+          fb.set({ status: withPassword ? STATUS.passwordAndAuthenticatorOn : STATUS.authenticatorOn });
+          if (withPassword) void sendAccountNotice(notices, 'password-changed');
           reloadTotp();
           reloadFactors();
         }}
-        {...(editing === 'authenticator' && { onCancel: () => setEditing(null) })}
+        // Nothing is saved before the code checks out, so cancelling drops the held password.
+        onCancel={() => {
+          if (passwordSaved.current) return;
+          heldPassword.current = null;
+          setEditing(null);
+        }}
         {...(props.renderQrCode !== undefined && { renderQrCode: props.renderQrCode })}
         classNames={classNames}
       />
@@ -359,15 +393,28 @@ export function MyAccount(props: MyAccountProps) {
         intro={MY_ACCOUNT.setPasswordIntro}
         headingLevel={nextLevel(sub)}
         {...(emailValue !== undefined && { email: emailValue })}
-        submitLabel={MY_ACCOUNT.savePassword}
+        // Without an authenticator the password isn't saved yet (it waits for the authenticator's code).
+        submitLabel={totp.state === 'ready' && totp.value ? MY_ACCOUNT.savePassword : SIGN_IN.continue}
         context="set-password"
-        onSubmit={({ newPassword }) => setFirstPassword(newPassword)}
+        onSubmit={async ({ newPassword }) => {
+          if (totp.state === 'ready' && totp.value) {
+            await setFirstPassword(newPassword);
+            return;
+          }
+          // No authenticator yet: hold the password until its code checks out (saveHeldPassword).
+          heldPassword.current = newPassword;
+          passwordSaved.current = false;
+        }}
         onDone={() => {
-          void sendAccountNotice(notices, 'password-changed');
-          reloadFactors();
-          reloadTotp();
+          if (totp.state === 'ready' && totp.value) {
+            setEditing(null);
+            fb.set({ status: STATUS.passwordSaved });
+            void sendAccountNotice(notices, 'password-changed');
+            reloadFactors();
+            return;
+          }
           // The standard requires the authenticator of every password user; go straight to it.
-          setEditing(totp.state === 'ready' && totp.value ? null : 'authenticator-after-password');
+          setEditing('authenticator-after-password');
         }}
         onCancel={() => setEditing(null)}
         {...(props.checkBreachedPassword !== undefined && { checkBreachedPassword: props.checkBreachedPassword })}

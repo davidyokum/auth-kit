@@ -72,6 +72,8 @@ export const TEST_SECRET = 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP';
 /** Puts every mock back to a signed-out, happy-path default. */
 export function resetAmplifyMocks(): void {
   for (const fn of Object.values(auth)) fn.mockReset();
+  // An authenticator setup in progress is kept per tab (authenticator-progress.ts): none carries over.
+  if (typeof window !== 'undefined') window.sessionStorage.clear();
   Amplify.configure.mockReset();
   Amplify.getConfig.mockReset();
   cognitoUserPoolsTokenProvider.setKeyValueStorage.mockReset();

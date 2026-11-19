@@ -1007,13 +1007,18 @@ describe('emailed code (the backstop) and joining', () => {
     await user.click(field);
     await user.paste('pasted-from-a-password-manager');
     await pressContinue(user);
-    await waitFor(() => expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('pasted-from-a-password-manager'));
 
     await heading('Add an authenticator app');
-    expect(screen.queryByRole('button', { name: /Not now|Cancel/ })).toBeNull();
+    // The password waits for the authenticator's code (no password without an authenticator, ever).
+    expect(changePasswordWithoutPrevious).not.toHaveBeenCalled();
+    expect(screen.getByText('Scan the code with your app or password manager, then enter the 6-digit code it shows. Your password is saved once the code checks out.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Not now|Cancel|Skip/ })).toBeNull();
     await user.type(await screen.findByLabelText('6-digit code'), '123456{Enter}');
-    await waitFor(() => expect(auth.verifyTOTPSetup).toHaveBeenCalledWith({ code: '123456' }));
-    expect(auth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'PREFERRED' });
+    await waitFor(() => expect(auth.updateMFAPreference).toHaveBeenCalledWith({ totp: 'PREFERRED' }));
+    expect(auth.verifyTOTPSetup).toHaveBeenCalledWith({ code: '123456' });
+    expect(changePasswordWithoutPrevious).toHaveBeenCalledWith('pasted-from-a-password-manager');
+    expect(auth.verifyTOTPSetup.mock.invocationCallOrder[0]).toBeLessThan(changePasswordWithoutPrevious.mock.invocationCallOrder[0]!);
+    expect(changePasswordWithoutPrevious.mock.invocationCallOrder[0]).toBeLessThan(auth.updateMFAPreference.mock.invocationCallOrder[0]!);
 
     await heading('You’re set up');
     expect(screen.getByText('Next time, sign in with your password and a code from your authenticator app. We’ve emailed you a note about this.')).toBeTruthy();

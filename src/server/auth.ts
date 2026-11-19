@@ -238,8 +238,6 @@ export interface ServerAuth<G extends string = string, C extends string = string
   invalidate(user: { username: string; sub?: string; tokenId?: string }): void;
 }
 
-const ENROLLMENT_RECHECK_MS = 30_000;
-
 /** What a signed-in person still has to set up before the site lets them in. */
 type Enrollment = 'first-credential' | 'totp' | 'none';
 
@@ -480,8 +478,10 @@ export function createServerAuth<G extends string, C extends string>(
     if (!accessToken) throw new UnauthenticatedError();
     const factors = await cognito().getUserAuthFactors({ accessToken, username: user.username });
     const needs: Enrollment = requireFirst && needsFirstCredential(factors) ? 'first-credential' : requireTotp && needsTotpEnrollment(factors) ? 'totp' : 'none';
-    const untilExpiry = user.expiresAt * 1000 - now();
-    factorCache.set(key, needs, Math.min(needs !== 'none' ? ENROLLMENT_RECHECK_MS : factorTtlMs, untilExpiry));
+    // Only "nothing to set up" is cached. An unfinished setup is read again on every request, so a
+    // passkey or authenticator added a moment ago counts at once, even on the same token (a refresh
+    // that failed, or one that never ran): caching it sent people straight back to the setup page.
+    if (needs === 'none') factorCache.set(key, needs, Math.min(factorTtlMs, user.expiresAt * 1000 - now()));
     return needs;
   }
 

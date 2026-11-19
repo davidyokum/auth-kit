@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { AuthenticatorSetup, type ClientAuthFactors, TOTPEnrollmentGate } from '../../src/client/index.js';
 import { auth, awsError, resetAmplifyMocks, TEST_SECRET } from './amplify-mock.js';
 import { pretendTouchDevice } from './touch.js';
+import { ERRORS } from '../../src/client/copy.js';
 
 vi.mock('aws-amplify', async () => (await import('./amplify-mock.js')).amplifyModule);
 vi.mock('aws-amplify/auth', async () => (await import('./amplify-mock.js')).authModule);
@@ -277,7 +278,7 @@ describe('AuthenticatorSetup', () => {
     auth.verifyTOTPSetup.mockRejectedValueOnce(awsError('EnableSoftwareTokenMFAException', 'Code mismatch'));
     render(createElement(AuthenticatorSetup, { issuer: 'X', accountName: 'ada@example.org' }));
     await user.type(await screen.findByLabelText('6-digit code'), '000000{Enter}');
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That code didn’t work. Codes change every 30 seconds, so enter the newest one.'));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(ERRORS.wrongTotpSetup));
     expect(screen.getByLabelText<HTMLInputElement>('6-digit code').value).toBe('');
     expect(screen.getByLabelText('6-digit code').getAttribute('aria-invalid')).toBe('true');
   });
