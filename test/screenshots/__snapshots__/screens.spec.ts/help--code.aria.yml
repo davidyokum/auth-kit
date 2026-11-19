@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Didn’t get a code?" [level=1]
 - list:
   - listitem: Wait a minute. State email screens messages, which can add a short delay.
@@ -14,5 +15,4 @@
 - paragraph: Jordan Lee looks after Example Reports.
 - paragraph: Never send a password or code.
 - status
-- button "Back"
 - paragraph: This site is managed by the NC Office of State Budget and Management

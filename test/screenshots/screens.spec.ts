@@ -6,6 +6,7 @@
  * - "How do you want to sign in?" (the screen that shipped unstyled in v0.1.9-alpha.1) in every family and
  *   card style, on a phone, and on a dark page, as images;
  * - the words that change with the site's settings and family, as accessibility snapshots;
+ * - the passkey retry where this browser remembers a passkey (the bold "Try again with your passkey");
  * - two backdrops behind the card, as still images.
  *
  * Images are compared pixel for pixel, so take them in the Playwright container (see playwright.config.ts).
@@ -35,6 +36,19 @@ test.describe('every screen and state', () => {
       });
     }
   }
+});
+
+test.describe('the passkey retry follows the browser (0.1.18)', () => {
+  test('passkey--cancelled-remembered', async ({ page }) => {
+    // This browser remembers a passkey for the address: "Try again with your passkey" is the bold button.
+    const stage = await draw(page, { screen: 'passkey', state: 'cancelled', remembered: true, family: 'osbm', ground: true, font: FONT });
+    await expect(stage).toMatchAriaSnapshot({ name: 'passkey--cancelled-remembered.aria.yml' });
+    await expect(stage).toHaveScreenshot('passkey--cancelled-remembered.png');
+  });
+  test('passkey--cancelled-remembered on a phone', async ({ page }) => {
+    const stage = await draw(page, { screen: 'passkey', state: 'cancelled', remembered: true, family: 'personal', device: 'phone', ground: true, font: FONT });
+    await expect(stage).toHaveScreenshot('passkey--cancelled-remembered-phone.png');
+  });
 });
 
 test.describe('the choice screen in every family and card style', () => {

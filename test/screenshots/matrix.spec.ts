@@ -32,7 +32,7 @@ const STATES = PREVIEW_SCREENS.flatMap((s) => s.states.map((st) => [s.id, st.id]
 const SLOTS = [
   'root', 'heading', 'text', 'form', 'field', 'label', 'input', 'hint', 'error', 'status', 'actions', 'button', 'secondaryButton', 'linkButton', 'section', 'list',
   'listItem', 'code', 'link', 'content', 'card', 'bottom', 'below', 'summary', 'fieldError', 'note', 'wait', 'alts', 'who', 'contact', 'steps', 'access', 'footer',
-  'choice', 'small', 'showButton', 'glyph', 'inputWrap', 'monogram', 'ways', 'way', 'wayText', 'wayLabel', 'wayDescription',
+  'choice', 'small', 'showButton', 'glyph', 'inputWrap', 'monogram', 'ways', 'way', 'wayText', 'wayLabel', 'wayDescription', 'back', 'intro',
 ];
 
 interface MatrixArgs {

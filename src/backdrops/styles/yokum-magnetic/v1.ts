@@ -644,6 +644,16 @@ export const yokumMagneticV1 = defineVersion({
       hot: [physics, drawFilings, drawMagnet, targetOf, angleDelta],
       // Not part of the drawing (frozen above): tells the card whether the name is on the page.
       siteNameShown: () => letters > 0,
+      siteNameBox: () => {
+        if (letters === 0) return null;
+        let left = Infinity;
+        let right = -Infinity;
+        for (let f = 0; f < letters; f++) {
+          left = Math.min(left, lhx[f] as number);
+          right = Math.max(right, (lhx[f] as number) + (lwid[f] as number));
+        }
+        return { x: left, y: lhy[0] as number, width: right - left, height: fs };
+      },
     };
   },
 });

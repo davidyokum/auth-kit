@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Can’t use your passkey?" [level=1]
 - paragraph: You can still get in with an emailed code, then make a new passkey on this device.
 - list:
@@ -18,5 +19,4 @@
 - paragraph: Jordan Lee looks after Example Reports.
 - paragraph: Never send a password or code.
 - status
-- button "Back"
 - paragraph: This site is managed by the NC Office of State Budget and Management

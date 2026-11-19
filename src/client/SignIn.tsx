@@ -228,6 +228,30 @@ function clockTime(at: number): string {
 /** The help screens' one button, as an action's name (ADR 0025). */
 const HELP_ACTION = { 'email-code': 'send-email-code', 'reset-code': 'send-reset-code', 'resend-code': 'resend-code' } as const;
 
+/**
+ * The views with "Back" at the top of the card (ADR 0024, amended 2026-11-19): every sign-in and help
+ * screen after the email step. Not the email step itself, the authenticator setup a challenge asks for
+ * (it has "Start again"), or anything after the sign-in has succeeded.
+ */
+const BACK_VIEWS = new Set<View['name']>(['choose', 'passkey', 'password', 'totp', 'email-code', 'new-password', 'reset-code', 'reset-password', 'trouble', 'help', 'access-help']);
+
+/** Views that end the way back: the email step starts over, and nothing after a sign-in goes back into it. */
+const TRAIL_RESETS = new Set<View['name']>(['email', 'finishing', 'check-failed', 'enroll-authenticator', 'first-credential', 'done', 'offer-passkey', 'totp-setup']);
+
+/**
+ * The screens behind the next one, for "Back": the current screen joins the trail, unless the next one
+ * starts over (`TRAIL_RESETS`), replaces this one (the same screen, as "Try again" does), or is already
+ * on the trail (going round in a circle: "Use a passkey instead" from the password screen), which
+ * shortens the trail to where it was.
+ */
+export function nextTrail(trail: readonly View[], current: View, next: View): View[] {
+  if (TRAIL_RESETS.has(next.name)) return [];
+  if (next.name === current.name) return [...trail];
+  const seen = trail.findIndex((v) => v.name === next.name);
+  if (seen >= 0) return trail.slice(0, seen);
+  return [...trail, current];
+}
+
 /** The views that carry "Trouble signing in?" (Card Studio: every sign-in screen, not setup or help). */
 const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'password', 'totp', 'email-code', 'reset-code', 'reset-password']);
 
@@ -285,6 +309,10 @@ export function SignIn(props: SignInProps) {
   const fb = useFeedback(init?.feedback);
   const { set } = fb;
   const [view, setView] = useState<View>(init?.view ?? { name: 'email' });
+  /** The screens behind this one, for "Back" (`nextTrail`). Empty: "Back" goes where the screen usually comes from (`backFrom`). */
+  const [trail, setTrail] = useState<View[]>([]);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   const [email, setEmail] = useState(init?.email ?? '');
   const [secretValue, setSecretValue] = useState(init?.secret ?? '');
   const [codeValue, setCodeValue] = useState(init?.code ?? '');
@@ -324,6 +352,7 @@ export function SignIn(props: SignInProps) {
       setSecretValue('');
       setCodeValue('');
       if (!keep.error) set({ error: null, field: null });
+      setTrail((t) => nextTrail(t, viewRef.current, next));
       setView(next);
     },
     [set],
@@ -491,6 +520,7 @@ export function SignIn(props: SignInProps) {
     go({ name: 'passkey', cancelled: false, fromHint });
     void attempt(firstFactor('passkey', () => driver.signInWithPasskey(email), driver.decoyPasskeyPrompt, passkeyOptions), 'sign-in').then((kind) => {
       // A closed window, or no passkey here (indistinguishable): a calm note, not an error.
+      // Back is off while the window is open (the screen is busy), so this is still the passkey screen.
       if (kind === 'passkey-cancelled') {
         set({ error: null, field: null });
         setView({ name: 'passkey', cancelled: true, fromHint });
@@ -546,6 +576,30 @@ export function SignIn(props: SignInProps) {
     go({ name: 'email' });
   }
 
+  /** Where "Back" goes with no trail (a card drawn at a later screen, as a preview is): where that screen usually comes from. */
+  function backFrom(v: View): View {
+    if (v.name === 'passkey') return v.fromHint || !passkeysEnabled ? { name: 'email' } : { name: 'choose' };
+    if (v.name === 'password' || v.name === 'email-code') return passkeysEnabled ? { name: 'choose' } : { name: 'email' };
+    if (v.name === 'totp') return { name: 'password', challenge: false };
+    if (v.name === 'help') return { name: 'trouble' };
+    if (v.name === 'reset-code') return { name: 'help', topic: 'password' };
+    if (v.name === 'reset-password') return { name: 'reset-code' };
+    return { name: 'email' };
+  }
+
+  /**
+   * "Back": the screen before this one, as it was (the address still typed, a sent code still good).
+   * A passkey screen comes back as "didn't work", never opening the browser's window again by itself.
+   */
+  function goBack() {
+    const previous = trail.length > 0 ? trail[trail.length - 1]! : backFrom(view);
+    set({ error: null, status: null, field: null });
+    setSecretValue('');
+    setCodeValue('');
+    setTrail(trail.slice(0, -1));
+    setView(previous.name === 'passkey' ? { ...previous, cancelled: true } : previous);
+  }
+
   const busy = fb.busy;
   const title = props.reauth ? SIGN_IN.reauthHeading : <SiteHeadingWords full={SIGN_IN.heading(c)} short={SIGN_IN.headingShort} />;
   const reauthNote = props.reauth ? <Text classNames={classNames}>{SIGN_IN.reauthNote}</Text> : null;
@@ -571,7 +625,6 @@ export function SignIn(props: SignInProps) {
   }
   /** A control's handler, named for the driver: itself when live, a report in preview. */
   const act = <A extends unknown[]>(name: string, handler: (...args: A) => void) => driver.act(name, handler);
-  const changeEmail = act('change-email', backToEmail);
 
   const emailField = (
     <Field
@@ -702,19 +755,12 @@ export function SignIn(props: SignInProps) {
       const wayPasskey = act('use-passkey', () => startPasskey());
       const wayPassword = act('use-password', () => go({ name: 'password', challenge: false }));
       const wayCode = act('send-email-code', sendEmailCode);
-      const firstVisitCode = props.firstVisit === true && emailCodeEnabled;
-      const codeRow = (
+      const way = (choice: 'email-code' | 'passkey' | 'password', icon: 'mail' | 'fingerprint' | 'password', label: string, onClick: () => void) => (
         <li {...slot(classNames, 'listItem')}>
-          <button type="button" disabled={busy} onClick={wayCode} {...tagged(wayCode)} data-auth-kit-choice="email-code" {...(firstVisitCode && { 'data-auth-kit-recommended': '' })} {...slot(classNames, 'way')}>
-            <Icon name="mail" />
+          <button type="button" disabled={busy} onClick={onClick} {...tagged(onClick)} data-auth-kit-choice={choice} {...slot(classNames, 'way')}>
+            <Icon name={icon} />
             <span {...slot(classNames, 'wayText')}>
-              <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.chooseCode}</span>
-              {firstVisitCode ? (
-                <>
-                  {' '}
-                  <span {...slot(classNames, 'wayDescription')}>{SIGN_IN.chooseCodeFirstVisit}</span>
-                </>
-              ) : null}
+              <span {...slot(classNames, 'wayLabel')}>{label}</span>
             </span>
             <Icon name="chevron" />
           </button>
@@ -724,70 +770,75 @@ export function SignIn(props: SignInProps) {
         <div {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_IN.chooseHeading)}
-          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
-          {/* Card Studio's .c-ways: one full-width row per way in, the passkey first, filled like the primary button with a glowing fingerprint and a "Recommended" pill. A first visit (an invite's link) leads with the emailed code instead. */}
+          {/* 0.1.18 (ADR 0024, register A5a): say whose account this is and, before the rows, which way a first sign-in takes. Back (above the heading) changes the address. */}
+          <div {...slot(classNames, 'intro')}>
+            <p>
+              {SIGN_IN.chooseSigningInAs} <strong>{email.trim()}</strong>.
+            </p>
+            {emailCodeEnabled ? (
+              <p data-auth-kit-first-time="">
+                <strong>{SIGN_IN.chooseFirstTimeLead}</strong> {SIGN_IN.chooseFirstTimeNext}
+              </p>
+            ) : null}
+          </div>
+          {/* Three equal one-line rows: the emailed code first (it is the only way in for a first sign-in), then the passkey, then the password. This screen only shows when the browser remembers no passkey for the address, so nothing here is singled out. */}
           <ul {...slot(classNames, 'ways')}>
-            {firstVisitCode ? codeRow : null}
-            <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={wayPasskey} {...tagged(wayPasskey)} data-auth-kit-choice="passkey" {...(!firstVisitCode && { 'data-auth-kit-recommended': '' })} {...slot(classNames, 'way')}>
-                <Icon name="fingerprint" />
-                <span {...slot(classNames, 'wayText')}>
-                  <span {...slot(classNames, 'wayLabel')}>
-                    {SIGN_IN.choosePasskey}
-                    {firstVisitCode ? null : (
-                      <>
-                        {' '}
-                        <span data-auth-kit-recommended-label="">{SIGN_IN.chooseRecommended}</span>
-                      </>
-                    )}
-                  </span>{' '}
-                  <span {...slot(classNames, 'wayDescription')}>{SIGN_IN.choosePasskeySub}</span>
-                </span>
-                <Icon name="chevron" />
-              </button>
-            </li>
-            <li {...slot(classNames, 'listItem')}>
-              <button type="button" disabled={busy} onClick={wayPassword} {...tagged(wayPassword)} data-auth-kit-choice="password" {...slot(classNames, 'way')}>
-                <Icon name="password" />
-                <span {...slot(classNames, 'wayText')}>
-                  <span {...slot(classNames, 'wayLabel')}>{SIGN_IN.choosePassword}</span>
-                </span>
-                <Icon name="chevron" />
-              </button>
-            </li>
-            {emailCodeEnabled && !firstVisitCode ? codeRow : null}
+            {emailCodeEnabled ? way('email-code', 'mail', SIGN_IN.chooseCode, wayCode) : null}
+            {way('passkey', 'fingerprint', SIGN_IN.choosePasskey, wayPasskey)}
+            {way('password', 'password', SIGN_IN.choosePassword, wayPassword)}
           </ul>
-          {/* Register A5a: an invitee has no passkey or password yet; say plainly which way gets them in. */}
-          {emailCodeEnabled && !firstVisitCode ? <p {...slot(classNames, 'small')} data-auth-kit-first-time="">{SIGN_IN.chooseFirstTime}</p> : null}
         </div>
       );
       break;
     }
-    case 'passkey':
+    case 'passkey': {
+      const retry = act('try-again', () => startPasskey(view.fromHint === true));
+      // The prompt closed or failed. The retry follows the browser (0.1.18): when it remembers a passkey
+      // for this address, retrying is the likely way in and is the bold button; when it doesn't, a passkey
+      // may not exist yet, so the emailed code leads and Try again stays quiet.
+      const settled = view.cancelled === true || fb.error !== null;
+      const boldRetry = settled && view.fromHint === true;
+      const leadCode = settled && !view.fromHint && emailCodeEnabled;
+      const sendCode = act('send-email-code', sendEmailCode);
       body = (
         <div {...slot(classNames, 'form')}>
           {summary}
           {heading(SIGN_IN.passkeyHeading)}
           <Text classNames={classNames}>{SIGN_IN.passkeySub}</Text>
-          <Who lead={SIGN_IN.signingInAs} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
+          <Who lead={SIGN_IN.signingInAs} email={email.trim()} classNames={classNames} />
           {view.cancelled ? <Note classNames={classNames}>{ERRORS.passkeyCancelled}</Note> : fb.error ? null : <Wait label={SIGN_IN.waitingForPasskey} classNames={classNames} />}
           <Actions classNames={classNames}>
-            <Button variant="secondary" disabled={busy} classNames={classNames} onClick={act('try-again', () => startPasskey(view.fromHint === true))}>
-              {SIGN_IN.tryAgain}
-            </Button>
+            {boldRetry ? (
+              <Button disabled={busy} classNames={classNames} onClick={retry} data-auth-kit-recommended="">
+                <Icon name="fingerprint" />
+                <span>{SIGN_IN.tryAgainPasskey}</span>
+              </Button>
+            ) : (
+              <>
+                {leadCode ? (
+                  <Button disabled={busy} classNames={classNames} onClick={sendCode}>
+                    {SIGN_IN.chooseCode}
+                  </Button>
+                ) : null}
+                <Button variant="secondary" disabled={busy} classNames={classNames} onClick={retry}>
+                  {SIGN_IN.tryAgain}
+                </Button>
+              </>
+            )}
           </Actions>
           <Text classNames={classNames}>{SIGN_IN.passkeyOnPhone}</Text>
           <AltLinks
             links={
               view.fromHint
                 ? [skipped('use-password', 'password', SIGN_IN.usePassword, usePassword), ...(emailCodeEnabled ? [skipped('send-email-code', 'mail', SIGN_IN.emailCode, sendEmailCode)] : [])]
-                : [passwordAlt, ...(emailCodeEnabled ? [codeAlt] : [])]
+                : [passwordAlt, ...(emailCodeEnabled && !leadCode ? [codeAlt] : [])]
             }
             classNames={classNames}
           />
         </div>
       );
       break;
+    }
     case 'password':
       body = (
         <form
@@ -811,7 +862,7 @@ export function SignIn(props: SignInProps) {
         >
           {summary}
           {heading(SIGN_IN.passwordHeading)}
-          <Who lead={SIGN_IN.passwordFor} email={email.trim()} onChange={changeEmail} disabled={busy} classNames={classNames} />
+          <Who lead={SIGN_IN.passwordFor} email={email.trim()} classNames={classNames} />
           <HiddenUsername email={email.trim()} />
           <PasswordField
             id={ids.password}
@@ -1204,7 +1255,6 @@ export function SignIn(props: SignInProps) {
       );
       break;
     case 'trouble':
-      bottom.back = { label: SIGN_IN.backToSignIn, onClick: act('back-to-sign-in', backToEmail) };
       body = (
         <div {...slot(classNames, 'form')}>
           {heading(TROUBLE.heading)}
@@ -1226,7 +1276,6 @@ export function SignIn(props: SignInProps) {
       );
       break;
     case 'help': {
-      bottom.back = { label: SIGN_IN.back, onClick: act('back', () => go({ name: 'trouble' })) };
       // The promise ahead of time only where the site says it mounted the notice route (L5; ADR 0024).
       const screen = helpScreen(view.topic, c, { securityNotices: notices?.mounted === true });
       const contact = contactLines(c, { teams: screen.teams === true });
@@ -1262,7 +1311,6 @@ export function SignIn(props: SignInProps) {
       break;
     }
     case 'access-help': {
-      bottom.back = { label: SIGN_IN.backToSignIn, onClick: act('back-to-sign-in', backToEmail) };
       const named = CONTACT.looksAfter(c);
       const mail = driver.act('email-help');
       body = (
@@ -1300,6 +1348,7 @@ export function SignIn(props: SignInProps) {
       view={view.name}
       theme={theme}
       bottom={bottom}
+      back={BACK_VIEWS.has(view.name) ? { onClick: act('back', goBack), disabled: busy } : null}
       troubleBelow={troubleHere && props.troubleLink === 'below' ? openTrouble : null}
       rootRef={rootRef}
       {...(props.className !== undefined && { className: props.className })}

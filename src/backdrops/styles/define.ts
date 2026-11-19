@@ -80,6 +80,12 @@ export interface StyleInstance {
    * Read once after `create`; it never changes for an instance.
    */
   readonly siteNameShown?: () => boolean;
+  /**
+   * Styles that letter the site's name: the box the name's letters sit in at home, in CSS pixels
+   * (null when it isn't drawn). Not part of the drawing: it lets a test, or a site, check that the card
+   * never covers the name (0.1.18). Read once after `create`; it never changes for an instance.
+   */
+  readonly siteNameBox?: () => BackdropRect | null;
 }
 
 /** One released version of a style, type-erased for the registry (see `defineVersion`). */
@@ -234,6 +240,13 @@ export interface BackdropStyleModule<Id extends string = string> {
    * readers). Each instance says whether it really drew it (`StyleInstance.siteNameShown`).
    */
   readonly letters?: 'site-name';
+  /**
+   * `true`: the art is laid out around the card (Yokum magnetic: the name in the band above it, or below
+   * it on phones, and the magnet clear of it), so the renderer lays it out again when the card's box
+   * changes, as it does on a taller sign-in screen (0.1.18). The drawing code is the same, so no new
+   * version: only its input, the card's box, is current.
+   */
+  readonly followsCard?: boolean;
 }
 
 /** Declares a style module (checks its versions are 1, 2, 3, ... in order). */

@@ -7,6 +7,8 @@ export const yokumMagnetic = defineStyle({
   interactivity: 'pointer',
   generative: true,
   letters: 'site-name',
+  // The name and the magnet are laid out around the card: lay them out again when it changes (0.1.18).
+  followsCard: true,
   // The drawing code loads on first use, in its own chunk.
   versions: [lazyVersion({ version: 1, fps: 30, maxPixelRatio: 2, stillTime: 2, settlesAt: 1 }, () => import('./v1.js').then((m) => m.yokumMagneticV1))],
 });

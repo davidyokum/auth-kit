@@ -6,6 +6,7 @@ import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type * as CognitoModule from '../../src/client/cognito.js';
 import { type ClientAuthFactors, SignIn, type SignInProps, authTheme } from '../../src/client/index.js';
+import { nextTrail } from '../../src/client/SignIn.js';
 import type { ThemeFamily } from '../../src/themes/index.js';
 import { auth, awsError, next, resetAmplifyMocks, SIGNED_IN, TEST_SECRET } from './amplify-mock.js';
 import { pretendTouchDevice } from './touch.js';
@@ -190,7 +191,12 @@ describe('the email step', () => {
     expect(root().getAttribute('data-auth-kit-view')).toBe('passkey');
     expect(auth.signIn).toHaveBeenCalledWith({ username: 'ada@example.org', options: { authFlowType: 'USER_AUTH', preferredChallenge: 'WEB_AUTHN' } });
     expect(screen.getByText('Confirm with your face, fingerprint, or device PIN when your browser asks.')).toBeTruthy();
-    expect(slotText('who')).toBe('Signing in as ada@example.org · Change email address');
+    expect(slotText('who')).toBe('Signing in as ada@example.org');
+    expect(screen.queryByRole('button', { name: CHANGE })).toBeNull();
+    // "Back" at the top of the card, before the heading (0.1.18): it changes the address.
+    const back = screen.getByRole('button', { name: 'Back' });
+    expect(back.getAttribute('data-auth-kit-slot')).toBe('back');
+    expect(back.compareDocumentPosition(screen.getByRole('heading', { name: 'Use your passkey' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Waiting for your passkey…').closest('[role="status"]')).not.toBeNull();
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
     expect(tryAgain.getAttribute('type')).toBe('button');
@@ -209,7 +215,7 @@ describe('the email step', () => {
     await user.type(emailField(), 'ada@example.org{Enter}');
     await heading('Enter your password');
     expect(auth.signIn).not.toHaveBeenCalled();
-    expect(slotText('who')).toBe('for ada@example.org · Change email address');
+    expect(slotText('who')).toBe('for ada@example.org');
     const password = screen.getByLabelText('Password');
     expect(password.getAttribute('autocomplete')).toBe('current-password');
     expect(password.getAttribute('type')).toBe('password');
@@ -221,12 +227,12 @@ describe('the email step', () => {
     expect(screen.queryByRole('button', { name: /passkey|Email me a code/i })).toBeNull();
   });
 
-  it('"Change" on the password and passkey screens goes back to the email, kept', async () => {
+  it('"Back" on the password and passkey screens goes back to the email, kept', async () => {
     auth.signIn.mockReturnValue(new Promise(() => undefined));
     const { user } = setup({ passkeysEnabled: false });
     await user.type(emailField(), 'ada@example.org{Enter}');
     await heading('Enter your password');
-    await user.click(screen.getByRole('button', { name: CHANGE }));
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await heading('Sign in to Example Reports');
     expect(emailField().value).toBe('ada@example.org');
     expect(screen.queryByLabelText('Password')).toBeNull();
@@ -239,7 +245,7 @@ describe('the email step', () => {
     await heading('Use your passkey');
     await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
     expect(screen.queryByRole('button', { name: 'Email me a code instead' })).toBeNull();
-    await second.user.click(screen.getByRole('button', { name: CHANGE }));
+    await second.user.click(screen.getByRole('button', { name: 'Back' }));
     await heading('Sign in to Example Reports');
     expect(emailField().value).toBe('ada@example.org');
   });
@@ -352,7 +358,8 @@ describe('the card', () => {
     const contact = root().querySelector('[data-auth-kit-slot="contact"]')!;
     expect([...contact.querySelectorAll('p')].map((p) => p.textContent)).toEqual(['Ask for an invitation', 'Email apps-help@example.org.', 'Never send a password or code.']);
     expect(within(contact as HTMLElement).getByRole('link', { name: 'apps-help@example.org' }).getAttribute('href')).toBe('mailto:apps-help@example.org');
-    await user.click(screen.getByRole('button', { name: 'Back to sign in' }));
+    expect(screen.queryByRole('button', { name: 'Back to sign in' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await heading('Sign in to Example Reports');
   });
 
@@ -468,7 +475,7 @@ describe('trouble signing in', () => {
   const ROWS = ['I can’t use my passkey', 'I forgot my password', 'I lost my authenticator app', 'I didn’t get a code', 'I can’t get into my email', 'Something else'];
   const HEADINGS = ['Can’t use your passkey?', 'Forgot your password?', 'Lost your authenticator app?', 'Didn’t get a code?', 'Can’t get into your email?', 'Something else?'];
 
-  it('the triage list has six rows; "Back to sign in" returns', async () => {
+  it('the triage list has six rows; "Back" returns', async () => {
     const { user } = setup();
     await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
     await heading('Trouble signing in?');
@@ -476,7 +483,8 @@ describe('trouble signing in', () => {
     expect(screen.getByText('Choose what’s happening and we’ll show you what to do.')).toBeTruthy();
     const list = root().querySelector('[data-auth-kit-slot="list"]')!;
     expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual(ROWS);
-    await user.click(screen.getByRole('button', { name: 'Back to sign in' }));
+    expect(screen.queryByRole('button', { name: 'Back to sign in' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
     await heading('Sign in to Example Reports');
   });
 
@@ -630,7 +638,7 @@ describe('passkey sign-in', () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/'));
   });
 
-  it('a closed prompt gets a calm note (not an error), keeps the other ways in, and "Try again" asks again', async () => {
+  it('a closed prompt gets a calm note (not an error), keeps the other ways in, and "Try again with your passkey" asks again', async () => {
     auth.signIn.mockRejectedValueOnce(awsError('PasskeyAuthenticationCanceled')).mockResolvedValueOnce(SIGNED_IN);
     const { user, navigate } = setup();
     await user.type(emailField(), 'ada@example.org{Enter}');
@@ -640,7 +648,13 @@ describe('passkey sign-in', () => {
     expect(screen.queryByText('Waiting for your passkey…')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Email me a code instead' })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    // This browser remembers a passkey for the address (the hint), so retrying is the bold button (0.1.18).
+    const retry = screen.getByRole('button', { name: 'Try again with your passkey' });
+    expect(retry.getAttribute('data-auth-kit-slot')).toBe('button');
+    expect(retry.hasAttribute('data-auth-kit-recommended')).toBe(true);
+    expect(retry.querySelector('[data-auth-kit-icon="fingerprint"]')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    await user.click(retry);
     await waitFor(() => expect(navigate).toHaveBeenCalled());
     expect(auth.signIn).toHaveBeenCalledTimes(2);
   });
@@ -1407,6 +1421,138 @@ describe('a passkey from another device: offer one on this device too', () => {
   });
 });
 
+describe('"Back" (0.1.18): the screen before, as it was', () => {
+  it('walks back the way it came: the password, the choice screen, then the email, with the address kept', async () => {
+    window.localStorage.clear();
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Use a password' }));
+    await heading('Enter your password');
+    await user.type(screen.getByLabelText('Password'), 'half-typed');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Use a password' }));
+    await heading('Enter your password');
+    // A password half typed on the way out isn't kept.
+    expect(screen.getByLabelText<HTMLInputElement>('Password').value).toBe('');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('Sign in to Example Reports');
+    expect(emailField().value).toBe('ada@example.org');
+    // The email step has no Back of its own.
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
+  });
+
+  it('from help it returns to the screen that opened it: "Forgot your password?" comes back to the password', async () => {
+    window.localStorage.clear();
+    const { user } = setup({ passkeysEnabled: false });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('Enter your password');
+    await user.click(screen.getByRole('button', { name: 'Forgot your password?' }));
+    expect(root().getAttribute('data-auth-kit-view')).toBe('help');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('Enter your password');
+    // And through Trouble signing in?: help, then the triage list, then where it started.
+    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await heading('Trouble signing in?');
+    await user.click(screen.getByRole('button', { name: 'I didn’t get a code' }));
+    expect(root().getAttribute('data-auth-kit-view')).toBe('help');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('Trouble signing in?');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('Enter your password');
+  });
+
+  it('back to a passkey screen shows it as "didn’t work", never opening the browser’s window again by itself', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockRejectedValueOnce(awsError('PasskeyAuthenticationCanceled'));
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Use a passkey' }));
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    await user.click(screen.getByRole('button', { name: 'Use a password instead' }));
+    await heading('Enter your password');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('Use your passkey');
+    expect(screen.getByText('We didn’t get a passkey. Try again, or use another way below.')).toBeTruthy();
+    expect(auth.signIn).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await heading('How do you want to sign in?');
+  });
+
+  it('is off while a request is out (the screen is busy)', async () => {
+    auth.signIn.mockReturnValue(new Promise(() => undefined));
+    const { user } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await heading('Use your passkey');
+    expect(screen.getByRole('button', { name: 'Back' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('nextTrail: a new screen joins the trail, a retry replaces it, a circle shortens it, and starting over or signing in clears it', () => {
+    const email = { name: 'email' } as const;
+    const choose = { name: 'choose' } as const;
+    const password = { name: 'password', challenge: false } as const;
+    const passkey = { name: 'passkey', cancelled: false, fromHint: false } as const;
+    expect(nextTrail([], email, choose)).toEqual([email]);
+    expect(nextTrail([email], choose, password)).toEqual([email, choose]);
+    expect(nextTrail([email, choose], password, { ...password })).toEqual([email, choose]);
+    expect(nextTrail([email, choose, passkey], password, passkey)).toEqual([email, choose]);
+    expect(nextTrail([email, choose], password, email)).toEqual([]);
+    expect(nextTrail([email, choose], password, { name: 'finishing' })).toEqual([]);
+  });
+});
+
+describe('the passkey retry follows the browser (0.1.18)', () => {
+  it('no passkey remembered here: "Email me a code" leads, Try again stays quiet, and the code isn’t offered twice', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockRejectedValueOnce(awsError('PasskeyAuthenticationCanceled')).mockResolvedValueOnce(CODE_SENT);
+    const { user } = setup();
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    await user.click(screen.getByRole('button', { name: 'Use a passkey' }));
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    const actions = root().querySelector('[data-auth-kit-slot="actions"]')!;
+    const buttons = [...actions.querySelectorAll('button')];
+    expect(buttons.map((b) => [b.textContent, b.getAttribute('data-auth-kit-slot')])).toEqual([
+      ['Email me a code', 'button'],
+      ['Try again', 'secondaryButton'],
+    ]);
+    expect(root().querySelector('[data-auth-kit-recommended]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Email me a code instead' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Use a password instead' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+  });
+
+  it('while the browser’s window is open, the screen is as before: the wait and a quiet Try again', async () => {
+    auth.signIn.mockReturnValue(new Promise(() => undefined));
+    const { user } = setup();
+    await user.type(emailField(), 'ada@example.org{Enter}');
+    await heading('Use your passkey');
+    expect(screen.getByRole('button', { name: 'Try again' }).getAttribute('data-auth-kit-slot')).toBe('secondaryButton');
+    expect(root().querySelector('[data-auth-kit-recommended]')).toBeNull();
+  });
+
+  it('a site without emailed codes keeps Try again as the one button', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockRejectedValueOnce(awsError('PasskeyAuthenticationCanceled'));
+    const { user } = setup({ emailCodeEnabled: false });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await user.click(await screen.findByRole('button', { name: 'Use a passkey' }));
+    await screen.findByText('We didn’t get a passkey. Try again, or use another way below.');
+    const actions = root().querySelector('[data-auth-kit-slot="actions"]')!;
+    expect([...actions.querySelectorAll('button')].map((b) => b.getAttribute('data-auth-kit-slot'))).toEqual(['secondaryButton']);
+  });
+});
+
 describe('register A5a: Continue opens the passkey prompt only where this browser remembers one', () => {
   const allAuthCalls = () => Object.values(auth).reduce((n, fn) => n + ((fn as { mock?: { calls: unknown[] } }).mock?.calls.length ?? 0), 0);
 
@@ -1418,9 +1564,13 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await heading('How do you want to sign in?');
     expect(root().getAttribute('data-auth-kit-view')).toBe('choose');
-    expect(slotText('who')).toBe('for ada@example.org · Change email address');
-    // A space between the label and the description, so a screen reader doesn't run "(recommended)Your" together.
-    expect(screen.getByRole('button', { name: 'Use a passkey Recommended Your face, fingerprint, or device PIN.' })).toBeTruthy();
+    // Who is signing in, in the intro (0.1.18): no "Change" (Back changes the address), no "Recommended".
+    expect(slotText('intro')).toBe('You’re signing in as ada@example.org.First time signing in? Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.');
+    expect(root().querySelector('[data-auth-kit-slot="who"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: CHANGE })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Back' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use a passkey' })).toBeTruthy();
+    expect(screen.queryByText('Recommended')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use a password' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
@@ -1434,7 +1584,22 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     await enterEmail(user, 'ada@example.org');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await heading('How do you want to sign in?');
-    expect(screen.getByText('First time signing in? Choose Email me a code.')).toBeTruthy();
+    const firstTime = root().querySelector('[data-auth-kit-first-time]')!;
+    expect(firstTime.closest('[data-auth-kit-slot="intro"]')).not.toBeNull();
+    expect(firstTime.textContent).toBe('First time signing in? Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.');
+    expect(firstTime.querySelector('strong')!.textContent).toBe('First time signing in?');
+    // Before the rows, so it's read first.
+    expect(firstTime.compareDocumentPosition(root().querySelector('[data-auth-kit-slot="ways"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a site without emailed codes leaves the first-time line out, and the code row with it', async () => {
+    window.localStorage.clear();
+    const { user } = setup({ emailCodeEnabled: false });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await heading('How do you want to sign in?');
+    expect(slotText('intro')).toBe('You’re signing in as ada@example.org.');
+    expect([...root().querySelectorAll('[data-auth-kit-choice]')].map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['passkey', 'password']);
   });
 
   it('a first visit (an invite’s link, ?first=1): Continue is "Email me a code", sent straight away, with the passkey and password as the other ways', async () => {
@@ -1484,35 +1649,38 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
   });
 
-  it('each way in is a row as Card Studio’s .c-ways draws it: icon, label (and "Recommended"), the description below, a chevron', async () => {
+  it('each way in is an equal one-line row as Card Studio’s .c-ways draws it: icon, label, a chevron; the emailed code first', async () => {
     window.localStorage.clear();
-    const { user } = setup({ classNames: { ways: 'my-ways', way: 'my-way', wayText: 'my-text', wayLabel: 'my-label', wayDescription: 'my-desc' } });
+    const { user } = setup({ classNames: { ways: 'my-ways', way: 'my-way', wayText: 'my-text', wayLabel: 'my-label', intro: 'my-intro', back: 'my-back' } });
     await enterEmail(user, 'ada@example.org');
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await heading('How do you want to sign in?');
     const list = card().querySelector<HTMLElement>('[data-auth-kit-slot="ways"]')!;
     expect(list.tagName).toBe('UL');
     expect(list.className).toBe('my-ways');
+    expect(card().querySelector('[data-auth-kit-slot="intro"]')!.className).toBe('my-intro');
+    expect(card().querySelector('[data-auth-kit-slot="back"]')!.className).toBe('my-back');
     const rows = [...list.querySelectorAll<HTMLButtonElement>(':scope > li > button')];
-    expect(rows.map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['passkey', 'password', 'email-code']);
+    expect(rows.map((b) => b.getAttribute('data-auth-kit-choice'))).toEqual(['email-code', 'passkey', 'password']);
+    const icons = { 'email-code': 'mail', passkey: 'fingerprint', password: 'password' } as Record<string, string>;
     for (const row of rows) {
       expect(row.getAttribute('data-auth-kit-slot')).toBe('way');
       expect(row.className).toBe('my-way');
-      // Icon, the words, chevron: in that order, and nothing else.
+      // Icon, the words, chevron: in that order, and nothing else. No row is singled out (0.1.18).
       const parts = [...row.children].map((c) => c.getAttribute('data-auth-kit-icon') ?? c.getAttribute('data-auth-kit-slot'));
-      expect(parts).toEqual([row.getAttribute('data-auth-kit-choice') === 'passkey' ? 'fingerprint' : row.getAttribute('data-auth-kit-choice') === 'password' ? 'password' : 'mail', 'wayText', 'chevron']);
+      expect(parts).toEqual([icons[row.getAttribute('data-auth-kit-choice')!], 'wayText', 'chevron']);
+      expect(row.hasAttribute('data-auth-kit-recommended')).toBe(false);
+      const text = row.querySelector('[data-auth-kit-slot="wayText"]')!;
+      expect([...text.children].map((c) => c.getAttribute('data-auth-kit-slot'))).toEqual(['wayLabel']);
+      expect(row.querySelector('[data-auth-kit-slot="wayDescription"]')).toBeNull();
     }
-    const [passkey, password] = rows as [HTMLButtonElement, HTMLButtonElement];
-    // Only the passkey is the recommended (tinted) row.
-    expect(rows.map((b) => b.hasAttribute('data-auth-kit-recommended'))).toEqual([true, false, false]);
-    const text = passkey.querySelector('[data-auth-kit-slot="wayText"]')!;
-    expect([...text.children].map((c) => c.getAttribute('data-auth-kit-slot'))).toEqual(['wayLabel', 'wayDescription']);
-    expect(text.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a passkey Recommended');
-    expect(text.querySelector('[data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]')!.textContent).toBe('Recommended');
-    expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.textContent).toBe('Your face, fingerprint, or device PIN.');
-    expect(text.querySelector('[data-auth-kit-slot="wayDescription"]')!.className).toBe('my-desc');
-    expect(password.querySelector('[data-auth-kit-slot="wayLabel"]')!.textContent).toBe('Use a password');
-    expect(password.querySelector('[data-auth-kit-slot="wayDescription"]')).toBeNull();
+    expect(rows.map((b) => b.textContent)).toEqual(['Email me a code', 'Use a passkey', 'Use a password']);
+    // A first visit draws the same rows.
+    cleanup();
+    const again = setup({ firstVisit: true });
+    await enterEmail(again.user, 'ada@example.org');
+    await again.user.click(screen.getByRole('button', { name: 'Use a passkey instead' }));
+    expect(screen.queryByText('Recommended')).toBeNull();
   });
 
   it('the hint for that address opens the prompt; a hint for another address doesn’t', async () => {

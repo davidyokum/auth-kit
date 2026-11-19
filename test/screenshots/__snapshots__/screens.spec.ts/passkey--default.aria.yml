@@ -1,9 +1,9 @@
+- button "Back"
 - heading "Use your passkey" [level=1]
 - paragraph: Confirm with your face, fingerprint, or device PIN when your browser asks.
 - paragraph:
   - text: Signing in as
   - strong: ada@example.org
-  - button "Change email address"
 - status: Waiting for your passkey…
 - button "Try again"
 - paragraph: Passkey on your phone? Choose the phone option in the window that opens.

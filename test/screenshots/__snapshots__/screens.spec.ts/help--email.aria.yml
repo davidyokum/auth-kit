@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Can’t get into your email?" [level=1]
 - paragraph: We can’t help you get back into your email. For that, contact your agency’s IT help desk.
 - list:
@@ -12,5 +13,4 @@
 - paragraph: Jordan Lee looks after Example Reports.
 - paragraph: Never send a password or code.
 - status
-- button "Back"
 - paragraph: This site is managed by the NC Office of State Budget and Management

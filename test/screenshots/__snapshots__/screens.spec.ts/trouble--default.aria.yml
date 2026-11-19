@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Trouble signing in?" [level=1]
 - paragraph: Choose what’s happening and we’ll show you what to do.
 - list:
@@ -14,5 +15,4 @@
   - listitem:
     - button "Something else"
 - status
-- button "Back to sign in"
 - paragraph: This site is managed by the NC Office of State Budget and Management

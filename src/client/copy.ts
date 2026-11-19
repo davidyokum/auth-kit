@@ -91,16 +91,24 @@ export const SIGN_IN = {
 
   /** "How do you want to sign in?" (register A5a): after Continue, unless this browser remembers a passkey for the address. */
   chooseHeading: 'How do you want to sign in?',
+  /** Under the heading, before the address (the screen's "Back" is how to change it). */
+  chooseSigningInAs: 'You’re signing in as',
+  /** The first-time advice, in plain sight under the address (ADR 0024, amended 2026-11-19): its lead in bold. */
+  chooseFirstTimeLead: 'First time signing in?',
+  chooseFirstTimeNext: 'Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.',
+  /** The whole first-time advice as one sentence (`chooseFirstTimeLead` and `chooseFirstTimeNext`). */
+  chooseFirstTime: 'First time signing in? Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.',
   choosePasskey: 'Use a passkey',
-  /** A pill on the passkey row (register A5a: the recommended way is the prominent one). */
-  chooseRecommended: 'Recommended',
-  choosePasskeySub: 'Your face, fingerprint, or device PIN.',
   choosePassword: 'Use a password',
   chooseCode: 'Email me a code',
-  /** The emailed code's row on a first visit (an invite's link), where it leads. */
+  /** @deprecated Since 0.1.18: the three ways in look alike (ADR 0024, amended 2026-11-19); no pill. */
+  chooseRecommended: 'Recommended',
+  /** @deprecated Since 0.1.18: every way in is one line. */
+  choosePasskeySub: 'Your face, fingerprint, or device PIN.',
+  /** @deprecated Since 0.1.18: the first-time advice sits under the heading for every visit. */
   chooseCodeFirstVisit: 'First time here? We’ll email you a code, then you’ll set up a passkey.',
-  /** Under the rows, on every other visit to this screen (register A5a): an invitee's only way in. */
-  chooseFirstTime: 'First time signing in? Choose Email me a code.',
+  /** "Use your passkey" after the prompt closed, where this browser remembers a passkey for the address: the one bold way on. */
+  tryAgainPasskey: 'Try again with your passkey',
   /**
    * The email step on a first visit (an invite's link): Continue emails the code straight away, the only
    * way in for an account with nothing saved yet, and the line says what follows on this site.

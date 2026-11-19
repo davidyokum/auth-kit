@@ -79,7 +79,6 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-auth-kit] [data-auth-kit-slot="way"] > svg) { flex: none; width: 22px; height: 22px; color: var(--ak-link, #1668b0); }
 :where([data-auth-kit] [data-auth-kit-slot="way"] > [data-auth-kit-icon="chevron"]) { margin-left: auto; width: 18px; height: 18px; color: var(--ak-muted, #56606b); }
 :where([data-auth-kit] [data-auth-kit-slot="wayText"]) { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-:where([data-auth-kit] [data-auth-kit-slot="wayLabel"] [data-auth-kit-recommended-label]) { display: inline-block; padding: 0 8px; border: 1px solid currentColor; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 18px; letter-spacing: 0.04em; text-transform: uppercase; vertical-align: 2px; color: inherit; }
 :where([data-auth-kit] [data-auth-kit-slot="wayDescription"]) { display: block; font-weight: 400; font-size: 16px; line-height: 22px; color: var(--ak-text, #3c434b); }
 :where([data-auth-kit] [data-auth-kit-slot="steps"]) { margin: 0; padding-inline-start: 1.25rem; display: grid; gap: 0.5rem; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"]) { display: grid; gap: 0.5rem; padding: 1rem; border: 1px solid var(--ak-field-border, #6b7480); border-radius: 10px; }
@@ -100,18 +99,20 @@ ${phoneRules('[data-auth-kit-device="phone"] ')}
 :where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-heading="short"], [data-auth-kit-site-name="never"] [data-auth-kit-site-heading="short"]) { display: inline !important; }
 :where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-full], [data-auth-kit-site-name="never"] [data-auth-kit-site-full]) { display: none !important; }
 :where([data-backdrop-site-name="shown"] [data-auth-kit-site-name="auto"] [data-auth-kit-site-short], [data-auth-kit-site-name="never"] [data-auth-kit-site-short]) { display: inline !important; }
-/* The recommended way in (register A5a): filled like the primary button, a glowing fingerprint, a "Recommended" pill. After the generic icon and row rules, so it wins at equal (zero) specificity. */
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]) { color: var(--ak-button-text, #fff); background: var(--ak-button-bg, var(--ak-button, #1e79c8)); border-color: transparent; box-shadow: var(--ak-recommended-shadow, 0 1px 2px rgba(9, 41, 64, 0.14), 0 12px 26px -14px rgba(9, 41, 64, 0.55)); transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease; }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]:hover:not(:disabled)) { border-color: transparent; filter: brightness(1.07); box-shadow: var(--ak-recommended-shadow-hover, 0 1px 2px rgba(9, 41, 64, 0.16), 0 16px 30px -14px rgba(9, 41, 64, 0.62)); }
-@media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended]:hover:not(:disabled)) { transform: translateY(-1px); } }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { width: 24px; height: 24px; margin: 0 8px 0 6px; border-radius: 50%; background: #fff; color: var(--ak-recommended-icon, #047857); box-shadow: 0 0 0 9px #fff, 0 0 0 12px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 22px 12px var(--ak-recommended-glow, rgba(74, 222, 128, 0.5)); }
-@media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { animation: ak-glow 2.8s ease-in-out infinite; } }
-@keyframes ak-glow { 50% { box-shadow: 0 0 0 9px #fff, 0 0 0 13px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 30px 16px var(--ak-recommended-glow, rgba(74, 222, 128, 0.5)); } }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="chevron"]) { color: inherit; }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayDescription"]) { color: inherit; }
+/* "Back" at the top of the card (0.1.18): a quiet link-colored button above the heading, the screen before. */
+:where([data-auth-kit] [data-auth-kit-slot="back"]) { font: inherit; font-size: 15px; font-weight: 500; line-height: 20px; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 36px; margin: -14px 0 -4px -8px; padding: 6px 10px 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ak-link, #1668b0); cursor: pointer; }
+:where([data-auth-kit] [data-auth-kit-slot="back"]:hover:not(:disabled)) { background: var(--ak-status, rgba(9, 41, 64, 0.06)); }
+:where([data-auth-kit] [data-auth-kit-slot="back"] > svg) { flex: none; width: 18px; height: 18px; }
+/* "How do you want to sign in?" (0.1.18): who is signing in, then what a first sign-in chooses, as plain text before the rows. */
+:where([data-auth-kit] [data-auth-kit-slot="intro"]) { display: grid; gap: 8px; margin: 0; font-size: 15.5px; line-height: 1.5; color: var(--ak-text, #3c434b); }
+:where([data-auth-kit] [data-auth-kit-slot="intro"] p) { margin: 0; }
+:where([data-auth-kit] [data-auth-kit-slot="intro"] strong) { font-weight: 600; color: var(--ak-ink, #092940); overflow-wrap: anywhere; }
+/* The passkey retry when this browser remembers a passkey for the address (0.1.18): the primary button, led by a glowing fingerprint. After the generic button rules, so it wins at equal (zero) specificity. */
+:where([data-auth-kit] [data-auth-kit-slot="button"][data-auth-kit-recommended]) { justify-content: flex-start; gap: 14px; min-height: 60px; padding: 12px 16px 12px 14px; box-shadow: var(--ak-recommended-shadow, 0 1px 2px rgba(9, 41, 64, 0.14), 0 12px 26px -14px rgba(9, 41, 64, 0.55)); text-align: start; }
+:where([data-auth-kit] [data-auth-kit-slot="button"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { flex: none; box-sizing: content-box; width: 20px; height: 20px; padding: 7px; border-radius: 50%; background: #fff; color: var(--ak-recommended-icon, #047857); box-shadow: 0 0 0 3px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 18px 6px var(--ak-recommended-glow, rgba(74, 222, 128, 0.45)); }
+@media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="button"][data-auth-kit-recommended] > [data-auth-kit-icon="fingerprint"]) { animation: ak-glow 2.8s ease-in-out infinite; } }
+@keyframes ak-glow { 50% { box-shadow: 0 0 0 4px var(--ak-recommended-ring, rgba(74, 222, 128, 0.55)), 0 0 26px 10px var(--ak-recommended-glow, rgba(74, 222, 128, 0.45)); } }
 :where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended]) { border: 2px solid var(--ak-button, #1e79c8); box-shadow: 0 12px 26px -16px rgba(9, 41, 64, 0.45); }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] > [data-auth-kit-icon="mail"]) { color: inherit; }
-:where([data-auth-kit] [data-auth-kit-slot="way"][data-auth-kit-recommended] [data-auth-kit-slot="wayLabel"]) { display: flex; flex-wrap: wrap; align-items: center; column-gap: 8px; row-gap: 2px; }
 :where([data-auth-kit] [data-auth-kit-slot="choice"][data-recommended] h2 > [data-auth-kit-icon="fingerprint"]) { color: var(--ak-recommended-icon, #047857); filter: drop-shadow(0 0 6px var(--ak-recommended-glow, rgba(74, 222, 128, 0.7))); }
 @media (prefers-reduced-motion: no-preference) { :where([data-auth-kit] [data-auth-kit-slot="wait"] svg) { animation: ak-pulse 1.6s ease-in-out infinite; } }
 @keyframes ak-pulse { 50% { opacity: 0.45; } }
