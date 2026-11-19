@@ -367,6 +367,19 @@ describe('authMatrixCases: completeness rules', () => {
     expect(cases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[403], [403]]);
   });
 
+  it('on a Simple site (ADR 0029) the emailed-code-only persona is an ordinary member: required, and expected to get what member gets', () => {
+    const route = { path: '/api/x', expect: { anonymous: 401, member: 200, admin: 200 } };
+    const without = { anonymous: {}, member: {}, admin: {} };
+    const simple = { signIn: { mode: 'simple', stay: 30 } } as const;
+    expect(() => authMatrixCases({ personas: without, appRoutes: ['/api/x'], routes: [route], ...simple })).toThrow(/persona "codeOnlyMember" is required/);
+    const cases = authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [route], ...simple });
+    expect(cases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[200], [200]]);
+    // It may still get no more than a member.
+    const more = { path: '/api/x', expect: { anonymous: 401, member: 403, admin: 200, codeOnlyMember: 200 } };
+    expect(() => authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [more], ...simple })).toThrow(/succeed where "member" can't/);
+    expect(() => authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [route], ...simple, requireFirstCredential: true })).toThrow(/can't be used with Simple sign-in/);
+  });
+
   it('flags missing params and unknown personas', () => {
     expect(() =>
       authMatrixCases({ personas, appRoutes, routes: [{ path: '/api/x/:id', expect: { anonymous: 401, member: 200, admin: 200, otherMember: 404 } }] }),
