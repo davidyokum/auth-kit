@@ -1845,9 +1845,9 @@ describe('Simple sign-in: code only (ADR 0029)', () => {
     expect(emailField().value).toBe('ada@example.org');
   });
 
-  it('"Trouble signing in?" offers only what can go wrong with a code, and its help never names passkeys, passwords, or authenticators', async () => {
+  it('"Help" offers only what can go wrong with a code, and its help never names passkeys, passwords, or authenticators', async () => {
     const { user } = setup(SIMPLE);
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await heading('Trouble signing in?');
     const rows = [...root().querySelectorAll('[data-auth-kit-slot="list"] button')].map((b) => b.textContent);
     expect(rows).toEqual(['I didn’t get a code', 'I can’t get into my email', 'Something else']);
