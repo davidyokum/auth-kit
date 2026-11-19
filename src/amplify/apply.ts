@@ -48,6 +48,8 @@ export interface AppliedAuthStandard {
   isSandbox: boolean;
   environment: string;
   relyingPartyId: string | null;
+  /** How people sign in (ADR 0029): `full` or `simple`. */
+  signInMode: 'full' | 'simple';
   allowedFirstAuthFactors: string[];
   explicitAuthFlows: string[];
   mfaConfiguration: 'OPTIONAL' | 'ON';
@@ -329,11 +331,13 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   // Best first: passkey; password (+ authenticator code, required by the app); emailed code as backstop.
   // Admin pools: no emailed codes. PASSWORD stays allowed there because a new admin has to sign in once
   // (with a one-time password and a TOTP enrollment) before Cognito lets them register a passkey.
-  const allowedFirstAuthFactors = [
-    ...(o.passkeys ? ['WEB_AUTHN'] : []),
-    'PASSWORD',
-    ...(o.adminPool ? [] : ['EMAIL_OTP']),
-  ];
+  // Simple sign-in (ADR 0029): the emailed code alone. Widening this list later (the move to Full) is an
+  // in-place update of the pool's sign-in policy; every account keeps working.
+  const simple = o.signIn.mode === 'simple';
+  const passkeysOnPool = o.passkeys !== null && !simple;
+  const allowedFirstAuthFactors = simple
+    ? ['EMAIL_OTP']
+    : [...(passkeysOnPool ? ['WEB_AUTHN'] : []), 'PASSWORD', ...(o.adminPool ? [] : ['EMAIL_OTP'])];
   cfnUserPool.policies = {
     passwordPolicy: { ...PASSWORD_POLICY },
     signInPolicy: { allowedFirstAuthFactors },
@@ -345,7 +349,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   cfnUserPool.enabledMfas = ['SOFTWARE_TOKEN_MFA'];
 
   let relyingPartyId: string | null = null;
-  if (o.passkeys) {
+  if (o.passkeys && passkeysOnPool) {
     relyingPartyId = isSandbox ? o.passkeys.sandboxRelyingPartyId : o.passkeys.relyingPartyId;
     cfnUserPool.webAuthnRelyingPartyId = relyingPartyId;
     cfnUserPool.webAuthnUserVerification = 'required';
@@ -466,6 +470,7 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     isSandbox,
     environment: tags.Environment ?? '',
     relyingPartyId,
+    signInMode: o.signIn.mode,
     allowedFirstAuthFactors,
     explicitAuthFlows,
     mfaConfiguration,

@@ -48,6 +48,11 @@ export interface AuthClientOptions {
   refreshTokenMinutes: number;
   /** Share the cookies across subdomains (rare). Must match the server's `amplifyCookieRuntimeOptions`. */
   cookieDomain?: string;
+  /**
+   * `'browser'` for Simple sign-in's "every visit" (ADR 0029): the token cookies end when the browser
+   * quits (no Expires). Pair it with `amplifyAdapterRefresh(deps, { cookies: 'browser' })` in the proxy.
+   */
+  cookies?: 'browser';
 }
 
 /**
@@ -75,7 +80,8 @@ export function configureAuthClient(outputs: Parameters<typeof Amplify.configure
       path: '/',
       sameSite: 'lax',
       secure,
-      expires: options.refreshTokenMinutes / (24 * 60),
+      // An explicit undefined (not a missing key) makes CookieStorage write session cookies.
+      expires: options.cookies === 'browser' ? undefined : options.refreshTokenMinutes / (24 * 60),
       ...(options.cookieDomain !== undefined && { domain: options.cookieDomain }),
     }),
   );

@@ -61,6 +61,19 @@ export {
   type NormalizedAccountCreation,
 } from '../shared/account-creation.js';
 export {
+  SIGN_IN_MODES,
+  SIGN_IN_MODE_LABEL,
+  SIMPLE_STAY_POLICY,
+  SignInConfigError,
+  normalizeSignIn,
+  maxStayDays,
+  stayRefreshTokenMinutes,
+  type SignInMode,
+  type SignInSettings,
+  type SimpleStay,
+  type NormalizedSignIn,
+} from '../shared/sign-in-mode.js';
+export {
   createAuthWebAcl,
   createSharedAuthWebAcl,
   associateAuthWebAcl,

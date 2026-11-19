@@ -69,7 +69,8 @@ export function standardAuthProps(options: AuthStandardOptions, extras: Standard
     ...(extras.name !== undefined && { name: extras.name }),
     loginWith: {
       email,
-      ...(o.passkeys && {
+      // Simple sign-in (ADR 0029) keeps the address for a later move to Full but registers no passkeys.
+      ...(o.passkeys && o.signIn.mode === 'full' && {
         // The sandbox relying-party ID is swapped in by applyAuthStandard at synth time.
         webAuthn: { relyingPartyId: o.passkeys.relyingPartyId, userVerification: 'required' as const },
       }),

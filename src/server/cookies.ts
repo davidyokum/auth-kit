@@ -123,6 +123,27 @@ export function amplifyCookieRuntimeOptions(input: AmplifyCookieRuntimeInput) {
   };
 }
 
+/**
+ * A Set-Cookie value made to end with the browser (Simple sign-in's "every visit", ADR 0029): its
+ * `Max-Age` and `Expires` attributes removed. A deletion (`Max-Age=0`, an `Expires` in the past, or an
+ * empty value) is returned unchanged, so signing out still clears the cookie. The refresh token's own
+ * 12-hour lifetime stays the ceiling for a browser that restores its session cookies on restart.
+ */
+export function browserSessionSetCookie(header: string): string {
+  const parts = header.split(';');
+  const pair = parts[0] ?? '';
+  const value = pair.slice(pair.indexOf('=') + 1).trim();
+  const attrs = parts.slice(1).map((a) => a.trim());
+  const maxAge = attrs.find((a) => /^max-age=/i.test(a));
+  const expires = attrs.find((a) => /^expires=/i.test(a));
+  const deleting =
+    value === '' ||
+    (maxAge !== undefined && Number(maxAge.slice(8)) <= 0) ||
+    (expires !== undefined && Date.parse(expires.slice(8)) <= Date.now());
+  if (deleting) return header;
+  return [pair, ...attrs.filter((a) => a !== '' && !/^(max-age|expires)=/i.test(a))].join('; ');
+}
+
 /** `Cache-Control` for every private or admin response: rendered per request, never cached. */
 export const PRIVATE_NO_STORE = 'private, no-store';
 

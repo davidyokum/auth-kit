@@ -28,7 +28,7 @@
 import { NextResponse, type NextRequest } from 'next/server.js';
 import type { ResolvedPoolConfig } from '../server/config.js';
 import { toRequestContext } from '../server/context.js';
-import { PRIVATE_NO_STORE } from '../server/cookies.js';
+import { PRIVATE_NO_STORE, browserSessionSetCookie } from '../server/cookies.js';
 import { AuthUnavailableError, type AuthError, UnauthenticatedError, authErrorResponse } from '../server/errors.js';
 import { RETURN_PATH_HEADER, signInUrl } from '../server/pages.js';
 import { isSafeRedirect, safeRedirect } from '../server/redirect.js';
@@ -586,6 +586,16 @@ export interface AmplifyAdapterRefreshDeps {
   fetchAuthSession: (contextSpec: never) => Promise<{ tokens?: { accessToken?: { toString(): string } } | undefined }>;
 }
 
+export interface AmplifyAdapterRefreshOptions {
+  /**
+   * `'browser'` for Simple sign-in's "every visit" (`signIn: { mode: 'simple', stay: 'browser' }`, ADR
+   * 0029): the refreshed token cookies lose their Max-Age and Expires, so they end when the browser
+   * quits (the adapter would otherwise give them a lifetime). Default: as the adapter writes them,
+   * bounded by `amplifyCookieRuntimeOptions`.
+   */
+  cookies?: 'browser';
+}
+
 /**
  * A refresh handler that uses the Amplify Next adapter: with a request/response context,
  * `fetchAuthSession` exchanges the refresh-token cookie for new tokens and writes the cookies to the
@@ -598,7 +608,8 @@ export interface AmplifyAdapterRefreshDeps {
  * export const proxy = withAuthProxy({ auth, refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession }) });
  * ```
  */
-export function amplifyAdapterRefresh(deps: AmplifyAdapterRefreshDeps): RefreshHandler {
+export function amplifyAdapterRefresh(deps: AmplifyAdapterRefreshDeps, options: AmplifyAdapterRefreshOptions = {}): RefreshHandler {
+  const keep = options.cookies === 'browser' ? browserSessionSetCookie : (header: string) => header;
   return async (request) => {
     const response = NextResponse.next();
     let token: string | undefined;
@@ -612,7 +623,7 @@ export function amplifyAdapterRefresh(deps: AmplifyAdapterRefreshDeps): RefreshH
       return null;
     }
     if (typeof token !== 'string' || token === '') return null;
-    return { accessToken: token, setCookies: response.headers.getSetCookie() };
+    return { accessToken: token, setCookies: response.headers.getSetCookie().map(keep) };
   };
 }
 

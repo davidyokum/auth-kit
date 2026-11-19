@@ -109,6 +109,23 @@ describe('cookies the server writes during a refresh (M2)', () => {
   });
 });
 
+describe('Simple sign-in, "every visit" (ADR 0029)', () => {
+  it("writes the refreshed token cookies with no Max-Age or Expires, so they end when the browser quits", async () => {
+    const { runWithAmplifyServerContext } = runner(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 720 }));
+    const proxy = withAuthProxy({ auth: h.auth, refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession }, { cookies: 'browser' }) });
+    const expired = h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 });
+    const res = await proxy(new NextRequest('https://app.example.org/dashboard', { headers: { cookie: sessionCookie(expired) } }));
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    const cookies = tokenCookies(res.headers.getSetCookie()).filter((c) => !/=;/.test(c));
+    expect(cookies.length).toBeGreaterThan(0);
+    for (const cookie of cookies) {
+      expect(cookie).not.toMatch(/max-age|expires/i);
+      expect(cookie).toMatch(/; Secure(;|$)/);
+      expect(cookie).toMatch(/; SameSite=lax/i);
+    }
+  });
+});
+
 describe('Cognito calls from the proxy (M1)', () => {
   it('refreshes a genuine expired session with exactly one GetTokensFromRefreshToken call', async () => {
     const proxy = proxyWith(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 1440 }));

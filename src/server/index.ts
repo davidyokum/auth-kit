@@ -94,6 +94,7 @@ export {
   type AmplifyCookieRuntimeInput,
   type OriginCheckRequest,
   type OriginCheckOptions,
+  browserSessionSetCookie,
 } from './cookies.js';
 export {
   AuthError,
