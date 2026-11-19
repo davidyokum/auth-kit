@@ -13,7 +13,7 @@ import { fetchAuthSession } from 'aws-amplify/auth/server';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { amplifyAdapterRefresh, withAuthProxy } from '../../src/proxy/index.js';
-import { amplifyCookieRuntimeOptions } from '../../src/server/index.js';
+import { amplifyCookieRuntimeOptions, browserSessionRunner } from '../../src/server/index.js';
 import { tamperToken } from '../../src/testing/index.js';
 import { CLIENT_ID, POOL_ID, harness } from '../helpers.js';
 
@@ -106,6 +106,65 @@ describe('cookies the server writes during a refresh (M2)', () => {
     const cookies = tokenCookies(res.headers.getSetCookie());
     expect(cookies.length).toBeGreaterThan(0);
     for (const cookie of cookies) expect(cookie).not.toMatch(/Secure/);
+  });
+});
+
+describe('Simple sign-in, "every visit" (ADR 0029)', () => {
+  it("writes the refreshed token cookies with no Max-Age or Expires, so they end when the browser quits", async () => {
+    const { runWithAmplifyServerContext } = runner(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 720 }));
+    const proxy = withAuthProxy({ auth: h.auth, refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession }, { cookies: 'browser' }) });
+    const expired = h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 });
+    const res = await proxy(new NextRequest('https://app.example.org/dashboard', { headers: { cookie: sessionCookie(expired) } }));
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    const cookies = tokenCookies(res.headers.getSetCookie()).filter((c) => !/=;/.test(c));
+    expect(cookies.length).toBeGreaterThan(0);
+    for (const cookie of cookies) {
+      expect(cookie).not.toMatch(/max-age|expires/i);
+      expect(cookie).toMatch(/; Secure(;|$)/);
+      expect(cookie).toMatch(/; SameSite=lax/i);
+    }
+  });
+
+  it('browserSessionRunner does the same for every server write, through the proxy without its own option', async () => {
+    const { runWithAmplifyServerContext } = runner(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 720 }));
+    const proxy = withAuthProxy({ auth: h.auth, refresh: amplifyAdapterRefresh({ runWithAmplifyServerContext: browserSessionRunner(runWithAmplifyServerContext), fetchAuthSession }) });
+    const expired = h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 });
+    const res = await proxy(new NextRequest('https://app.example.org/dashboard', { headers: { cookie: sessionCookie(expired) } }));
+    expect(res.headers.get('x-middleware-next')).toBe('1');
+    const all = tokenCookies(res.headers.getSetCookie());
+    const written = all.filter((c) => !/=;/.test(c));
+    expect(written.length).toBeGreaterThan(0);
+    for (const cookie of written) {
+      expect(cookie).not.toMatch(/max-age|expires/i);
+      expect(cookie).toMatch(/; Secure(;|$)/);
+    }
+  });
+
+  it('browserSessionRunner on a server action’s cookies(): sets lose their lifetime, deletions keep theirs', async () => {
+    const { runWithAmplifyServerContext } = runner(amplifyCookieRuntimeOptions({ refreshTokenMinutes: 720 }));
+    const expired = h.issuer.mintAccessToken({ sub: 'u1', expiresIn: -60 });
+    const jar = new Map(sessionCookie(expired).split('; ').map((pair) => [pair.slice(0, pair.indexOf('=')), pair.slice(pair.indexOf('=') + 1)] as const));
+    const sets: { name: string; value: string; options: Record<string, unknown> | undefined }[] = [];
+    const deletes: unknown[] = [];
+    const store = {
+      get: (name: string) => (jar.has(name) ? { name, value: jar.get(name)! } : undefined),
+      getAll: () => [...jar].map(([name, value]) => ({ name, value })),
+      has: (name: string) => jar.has(name),
+      set: (name: string, value: string, options?: Record<string, unknown>) => void sets.push({ name, value, options }),
+      delete: (arg: unknown) => void deletes.push(arg),
+    };
+    const token = await browserSessionRunner(runWithAmplifyServerContext)({
+      nextServerContext: { cookies: () => Promise.resolve(store) as never },
+      operation: async (spec) => (await fetchAuthSession(spec)).tokens?.accessToken?.toString(),
+    });
+    expect(typeof token).toBe('string');
+    expect(sets.length).toBeGreaterThan(0);
+    for (const set of sets) {
+      expect(set.options).not.toHaveProperty('maxAge');
+      expect(set.options).not.toHaveProperty('expires');
+      expect(set.options).toMatchObject({ sameSite: 'lax', secure: true });
+    }
+    expect(deletes.length).toBeGreaterThan(0);
   });
 });
 

@@ -14,6 +14,7 @@
  *   managed by the NC Office of State Budget and Management. Help: {help address}."; personal sites:
  *   the help line alone). David, 2026-10-18: emails match the card (ADR 0024).
  */
+import type { SignInMode } from './sign-in-mode.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 
 export interface RenderedEmail {
@@ -323,6 +324,11 @@ export function confirmNewEmailEmail(site: EmailSite, input: { code: string }): 
 
 export interface InviteEmailContent {
   email: string;
+  /**
+   * How people sign in to the site (ADR 0029). Default `full`: the last step says to set up a passkey.
+   * `simple`: the emailed code is all there is, and the step says so.
+   */
+  signInMode?: SignInMode;
   name?: string;
   expiresAt: Date;
   /** Who sent it, as the email names them (their name, else their address). */
@@ -388,7 +394,11 @@ export function inviteEmail(site: EmailSite, input: InviteEmailContent): Rendere
         items: [
           ['Go to ', link(url)],
           ['Check that it shows ', strong(input.email), ', then choose ', strong('Email me a code'), '.'],
-          ['Enter the 8-digit code we email you, then set up a passkey so signing in next time takes a second.'],
+          [
+            input.signInMode === 'simple'
+              ? 'Enter the 8-digit code we email you. That’s all: there’s no password or app to set up.'
+              : 'Enter the 8-digit code we email you, then set up a passkey so signing in next time takes a second.',
+          ],
         ],
       },
       p(`This invitation expires on ${clockDateTime(input.expiresAt, site)}.`),

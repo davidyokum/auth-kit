@@ -39,6 +39,7 @@
  * the build manifest, so they need rows of their own; and it checks responses, so a route that
  * answers correctly for these personas but leaks to some other one is beyond it.
  */
+import { type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import {
   MATRIX_HANDLER_PASS_VALUE,
   MATRIX_REQUEST_HEADER,
@@ -147,6 +148,13 @@ export interface AuthMatrixOptions {
    * only when the server turns the rule off.
    */
   requireFirstCredential?: boolean;
+  /**
+   * The site's sign-in mode (ADR 0029), the same `signIn` the server gets. On a Simple site every
+   * account has only emailed codes, so `codeOnlyMember` is required, runs against every route, and
+   * by default expects what `member` gets (`otherMember` on item routes: it has no item access); a
+   * row may not give it more.
+   */
+  signIn?: SignInSettings;
 }
 
 /** What an emailed-code-only account gets on a route by default: an anonymous visitor's success or redirect, else 403. */
@@ -202,13 +210,15 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
   const baseUrl = options.baseUrl ?? 'http://localhost';
   const needsSecond = options.routes.some(isRecordRoute);
   const newMember = options.signUpSite === true || options.personas[NEW_MEMBER] !== undefined;
-  const firstCredentialEnforced = options.requireFirstCredential !== false;
-  const codeOnly = options.signUpSite === true || firstCredentialEnforced || options.personas[CODE_ONLY_MEMBER] !== undefined;
+  const simpleSite = normalizeSignIn(options.signIn, 2, 'signIn').mode === 'simple';
+  if (simpleSite && options.requireFirstCredential === true) problems.push("requireFirstCredential: true can't be used with Simple sign-in: the server turns the rule off there.");
+  const firstCredentialEnforced = options.requireFirstCredential !== false && !simpleSite;
+  const codeOnly = options.signUpSite === true || firstCredentialEnforced || simpleSite || options.personas[CODE_ONLY_MEMBER] !== undefined;
   const required = [
     ...REQUIRED_PERSONAS,
     ...(needsSecond ? [SECOND_MEMBER] : []),
     ...(options.signUpSite === true ? [NEW_MEMBER] : []),
-    ...(options.signUpSite === true || firstCredentialEnforced ? [CODE_ONLY_MEMBER] : []),
+    ...(options.signUpSite === true || firstCredentialEnforced || simpleSite ? [CODE_ONLY_MEMBER] : []),
   ];
   for (const p of required) {
     if (!options.personas[p]) {
@@ -273,7 +283,9 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
     // An account with only emailed codes is refused wherever a signed-in person is needed (M2).
     if (codeOnly) {
       if (route.expect[CODE_ONLY_MEMBER] === undefined) {
-        const fallback = route.exists === false ? 404 : codeOnlyDefault(route.expect);
+        // On a Simple site an emailed-code-only account is an ordinary member with no item access of its
+        // own: a second member's answer on item routes, a member's elsewhere.
+        const fallback = route.exists === false ? 404 : simpleSite ? (route.expect[SECOND_MEMBER] ?? route.expect.member) : codeOnlyDefault(route.expect);
         if (fallback !== undefined) expect = { ...expect, [CODE_ONLY_MEMBER]: fallback };
       } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s >= 200 && s < 300) && !asList(route.expect.member).some((s) => s < 400)) {
         // A redirect (to the chooser) isn't getting in; a 2xx where a member gets nothing is.

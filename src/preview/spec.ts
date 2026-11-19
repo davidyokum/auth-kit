@@ -2,6 +2,7 @@
  * What a preview draws (ADR 0025): a declarative spec, checked and filled in with sample data. Pure:
  * no React, no DOM.
  */
+import { type NormalizedSignIn, type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { ACCOUNT_CREATION_MODES, type AccountCreationMode, type AccountCreationSettings, normalizeAccountCreation, type NormalizedAccountCreation } from '../shared/account-creation.js';
 import { BACKDROP_FAMILIES } from '../backdrops/families.js';
 import { type AuthTheme, CARD_STYLES, type CardEdge, type CardStyle, THEME_FAMILIES, type ThemeFamily, authTheme } from '../themes/index.js';
@@ -62,8 +63,13 @@ export interface PreviewSpec {
   device?: PreviewDevice;
   /** The email field's example address. Default: the family's. */
   emailHint?: string;
-  /** Passkeys on (the site's final domain is live). Default true. */
+  /** Passkeys on (the site's final domain is live). Default true. Ignored on a Simple site. */
   passkeysEnabled?: boolean;
+  /**
+   * How people sign in (ADR 0029): `{ mode: 'simple', stay }` draws the code-only card. Default Full.
+   * A Simple site has only the code screens (`PREVIEW_SIMPLE_SCREENS`); naming another throws.
+   */
+  signIn?: SignInSettings;
   /** "Email me a code instead" offered. Default true. */
   emailCodeEnabled?: boolean;
   /** "Help" (the help screen) inside the card (default) or below it. */
@@ -108,6 +114,8 @@ export interface ResolvedPreviewSpec {
   device: PreviewDevice;
   emailHint: string;
   passkeysEnabled: boolean;
+  /** Full, or Simple with its stay. */
+  signIn: NormalizedSignIn;
   emailCodeEnabled: boolean;
   troubleLink: 'inside' | 'below';
   qrCode: boolean;
@@ -207,6 +215,18 @@ export function resolvePreviewBase(spec: PreviewSpec): ResolvedPreviewSpec {
   if (!EMAIL.test(helpAddress)) throw new PreviewSpecError(`help.address "${helpAddress}" isn't an email address.`);
   const owner = spec.help?.owner === undefined ? (t.help.named ? PREVIEW_DEFAULTS.owner : undefined) : text('help.owner', spec.help.owner, '');
 
+  let signIn: NormalizedSignIn;
+  try {
+    signIn = normalizeSignIn(spec.signIn, 2, 'signIn');
+  } catch (error) {
+    throw new PreviewSpecError((error as Error).message.replace(/^auth-kit: /, ''));
+  }
+  const simple = signIn.mode === 'simple';
+  if (simple && spec.emailCodeEnabled === false) throw new PreviewSpecError('a Simple site always has emailed codes: leave emailCodeEnabled out.');
+  if (simple && (accountCreation.mode === 'domains' || accountCreation.mode === 'open')) {
+    throw new PreviewSpecError(`a Simple site is invite only: accountCreation '${accountCreation.mode}' can't be drawn with it.`);
+  }
+
   const palette = BACKDROP_FAMILIES[family].palette;
   return {
     screen: typeof spec.screen === 'string' && spec.screen !== '' ? spec.screen : 'email',
@@ -226,7 +246,8 @@ export function resolvePreviewBase(spec: PreviewSpec): ResolvedPreviewSpec {
     badEmail,
     device,
     emailHint: t.emailHint,
-    passkeysEnabled: bool('passkeysEnabled', spec.passkeysEnabled, true),
+    passkeysEnabled: bool('passkeysEnabled', spec.passkeysEnabled, true) && !simple,
+    signIn,
     emailCodeEnabled: bool('emailCodeEnabled', spec.emailCodeEnabled, true),
     troubleLink,
     qrCode: bool('qrCode', spec.qrCode, true),

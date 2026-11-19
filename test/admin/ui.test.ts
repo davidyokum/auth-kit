@@ -11,6 +11,7 @@ import {
   allowedPeopleActions,
   CompareRoles,
   InviteForm,
+  InviteManyForm,
   PeopleTable,
   RoleChangeDialog,
   RoleMatrixTable,
@@ -256,6 +257,32 @@ describe('InviteForm', () => {
     const html = renderToStaticMarkup(h(InviteForm, { action: noop, viewer: admin, inviteMode: 'temporary-password' }));
     expect(html).toContain('one-time password');
     expect(html).not.toContain('SUPPRESS');
+  });
+});
+
+describe('InviteManyForm ("Add several at once", ADR 0029)', () => {
+  it('is a closed disclosure under the invite form, with a textarea, Member or app roles only, and the domain check', () => {
+    const html = renderToStaticMarkup(h(InviteForm, { action: noop, viewer: admin, appRoles: ['reviewer'], inviteDomains: ['example.org'], inviteMany: noop }));
+    expect(html).toContain('<details class="ak-invite-many"><summary>Add several at once</summary>');
+    expect(html).toContain('<textarea name="emails" required=""');
+    expect(html).toContain('Paste up to 50, one per line or separated by commas.');
+    // Nothing is outside yet: the confirmation appears only once it can name the addresses.
+    expect(html).not.toContain('confirmedOutside');
+    const many = html.slice(html.indexOf('ak-invite-many'));
+    expect(radios(many).map((r) => r.value)).toEqual(['member', 'reviewer']);
+    expect(radios(many).find((r) => r.checked)?.value).toBe('member');
+  });
+
+  it('with no app roles: everyone joins as Member, said plainly', () => {
+    const html = renderToStaticMarkup(h(InviteManyForm, { action: noop }));
+    expect(radios(html)).toEqual([]);
+    expect(html).toContain('<input type="hidden" name="role" value="member"/>');
+    expect(html).toContain('Everyone in the list joins as Member. Give admin roles one person at a time.');
+    expect(html).toContain('disabled="">Send invites</button>');
+  });
+
+  it('the invite form alone stays as it was', () => {
+    expect(renderToStaticMarkup(h(InviteForm, { action: noop, viewer: admin }))).not.toContain('Add several at once');
   });
 });
 

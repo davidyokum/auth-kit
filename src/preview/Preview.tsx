@@ -62,6 +62,7 @@ export function PreviewCard(props: { r: ResolvedPreviewSpec; placement: ReturnTy
           {...common}
           help={r.help}
           passkeysEnabled={r.passkeysEnabled}
+          signIn={r.signIn.mode === 'simple' ? { mode: 'simple', ...(r.signIn.stay !== null && { stay: r.signIn.stay }) } : { mode: 'full' }}
           emailCodeEnabled={r.emailCodeEnabled}
           accountCreation={settingOf(r.accountCreation)}
           inviteLine={r.inviteLine}

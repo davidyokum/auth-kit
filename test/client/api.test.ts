@@ -234,6 +234,13 @@ describe('configureAuthClient', () => {
     expect(storage.options).toEqual({ path: '/', sameSite: 'lax', secure: true, expires: 30 });
   });
 
+  it("Simple sign-in's every visit: cookies that end when the browser quits (an explicit undefined expires)", () => {
+    configureAuthClient({}, { refreshTokenMinutes: 720, cookies: 'browser' });
+    const options = (cognitoUserPoolsTokenProvider.setKeyValueStorage.mock.calls[0]![0] as { options: { expires?: number } }).options;
+    expect(Object.hasOwn(options, 'expires')).toBe(true);
+    expect(options.expires).toBeUndefined();
+  });
+
   it('passes a cookie domain and refuses a missing lifetime', () => {
     configureAuthClient({}, { refreshTokenMinutes: 24 * 60, cookieDomain: 'example.org' });
     expect(cognitoUserPoolsTokenProvider.setKeyValueStorage.mock.calls[0]![0].options).toMatchObject({ expires: 1, domain: 'example.org' });

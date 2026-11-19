@@ -14,6 +14,7 @@ import {
   WAF_POLICY,
   codeLifetimeMinutes,
 } from '../shared/policy.js';
+import { type NormalizedSignIn, type SignInSettings, SignInConfigError, normalizeSignIn, stayRefreshTokenMinutes } from '../shared/sign-in-mode.js';
 import { type HelpAddressSetting, type ThemeFamily, decodeSenderName, helpSettingProblems, isThemeFamily, readHelpSetting, senderAddressProblems, senderNameProblems } from '../themes/index.js';
 
 /** Thrown at synth time when the preset's options can't produce a pool that meets the standard. */
@@ -180,8 +181,17 @@ export interface AuthStandardOptions {
    * (tested 2026-10-12), so a pool without a rate limit lets anyone keep guessing them.
    */
   acknowledgeNoRateLimit?: boolean;
-  /** Refresh-token lifetime in minutes. Default and ceiling: 43200 (30 days) on Tier 2, 1440 (1 day) on Tier 3. */
+  /** Refresh-token lifetime in minutes. Default and ceiling: 43200 (30 days) on Tier 2, 1440 (1 day) on Tier 3. Simple sign-in sets it from `signIn.stay` instead. */
   refreshTokenMinutes?: number;
+  /**
+   * How people sign in (ADR 0029). Default `{ mode: 'full' }`: passkey, password plus authenticator,
+   * or emailed code. `{ mode: 'simple', stay }` ("Simple: code only"): the emailed code is the only way
+   * in (PASSWORD stays listed because Cognito requires it; recovery is admin-only and MFA is OFF, so
+   * nobody can set one or enrol an authenticator), and `stay` (`'browser'` or 1 to 30 days; 1 on Tier 3; default 30) sets the
+   * refresh token. `passkeys` may still be given (the site's final address, kept for a later move to
+   * Full) and is not applied to the pool until then. Not for admin pools.
+   */
+  signIn?: SignInSettings;
   /**
    * Cognito threat protection (Plus plan): sign-in event logs and compromised-credential checks.
    * Default `audit` on Tier 3 (the standard requires sign-in event logs there), `off` on Tier 2.
@@ -231,6 +241,7 @@ export interface NormalizedAuthStandardOptions {
   appRoles: string[];
   waf: NormalizedWafOptions;
   refreshTokenMinutes: number;
+  signIn: NormalizedSignIn;
   threatProtection: 'off' | 'audit' | 'enforced';
   guestAccess: boolean;
   environment: string | undefined;
@@ -446,10 +457,25 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   if (new Set(appRoles).size !== appRoles.length) fail('appRoles contains duplicates.');
   const groups = [...STANDARD_GROUPS, ...appRoles];
 
+  // How people sign in (ADR 0029).
+  if (o.adminPool === true && (o.signIn as { mode?: unknown } | undefined)?.mode === 'simple') {
+    fail("An admin pool can't use Simple sign-in: it takes no emailed codes (MFA is required there).");
+  }
+  let signIn: NormalizedSignIn;
+  try {
+    signIn = normalizeSignIn(o.signIn, tier);
+  } catch (error) {
+    if (error instanceof SignInConfigError) fail(error.message.replace(/^auth-kit: /, ''));
+    throw error;
+  }
+  if (signIn.mode === 'simple') {
+    if (o.refreshTokenMinutes !== undefined) fail('Simple sign-in sets the refresh token from signIn.stay: leave refreshTokenMinutes out.');
+  }
+
   // Sessions. Admin areas are held to Tier 3's short sessions even on a Tier 2 site.
   const sessionTier: AuthTier = o.adminPool === true ? 3 : tier;
   const ceiling = SESSION_POLICY.refreshTokenMinutesMax[sessionTier];
-  const refreshTokenMinutes = o.refreshTokenMinutes ?? ceiling;
+  const refreshTokenMinutes = signIn.stay !== null ? stayRefreshTokenMinutes(signIn.stay) : (o.refreshTokenMinutes ?? ceiling);
   if (!Number.isInteger(refreshTokenMinutes) || refreshTokenMinutes < SESSION_POLICY.refreshTokenMinutesMin) {
     fail(`refreshTokenMinutes must be a whole number of at least ${SESSION_POLICY.refreshTokenMinutesMin}.`);
   }
@@ -479,6 +505,12 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
   } catch (error) {
     if (error instanceof AccountCreationConfigError) throw new AuthStandardConfigError(error.message.replace(/^auth-kit: /, ''));
     throw error;
+  }
+  if (signIn.mode === 'simple' && allowsSelfSignUp(accountCreation)) {
+    fail(
+      `Simple sign-in is for invited people (the People page's list): accountCreation.mode '${accountCreation.mode}' makes accounts on the sign-up page, which asks for a passkey or a password. ` +
+        "Use 'invite' or 'request', or Full sign-in.",
+    );
   }
   if (o.adminPool && accountCreation.mode !== 'invite') {
     fail(`An admin pool is invite only: accountCreation.mode '${accountCreation.mode}' would let people make their own admin-pool accounts.`);
@@ -524,6 +556,7 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     appRoles,
     waf,
     refreshTokenMinutes,
+    signIn,
     threatProtection,
     guestAccess: o.guestAccess === true,
     environment,

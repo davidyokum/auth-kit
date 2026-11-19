@@ -43,6 +43,7 @@ export {
 } from './guardrails.js';
 export {
   PEOPLE_ACTION_COPY,
+  PEOPLE_INVITE_COPY_SIMPLE,
   SUPERADMIN_GRANT_NOTE,
   TRANSFER_OWNERSHIP_NOTE,
   OWNER_ROLE_NOTE,
@@ -173,6 +174,7 @@ export {
   type BackoffOptions,
   type Sleep,
 } from './quota.js';
+export { parseInviteList, INVITE_MANY_MAX_CHARS, type InviteListParse } from './invite-list.js';
 export { ADMIN_POLICY, COGNITO_RATE_QUOTAS, DEFAULT_QUOTA_BUDGET, type CognitoQuotaCategory } from './policy.js';
 export {
   STANDARD_GROUPS,
@@ -195,6 +197,8 @@ export {
 export {
   PEOPLE_FORM_FIELDS,
   DECLINE_REQUESTS_MAX,
+  INVITE_MANY_MAX,
+  INVITE_MANY_TIME_BUDGET_MS,
   PENDING_REQUESTS_SHOWN,
   type PersonRow,
   type PeopleList,
@@ -204,6 +208,9 @@ export {
   type DeclineRequestInput,
   type DeclineRequestsInput,
   type DeclineRequestsResult,
+  type InviteManyInput,
+  type InviteManyResult,
+  type InviteManySkip,
   type DeclineRequestsSkip,
   type DeclineRequestsSkipStatus,
   type ActionResult,

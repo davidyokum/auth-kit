@@ -20,6 +20,7 @@ import {
   poolConfigFromAmplifyOutputs,
   secureCookieOptions,
   serializeCookie,
+  browserSessionSetCookie,
   signInUrl,
   toRequestContext,
   withAuthErrors,
@@ -62,6 +63,18 @@ describe('cookie helpers', () => {
   it('refuses a nonsensical refresh-token lifetime', () => {
     for (const minutes of [0, -1, Number.NaN, Infinity]) {
       expect(() => amplifyCookieRuntimeOptions({ refreshTokenMinutes: minutes })).toThrow(/positive refreshTokenMinutes/);
+    }
+  });
+
+  it('turns a lasting token cookie into a browser-session cookie for "every visit" (ADR 0029)', () => {
+    const lasting = 'CognitoIdentityServiceProvider.abc.idToken=eyJ; Path=/; Max-Age=31536000; Expires=Wed, 19 Nov 2027 00:00:00 GMT; HttpOnly; Secure; SameSite=Lax';
+    expect(browserSessionSetCookie(lasting)).toBe('CognitoIdentityServiceProvider.abc.idToken=eyJ; Path=/; HttpOnly; Secure; SameSite=Lax');
+    expect(browserSessionSetCookie('a=b; max-age=60; secure')).toBe('a=b; secure');
+  });
+
+  it('leaves cookie deletions alone so sign-out still clears them', () => {
+    for (const header of ['a=; Max-Age=0; Path=/; Secure', 'a=b; Max-Age=-1; Path=/', 'a=b; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/']) {
+      expect(browserSessionSetCookie(header)).toBe(header);
     }
   });
 

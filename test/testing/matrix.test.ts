@@ -367,6 +367,23 @@ describe('authMatrixCases: completeness rules', () => {
     expect(cases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[403], [403]]);
   });
 
+  it('on a Simple site (ADR 0029) the emailed-code-only persona is an ordinary member: required, and expected to get what member gets', () => {
+    const route = { path: '/api/x', expect: { anonymous: 401, member: 200, admin: 200 } };
+    const without = { anonymous: {}, member: {}, admin: {} };
+    const simple = { signIn: { mode: 'simple', stay: 30 } } as const;
+    expect(() => authMatrixCases({ personas: without, appRoutes: ['/api/x'], routes: [route], ...simple })).toThrow(/persona "codeOnlyMember" is required/);
+    const cases = authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [route], ...simple });
+    expect(cases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[200], [200]]);
+    // On an item route it's a member with no access to the item: the second member's answer.
+    const item = { path: '/api/x/:id', expect: { anonymous: 401, member: 200, admin: 200, otherMember: 404 } };
+    const itemCases = authMatrixCases({ personas: { ...without, otherMember: {}, codeOnlyMember: {} }, appRoutes: ['/api/x/[id]'], params: { id: '1' }, routes: [item], ...simple });
+    expect(itemCases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[404], [404]]);
+    // It may still get no more than a member.
+    const more = { path: '/api/x', expect: { anonymous: 401, member: 403, admin: 200, codeOnlyMember: 200 } };
+    expect(() => authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [more], ...simple })).toThrow(/succeed where "member" can't/);
+    expect(() => authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [route], ...simple, requireFirstCredential: true })).toThrow(/can't be used with Simple sign-in/);
+  });
+
   it('flags missing params and unknown personas', () => {
     expect(() =>
       authMatrixCases({ personas, appRoutes, routes: [{ path: '/api/x/:id', expect: { anonymous: 401, member: 200, admin: 200, otherMember: 404 } }] }),
@@ -463,6 +480,12 @@ describe('routesFromNextBuild', () => {
     expect(() => routesFromNextBuild(elsewhere)).toThrow(/no page at \/account\/sign-in-method/);
     expect(routesFromNextBuild(elsewhere, { firstCredentialPath: '/welcome/choose' }).map((r) => r.path)).toContain('/welcome/choose');
     expect(routesFromNextBuild(without, { firstCredentialPath: false })).toHaveLength(2);
+  });
+
+  it('a Simple site has no chooser page and needs none (ADR 0029)', () => {
+    const without = fakeBuild({ '/page': '/', '/records/page': '/records' }, null);
+    expect(routesFromNextBuild(without, { signIn: { mode: 'simple', stay: 30 } })).toHaveLength(2);
+    expect(() => routesFromNextBuild(without, { signIn: { mode: 'full' } })).toThrow(/no page at \/account\/sign-in-method/);
   });
 });
 

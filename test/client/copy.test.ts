@@ -74,6 +74,7 @@ const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'ERRORS.network': (c) => [[c], [undefined]],
   'CONTACT.looksAfter': (c) => [[c]],
   'MY_ACCOUNT.couldntLoad': () => [['Too many attempts. Wait a minute, then try again.']],
+  'MY_ACCOUNT.staySignedIn': () => [['for 30 days'], ['until you quit your browser']],
   'MY_ACCOUNT.removeLabel': () => [['iPhone passkey']],
   'MY_ACCOUNT.removeQuestion': () => [['iPhone passkey']],
   'MY_ACCOUNT.removeConfirm': () => [['iPhone passkey']],
@@ -122,16 +123,16 @@ function copyTexts(): Text[] {
   const topics = copy.TROUBLE.rows.map(([topic]) => topic);
   for (const c of CONTEXTS) {
     for (const topic of topics) {
-      for (const securityNotices of [false, true]) {
-        const screen = copy.helpScreen(topic, c, { securityNotices });
-        const where = `helpScreen(${topic}, ${c.theme.family}${c.ownerName ? '' : ', no owner'})`;
+      for (const [securityNotices, simple] of [[false, false], [true, false], [false, true]] as const) {
+        const screen = copy.helpScreen(topic, c, { securityNotices, simple });
+        const where = `helpScreen(${topic}, ${c.theme.family}${c.ownerName ? '' : ', no owner'}${simple ? ', simple' : ''})`;
         for (const text of [screen.heading, screen.intro, screen.after, screen.button?.label, ...(screen.steps ?? []).map(copy.plain)]) {
           if (text !== undefined) out.push({ where, text });
         }
       }
     }
     for (const teams of [false, true]) {
-      const contact = copy.contactLines(c, { teams });
+      const contact = copy.contactLines(c, { teams, simple: teams });
       out.push(...[contact.lead, ...contact.lines].map((text) => ({ where: `contactLines(${c.theme.family})`, text })));
     }
     // The access lines as the card composes them (SignIn's accessLine).
@@ -393,6 +394,20 @@ describe('every user-facing string is rendered', () => {
 
   it('every message is a sentence that ends with a full stop', () => {
     for (const { where, text } of messageTexts()) expect(text, where).toMatch(/^[A-Z].*\.$/);
+  });
+});
+
+describe('Simple sign-in’s words (ADR 0029)', () => {
+  it('no Simple help screen or contact box names a passkey, a password, or an authenticator app', () => {
+    for (const c of CONTEXTS) {
+      for (const [topic] of copy.SIMPLE_SIGN_IN.troubleRows) {
+        const screen = copy.helpScreen(topic, c, { simple: true });
+        const words = [screen.heading, screen.intro, screen.after, screen.button?.label, ...(screen.steps ?? []).map(copy.plain), ...copy.contactLines(c, { teams: true, simple: true }).lines].join(' ');
+        expect(words, `${topic}, ${c.theme.family}`).not.toMatch(/passkey|password|authenticator/i);
+      }
+      expect(copy.SIMPLE_SIGN_IN.codeHelp).toBe('No email after a minute? Check your spam or junk folder, then send a new code.');
+    }
+    expect([...copy.SIMPLE_HELP_TOPICS]).toEqual(['code', 'email', 'else']);
   });
 });
 

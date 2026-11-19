@@ -2,6 +2,7 @@ import { MATRIX_ENV_FLAG, MATRIX_SERVER_MODE, matrixServerEnvironment } from '..
 import { type ResourceNeed, type ResourceTypes, decideResourceAccess, isResourceId, isResourceTypes, neededActions } from '../resources/policy.js';
 import type { ResourceAccessStore, ResourceMembership } from '../resources/types.js';
 import { type ResourceRole, SESSION_POLICY } from '../shared/policy.js';
+import { type NormalizedSignIn, SignInConfigError, type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { TtlCache } from './cache.js';
 import type { Capabilities } from './capabilities.js';
 import { type CognitoGateway, type LiveUserState, createCognitoGateway, needsFirstCredential, needsTotpEnrollment } from './cognito.js';
@@ -40,6 +41,13 @@ export interface ServerAuthOptions<G extends string = string, C extends string =
    * "Choose how you'll sign in next time" passes `allowFirstCredentialEnrollment: true`.
    */
   requireFirstCredential?: boolean;
+  /**
+   * How people sign in to the site (ADR 0029): the same `signIn` setting the preset and `SignIn` get
+   * (the template's `site.config.ts`). Default Full. On a Simple site (`{ mode: 'simple' }`) an emailed
+   * code is the only way in, so there's no first credential to require: `requireFirstCredential`
+   * defaults to `false` there, and `true` is refused (it would lock everyone out).
+   */
+  signIn?: SignInSettings;
   /** Set by `matrixOverrides().serverAuth` (`auth-kit/testing/matrix-server`) only. */
   matrixServerMode?: typeof MATRIX_SERVER_MODE;
   /** How the TOTP check reads factors: the person's own token (default) or the server's IAM role. */
@@ -252,6 +260,8 @@ const OPTION_KEYS = new Set<string>([
   'tokenSource',
   'requireTotpForPasswordUsers',
   'requireFirstCredential',
+  'signIn',
+  'poolSignInMode',
   'matrixServerMode',
   'factorLookup',
   'factorCheckTtlSeconds',
@@ -295,7 +305,32 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
   else if (options.matrixServerMode !== undefined && !matrixMode) {
     problems.push(`matrixServerMode is accepted only while the auth matrix runs (NODE_ENV isn't production and ${MATRIX_ENV_FLAG}=1)`);
   }
+  let signIn: NormalizedSignIn | null = null;
+  try {
+    // Any stay that's valid on Tier 3 is valid on Tier 2; the preset checks the site's own tier.
+    signIn = normalizeSignIn(options.signIn, 2, 'signIn');
+  } catch (error) {
+    if (!(error instanceof SignInConfigError)) throw error;
+    problems.push(error.message.replace(/^auth-kit: /, ''));
+  }
+  const simple = signIn?.mode === 'simple';
+  // The pool and the server must agree on the mode (ADR 0029): a server told Simple on a Full pool would
+  // let every code-only account skip the first-credential step (register A1); a server told Full on a
+  // Simple pool would send everyone to a setup page the site doesn't have.
+  const poolMode: unknown = options.poolSignInMode;
+  if (poolMode !== undefined && poolMode !== 'full' && poolMode !== 'simple') problems.push("poolSignInMode must be 'full' or 'simple'");
+  else if (poolMode !== undefined && signIn !== null && poolMode !== signIn.mode) {
+    const name = (m: string) => (m === 'simple' ? 'Simple' : 'Full');
+    problems.push(
+      `signIn is ${name(signIn.mode)} but the deployed pool is ${name(poolMode)} (amplify_outputs.json). Pass the same signIn (the template's site.signIn) to authOptions and createServerAuth, and deploy the backend before the app`,
+    );
+  }
+  if (simple && options.requireFirstCredential === true) {
+    problems.push("requireFirstCredential: true can't be used with Simple sign-in (signIn.mode 'simple'): an emailed code is the only way in, so nobody could ever meet it");
+  }
   for (const key of ['requireFirstCredential', 'requireTotpForPasswordUsers'] as const) {
+    // Simple sign-in turns the first-credential rule off by design, not as a matrix override.
+    if (key === 'requireFirstCredential' && simple) continue;
     if (options[key] === false && !matrixMode) {
       problems.push(`${key}: false breaks the standard (register ${key === 'requireFirstCredential' ? 'A1' : 'A2'}) and is accepted only in the auth matrix's server mode (matrixOverrides().serverAuth)`);
     }
@@ -341,7 +376,8 @@ export function createServerAuth<G extends string, C extends string>(
     });
   const tokenSource = options.tokenSource ?? defaultTokenSource(pool.clientId);
   const requireTotp = options.requireTotpForPasswordUsers ?? true;
-  const requireFirst = options.requireFirstCredential ?? true;
+  const simpleSignIn = normalizeSignIn(options.signIn, 2).mode === 'simple';
+  const requireFirst = options.requireFirstCredential ?? !simpleSignIn;
   const factorTtlMs = (options.factorCheckTtlSeconds ?? 300) * 1000;
   const liveTtlMs = (options.liveCheckTtlSeconds ?? SESSION_POLICY.liveCheckTtlSeconds) * 1000;
   const stepUpMax = options.stepUpMaxAgeSeconds ?? SESSION_POLICY.stepUpMaxAgeSeconds;

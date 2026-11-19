@@ -64,7 +64,7 @@ export {
   type UserAuthFactors,
   type LiveUserState,
 } from './cognito.js';
-export { resolvePoolConfig, poolConfigFromAmplifyOutputs, type PoolConfig, type ResolvedPoolConfig, type AmplifyOutputsAuth } from './config.js';
+export { resolvePoolConfig, poolConfigFromAmplifyOutputs, poolSignInModeFromAmplifyOutputs, type PoolConfig, type ResolvedPoolConfig, type AmplifyOutputsAuth } from './config.js';
 export {
   amplifyCookieTokens,
   amplifyCookieNames,
@@ -94,6 +94,8 @@ export {
   type AmplifyCookieRuntimeInput,
   type OriginCheckRequest,
   type OriginCheckOptions,
+  browserSessionSetCookie,
+  browserSessionRunner,
 } from './cookies.js';
 export {
   AuthError,
@@ -156,3 +158,4 @@ export {
   type RoleMatrixRow,
   type AuthTier,
 } from '../shared/policy.js';
+export { SIGN_IN_MODE_LABEL, SignInConfigError, normalizeSignIn, signInSession, stayRefreshTokenMinutes, type SignInMode, type SignInSettings, type SimpleStay } from '../shared/sign-in-mode.js';

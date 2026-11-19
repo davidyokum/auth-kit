@@ -886,3 +886,87 @@ describe('standardAuthProps', () => {
     expect(props.userAttributes).toEqual({ givenName: { required: false, mutable: true } });
   });
 });
+
+describe('Simple sign-in: code only (ADR 0029)', () => {
+  const SIMPLE: AuthStandardOptions = { ...BASE, signIn: { mode: 'simple', stay: 30 } };
+
+  it('makes the emailed code the only first factor, registers no passkeys, and keeps the address for later', () => {
+    const { template, applied } = synth(SIMPLE);
+    const t = template();
+    t.hasResourceProperties('AWS::Cognito::UserPool', {
+      // Cognito requires PASSWORD in the list; nobody on a Simple pool can have one (see below).
+      Policies: Match.objectLike({ SignInPolicy: { AllowedFirstAuthFactors: ['PASSWORD', 'EMAIL_OTP'] } }),
+      WebAuthnRelyingPartyID: Match.absent(),
+      WebAuthnFactorConfiguration: Match.absent(),
+      // No "forgot password" to create a password, and no authenticator to stop emailed codes.
+      AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'admin_only', Priority: 1 }] },
+      MfaConfiguration: 'OFF',
+      EnabledMfas: Match.absent(),
+    });
+    t.hasResourceProperties('AWS::Cognito::UserPoolClient', { RefreshTokenValidity: 43200, PreventUserExistenceErrors: 'ENABLED' });
+    expect(applied.signInMode).toBe('simple');
+    expect(applied.relyingPartyId).toBeNull();
+    expect(standardAuthProps(SIMPLE).loginWith).not.toHaveProperty('webAuthn');
+    expect(normalizeOptions(SIMPLE).passkeys?.relyingPartyId).toBe('reports.example.org');
+  });
+
+  it('sets the refresh token from the stay choice: days, or 12 hours behind a browser-only cookie', () => {
+    expect(normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 7 } }).refreshTokenMinutes).toBe(7 * 1440);
+    expect(normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 1 } }).refreshTokenMinutes).toBe(1440);
+    expect(normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 'browser' } }).refreshTokenMinutes).toBe(720);
+    expect(normalizeOptions({ ...BASE, signIn: { mode: 'simple' } }).signIn).toEqual({ mode: 'simple', stay: 30 });
+    expect(normalizeOptions({ ...BASE, tier: 3, signIn: { mode: 'simple' } }).signIn).toEqual({ mode: 'simple', stay: 1 });
+  });
+
+  it('refuses a stay beyond the tier, a refreshTokenMinutes beside it, an admin pool, and anything else', () => {
+    expect(() => normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 31 } })).toThrow(/1 to 30/);
+    expect(() => normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 0 } })).toThrow(AuthStandardConfigError);
+    expect(() => normalizeOptions({ ...BASE, signIn: { mode: 'simple', stay: 2.5 } })).toThrow(AuthStandardConfigError);
+    expect(() => normalizeOptions({ ...BASE, tier: 3, threatProtection: 'audit', signIn: { mode: 'simple', stay: 2 } })).toThrow(/Tier 3/);
+    expect(() => normalizeOptions({ ...SIMPLE, refreshTokenMinutes: 60 })).toThrow(/leave refreshTokenMinutes out/);
+    expect(() => normalizeOptions({ ...SIMPLE, adminPool: true, tier: 3 })).toThrow(/admin pool/);
+    expect(() => normalizeOptions({ ...BASE, signIn: { mode: 'code' } as never })).toThrow(/'full' or 'simple'/);
+    expect(() => normalizeOptions({ ...BASE, signIn: { mode: 'full', stay: 7 } as never })).toThrow(/Simple sign-in only/);
+  });
+
+  it('leaves a Full pool exactly as before when signIn is { mode: "full" }', () => {
+    const before = synth(BASE).template().toJSON();
+    const after = synth({ ...BASE, signIn: { mode: 'full' } }).template().toJSON();
+    expect(after).toEqual(before);
+  });
+
+  it('moves to Full in place: same resources, and only sign-in, MFA, recovery, passkey, and refresh-token settings change', () => {
+    const resources = (opts: AuthStandardOptions) => synth(opts).template().toJSON().Resources as Record<string, { Type: string; Properties?: Record<string, unknown> }>;
+    const simple = resources({ ...BASE, signIn: { mode: 'simple', stay: 7 } });
+    const full = resources(BASE);
+    // Same logical IDs and types: nothing is created, removed, or swapped for another resource.
+    expect(Object.keys(full).sort()).toEqual(Object.keys(simple).sort());
+    for (const id of Object.keys(full)) expect(full[id]!.Type).toBe(simple[id]!.Type);
+    // Every changed property is one CloudFormation updates with no interruption (AWS::Cognito::UserPool and
+    // AWS::Cognito::UserPoolClient references, checked 2026-11-19).
+    const ALLOWED: Record<string, readonly string[]> = {
+      'AWS::Cognito::UserPool': [
+        'Policies',
+        'WebAuthnRelyingPartyID',
+        'WebAuthnUserVerification',
+        'WebAuthnFactorConfiguration',
+        'MfaConfiguration',
+        'EnabledMfas',
+        'AccountRecoverySetting',
+      ],
+      'AWS::Cognito::UserPoolClient': ['RefreshTokenValidity'],
+    };
+    const changed: string[] = [];
+    for (const [id, res] of Object.entries(full)) {
+      const a = simple[id]!.Properties ?? {};
+      const b = res.Properties ?? {};
+      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        if (JSON.stringify(a[key]) === JSON.stringify(b[key])) continue;
+        changed.push(`${res.Type}.${key}`);
+        expect(ALLOWED[res.Type] ?? [], `${id} ${res.Type}.${key}`).toContain(key);
+      }
+    }
+    expect(changed).toContain('AWS::Cognito::UserPool.Policies');
+    expect(changed).toContain('AWS::Cognito::UserPool.WebAuthnRelyingPartyID');
+  });
+});

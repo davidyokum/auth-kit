@@ -24,6 +24,10 @@ export const PEOPLE_ACTION_COPY = {
   delete: 'Permanent. If they’re invited again they get a new ID.',
 } as const satisfies Record<PeopleAction, string>;
 
+/** The invite's words on a Simple site (ADR 0029): the code is all there is. */
+export const PEOPLE_INVITE_COPY_SIMPLE =
+  'They can sign in now with a code sent to their email. There’s nothing else to set up. The invite expires in 7 days if they don’t use it.';
+
 /** Shown wherever Super admin can be granted (only the owner grants it). */
 export const SUPERADMIN_GRANT_NOTE =
   'Granting Super admin needs a sign-in in the last few minutes, and the owner gets an email about it. If that email can’t be sent, the grant is undone.';
@@ -148,8 +152,15 @@ const DETAILS_TEMPORARY_PASSWORD: Readonly<Record<PeopleAction, PeopleActionDeta
 };
 
 /** Each People action's label, copy, Cognito calls, and timing, for the pool's invite mode. */
-export function peopleActionDetails(mode: InviteMode = 'emailed-code'): Readonly<Record<PeopleAction, PeopleActionDetail>> {
-  return mode === 'temporary-password' ? DETAILS_TEMPORARY_PASSWORD : DETAILS_EMAILED_CODE;
+const DETAILS_SIMPLE: Readonly<Record<PeopleAction, PeopleActionDetail>> = Object.freeze({
+  ...DETAILS_EMAILED_CODE,
+  invite: { ...DETAILS_EMAILED_CODE.invite, says: PEOPLE_INVITE_COPY_SIMPLE },
+});
+
+/** What each People action says and does. `signInMode: 'simple'` (ADR 0029) drops the passkey step from the invite's words. */
+export function peopleActionDetails(mode: InviteMode = 'emailed-code', options: { signInMode?: 'full' | 'simple' } = {}): Readonly<Record<PeopleAction, PeopleActionDetail>> {
+  if (mode === 'temporary-password') return DETAILS_TEMPORARY_PASSWORD;
+  return options.signInMode === 'simple' ? DETAILS_SIMPLE : DETAILS_EMAILED_CODE;
 }
 
 // ---- Lost passkey -------------------------------------------------------------------------------

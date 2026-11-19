@@ -1787,3 +1787,91 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     await heading('How do you want to sign in?');
   });
 });
+
+describe('Simple sign-in: code only (ADR 0029)', () => {
+  const SIMPLE = { signIn: { mode: 'simple', stay: 30 } } as const;
+  /** Words a Simple card must never show: it has no passkeys, passwords, or authenticator apps. */
+  const FULL_ONLY = /passkey|password|authenticator/i;
+  const cardWords = () => card().textContent ?? '';
+
+  it('Continue is "Email me a code", sent straight away for every address, with no other way in on the card', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    const { user } = setup(SIMPLE);
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(root().querySelector('[data-auth-kit-first-visit]')).toBeNull();
+    expect(cardWords()).not.toMatch(FULL_ONLY);
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+    expect(screen.queryByRole('heading', { name: 'How do you want to sign in?' })).toBeNull();
+    expect(screen.getByText('No email after a minute? Check your spam or junk folder, then send a new code.')).toBeTruthy();
+    expect(cardWords()).not.toMatch(FULL_ONLY);
+    expect(auth.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('even when the browser remembers a passkey for the address, and with passkeysEnabled: no passkey prompt', async () => {
+    await rememberPasskey('ada@example.org');
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    const { user } = setup({ ...SIMPLE, passkeysEnabled: true });
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+    expect(auth.signIn).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('heading', { name: 'Use your passkey' })).toBeNull();
+  });
+
+  it('the code is the whole sign-in: straight in, with no factor read, no passkey offer, and no first-credential step', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    auth.confirmSignIn.mockResolvedValue(SIGNED_IN);
+    const { user, navigate, loadFactors } = setup(SIMPLE, [FRESH_INVITE]);
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await user.type(await screen.findByLabelText('8-digit code'), '12345678{Enter}');
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/reports/42?tab=notes'));
+    expect(loadFactors).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Create a passkey' })).toBeNull();
+  });
+
+  it('Back from the code screen goes to the email step (there is no choice screen)', async () => {
+    window.localStorage.clear();
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    const { user } = setup(SIMPLE);
+    await enterEmail(user, 'ada@example.org');
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+    await user.click(screen.getByRole('button', { name: /^Back/ }));
+    expect(emailField().value).toBe('ada@example.org');
+  });
+
+  it('"Help" offers only what can go wrong with a code, and its help never names passkeys, passwords, or authenticators', async () => {
+    const { user } = setup(SIMPLE);
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
+    await heading('Trouble signing in?');
+    const rows = [...root().querySelectorAll('[data-auth-kit-slot="list"] button')].map((b) => b.textContent);
+    expect(rows).toEqual(['I didn’t get a code', 'I can’t get into my email', 'Something else']);
+    for (const label of ['I didn’t get a code', 'I can’t get into my email', 'Something else']) {
+      await user.click(screen.getByRole('button', { name: label }));
+      expect(cardWords()).not.toMatch(FULL_ONLY);
+      await user.click(screen.getByRole('button', { name: /^Back/ }));
+      await heading('Trouble signing in?');
+    }
+  });
+
+  it('step-up on a Simple site emails a code too', async () => {
+    auth.signIn.mockResolvedValue(CODE_SENT);
+    const { user } = setup({ ...SIMPLE, reauth: true });
+    await waitFor(() => expect(emailField().value).toBe('ada@example.org'));
+    await user.click(screen.getByRole('button', { name: 'Email me a code' }));
+    await heading('Check your email');
+  });
+
+  it('refuses settings that would leave no way in or let people make their own accounts', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    onTestFinished(() => quiet.mockRestore());
+    expect(() => setup({ ...SIMPLE, emailCodeEnabled: false })).toThrow(/emailCodeEnabled must stay on/);
+    expect(() => setup({ ...SIMPLE, accountCreation: { mode: 'open' } })).toThrow(/Simple site is invite only/);
+    expect(() => setup({ signIn: { mode: 'code' } as never })).toThrow(/signIn.mode must be 'full' or 'simple'/);
+  });
+});

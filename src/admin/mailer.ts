@@ -1,6 +1,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { type EmailBlock, type EmailSite, type RenderedEmail, inviteEmail, renderEmail } from '../shared/emails.js';
 import { INVITE_EXPIRY_DAYS, RESOURCE_ROLE_LABEL, type ResourceRole } from '../shared/policy.js';
+import { type SignInMode, type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { type AuthTheme, type ThemeFamily, helpAddressProblems, senderProblems, sesSender } from '../themes/index.js';
 
 export type { RenderedEmail } from '../shared/emails.js';
@@ -27,6 +28,8 @@ export interface InviteEmail {
   roleLabel?: string;
   /** An approved access request (REPORT §5.2j): the inviter is the approver. */
   approved?: boolean;
+  /** How people sign in to the site (ADR 0029): a Simple site's invite says the code is all there is. Default: the mailer's `site.signIn`, else Full. */
+  signInMode?: SignInMode;
 }
 
 /** Sends the branded invite email (Cognito's own invite is suppressed in `emailed-code` mode). */
@@ -56,6 +59,7 @@ export function renderInviteEmail(input: InviteEmail): RenderedEmail {
         : input.invitedBy !== undefined && { invitedBy: input.invitedBy }),
       ...(input.roleLabel !== undefined && { roleLabel: input.roleLabel }),
       ...(input.approved === true && { approved: true }),
+      ...(input.signInMode !== undefined && { signInMode: input.signInMode }),
     },
   );
 }
@@ -332,7 +336,14 @@ export interface SesInviteMailerOptions {
    * (the footer's identity sentence and the sender's suffix), and the help address in effect (the
    * "Help:" line): a plain address, or `createSignInHelp` from `auth-kit/accounts`.
    */
-  site: { siteName: string; theme: AuthTheme | ThemeFamily; help: string | { effective(): Promise<{ address: string }> }; signInUrl?: string };
+  site: {
+    siteName: string;
+    theme: AuthTheme | ThemeFamily;
+    help: string | { effective(): Promise<{ address: string }> };
+    signInUrl?: string;
+    /** How people sign in (ADR 0029), the same `signIn` setting the preset gets: a Simple site's invites say the emailed code is all there is. Default Full. */
+    signIn?: SignInSettings;
+  };
   region?: string;
   client?: SESv2Client;
   configurationSet?: string;
@@ -377,6 +388,7 @@ export function createSesInviteMailer(
   }
   // As SES takes it: a site name outside ASCII ("Café Reports") as RFC 2047 encoded-words, whichever form `from` used.
   const fromHeader = sesSender(options.from);
+  const siteSignInMode = normalizeSignIn(options.site.signIn, 2, 'createSesInviteMailer site.signIn').mode;
   const siteHelp = options.site.help;
   const alertSite = async (): Promise<AlertSite> => ({
     theme: options.site.theme,
@@ -410,7 +422,7 @@ export function createSesInviteMailer(
     );
   };
   return {
-    sendInvite: (input) => send([input.email], render(input)),
+    sendInvite: (input) => send([input.email], render({ ...input, signInMode: input.signInMode ?? siteSignInMode })),
     async superadminGranted(alert) {
       const to = [...new Set(alert.owners.map((o) => o.email).filter(Boolean))];
       if (to.length === 0) throw new Error('auth-kit: the site has no owner with an email address to alert.');

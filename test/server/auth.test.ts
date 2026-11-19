@@ -9,8 +9,9 @@ import {
   StepUpRequiredError,
   UnauthenticatedError,
 } from '../../src/server/index.js';
+import { poolConfigFromAmplifyOutputs } from '../../src/server/config.js';
 import { amplifyCookiePersona, tamperToken } from '../../src/testing/index.js';
-import { CLIENT_ID, bearer, harness } from '../helpers.js';
+import { CLIENT_ID, POOL_ID, bearer, harness } from '../helpers.js';
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   try {
@@ -188,6 +189,53 @@ describe('requireUser and the authenticator rule', () => {
     totpOff.cognito.setFactors('code-only', { configured: ['EMAIL_OTP'], mfa: [] });
     await expect(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'pw-only' })) })).resolves.toBeTruthy();
     expect(await rejection(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'code-only' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
+  });
+
+  describe('Simple sign-in: code only (ADR 0029)', () => {
+    it('lets an account with only emailed codes in: on a Simple site that is every account', async () => {
+      const { auth, issuer, cognito } = harness({ signIn: { mode: 'simple', stay: 30 } });
+      cognito.setFactors('member', { configured: ['EMAIL_OTP'], mfa: [] });
+      const user = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'member' })) });
+      expect(user.sub).toBe('member');
+      expect((await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'member' })) }))?.sub).toBe('member');
+    });
+
+    it('still refuses a password user without an authenticator (the rule stays on; Simple pools take no passwords)', async () => {
+      const { auth, issuer, cognito } = harness({ signIn: { mode: 'simple' } });
+      cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+      expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) }))).toBeInstanceOf(MfaEnrollmentRequiredError);
+    });
+
+    it('moving to Full brings the first-credential rule back for the same account', async () => {
+      const full = harness({ signIn: { mode: 'full' } });
+      full.cognito.setFactors('member', { configured: ['EMAIL_OTP'], mfa: [] });
+      expect(await rejection(full.auth.requireUser({ request: bearer(full.issuer.mintAccessToken({ sub: 'member' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
+    });
+
+    it('refuses settings that would lock everyone out or that make no sense', () => {
+      expect(() => harness({ signIn: { mode: 'simple' }, requireFirstCredential: true })).toThrow(/requireFirstCredential: true can't be used with Simple sign-in/);
+      expect(() => harness({ signIn: { mode: 'code' } as never })).toThrow(/signIn.mode must be 'full' or 'simple'/);
+      expect(() => harness({ signIn: { mode: 'full', stay: 7 } as never })).toThrow(/stay is for Simple sign-in only/);
+      expect(() => harness({ signIn: { mode: 'simple', stay: 0 } })).toThrow(/signIn.stay must be/);
+      // Simple's off switch isn't a matrix override: no environment flag is needed for it.
+      expect(() => harness({ signIn: { mode: 'simple' }, requireFirstCredential: false })).not.toThrow();
+    });
+
+    it('refuses a signIn that disagrees with the deployed pool (amplify_outputs.json)', () => {
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'full' })).toThrow(/signIn is Simple but the deployed pool is Full/);
+      expect(() => harness({ poolSignInMode: 'simple' })).toThrow(/signIn is Full but the deployed pool is Simple/);
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'code' as never })).toThrow(/poolSignInMode must be/);
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'simple' })).not.toThrow();
+      expect(() => harness({ poolSignInMode: 'full' })).not.toThrow();
+    });
+
+    it('reads the pool’s mode from amplify_outputs.json: MFA off is a Simple pool', () => {
+      const outputs = (mfa?: string) => ({ auth: { user_pool_id: POOL_ID, user_pool_client_id: CLIENT_ID, ...(mfa !== undefined && { mfa_configuration: mfa }) } });
+      expect(poolConfigFromAmplifyOutputs(outputs('NONE')).poolSignInMode).toBe('simple');
+      expect(poolConfigFromAmplifyOutputs(outputs('OPTIONAL')).poolSignInMode).toBe('full');
+      expect(poolConfigFromAmplifyOutputs(outputs('REQUIRED')).poolSignInMode).toBe('full');
+      expect(poolConfigFromAmplifyOutputs(outputs())).not.toHaveProperty('poolSignInMode');
+    });
   });
 
   describe('the matrix server mode’s lock (L7: defence in depth)', () => {
