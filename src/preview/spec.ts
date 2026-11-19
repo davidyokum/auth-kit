@@ -66,7 +66,7 @@ export interface PreviewSpec {
   passkeysEnabled?: boolean;
   /** "Email me a code instead" offered. Default true. */
   emailCodeEnabled?: boolean;
-  /** "Trouble signing in?" inside the card (default) or below it. */
+  /** "Help" (the help screen) inside the card (default) or below it. */
   troubleLink?: 'inside' | 'below';
   /** Draw a stand-in QR code on "Add an authenticator app", as sites that pass `renderQrCode` show. Default true. */
   qrCode?: boolean;

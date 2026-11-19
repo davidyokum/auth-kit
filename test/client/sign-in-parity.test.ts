@@ -273,7 +273,7 @@ const SCRIPTS: Record<string, Script> = {
   'Trouble signing in, then "Email me a code" on the passkey help': {
     run: async (user, frames) => {
       await typeEmail(user);
-      await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+      await user.click(screen.getByRole('button', { name: 'Help signing in' }));
       await screen.findByRole('heading', { name: 'Trouble signing in?' });
       frames.push(snapshot());
       await user.click(screen.getByRole('button', { name: 'I can’t use my passkey' }));

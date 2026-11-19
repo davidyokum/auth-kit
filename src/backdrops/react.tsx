@@ -28,6 +28,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { backdropPalette } from './families.js';
 import { type BackdropController, type BackdropOptions, renderBackdrop } from './render.js';
+import { nameRoom as nameRoomFor } from './name-room.js';
 import { backdropStyle } from './styles/registry.js';
 
 export interface BackdropProps extends Omit<BackdropOptions, 'card' | 'onReady' | 'onSiteName'> {
@@ -79,6 +80,8 @@ export function Backdrop(props: BackdropProps) {
   // Whether the art shows the site's name: the style's promise until the drawing says otherwise.
   const [nameShown, setNameShown] = useState<boolean | null>(null);
   const showsName = nameShown ?? lettersSiteName(style, siteName);
+  // A version that letters the name above the card on phones asks the scene for room there (0.1.19).
+  const nameRoom = nameRoomFor(style, styleVersion, siteName);
 
   // Start once; later prop changes go through update().
   useEffect(() => {
@@ -212,7 +215,7 @@ export function Backdrop(props: BackdropProps) {
       data-auth-kit-backdrop=""
       data-backdrop-style={style}
       data-backdrop-site-name={showsName ? 'shown' : undefined}
-      style={{ position: 'relative', isolation: 'isolate', backgroundColor: pageColor(props) }}
+      style={{ position: 'relative', isolation: 'isolate', backgroundColor: pageColor(props), ...(nameRoom !== null && { '--ak-backdrop-name-room': `${nameRoom}px` }) }}
     >
       <canvas
         ref={canvasRef}

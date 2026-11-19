@@ -308,7 +308,7 @@ describe('the email step', () => {
     await user.type(emailField(), 'ada{Enter}');
     expect(summary().textContent).toBe('Enter an email address like name@osbm.nc.gov');
     await user.clear(emailField());
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     expect(emailField().getAttribute('placeholder')).toBe('name@osbm.nc.gov');
   });
@@ -441,15 +441,17 @@ describe('the card', () => {
     expect(document.querySelector('[data-auth-kit-slot="monogram"]')?.getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('"Trouble signing in?" sits inside the card by default, and just below it with troubleLink "below"', () => {
+  it('"Help" sits inside the card by default, and just below it with troubleLink "below"', () => {
     setup();
-    let trouble = screen.getByRole('button', { name: 'Trouble signing in?' });
+    let trouble = screen.getByRole('button', { name: 'Help signing in' });
+    // Short and quiet on the card (register E4e), with a name that says what it's for.
+    expect(trouble.textContent).toBe('Help');
     expect(card().contains(trouble)).toBe(true);
     expect(root().querySelector('[data-auth-kit-slot="below"]')).toBeNull();
     cleanup();
 
     setup({ troubleLink: 'below' });
-    const all = screen.getAllByRole('button', { name: 'Trouble signing in?' });
+    const all = screen.getAllByRole('button', { name: 'Help signing in' });
     expect(all).toHaveLength(1);
     trouble = all[0]!;
     expect(card().contains(trouble)).toBe(false);
@@ -457,17 +459,17 @@ describe('the card', () => {
     expect(trouble.closest('[data-auth-kit-slot="below"]')).not.toBeNull();
   });
 
-  it('"Trouble signing in?" is on the sign-in steps, not on the help screens', async () => {
+  it('"Help" is on the sign-in steps, not on the help screens', async () => {
     const { user } = setup({ passkeysEnabled: false, troubleLink: 'below' });
     await user.type(emailField(), 'ada@example.org{Enter}');
     await heading('Enter your password');
-    expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    expect(screen.getByRole('button', { name: 'Help signing in' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await heading('Trouble signing in?');
-    expect(screen.queryByRole('button', { name: 'Trouble signing in?' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Help signing in' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Something else' }));
     await heading('Something else?');
-    expect(screen.queryByRole('button', { name: 'Trouble signing in?' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Help signing in' })).toBeNull();
   });
 });
 
@@ -477,7 +479,7 @@ describe('trouble signing in', () => {
 
   it('the triage list has six rows; "Back" returns', async () => {
     const { user } = setup();
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await heading('Trouble signing in?');
     expect(root().getAttribute('data-auth-kit-view')).toBe('trouble');
     expect(screen.getByText('Choose what’s happening and we’ll show you what to do.')).toBeTruthy();
@@ -497,7 +499,7 @@ describe('trouble signing in', () => {
   for (const [family, words] of FAMILIES) {
     it(`each of the six help screens, with its contact box (${family})`, async () => {
       const { user } = setup({ theme: family, help: { address: 'apps-help@example.org', owner: 'Jordan Lee' } });
-      await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+      await user.click(screen.getByRole('button', { name: 'Help signing in' }));
       for (const [i, row] of ROWS.entries()) {
         await user.click(await screen.findByRole('button', { name: row }));
         await heading(HEADINGS[i]!);
@@ -531,7 +533,7 @@ describe('trouble signing in', () => {
 
   it('without an owner, a named family says "the {Site} team" too', async () => {
     const { user } = setup({ theme: 'osbm' });
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await user.click(screen.getByRole('button', { name: 'I lost my authenticator app' }));
     await heading('Lost your authenticator app?');
     expect(card().textContent).toContain('so the Example Reports team has to reset it');
@@ -540,7 +542,7 @@ describe('trouble signing in', () => {
 
   it('a help screen’s action asks for the address when it wasn’t typed yet', async () => {
     const { user } = setup({ notices: false });
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.getByText('We’ll email you a code so you can choose a new one.')).toBeTruthy();
@@ -563,20 +565,20 @@ describe('trouble signing in', () => {
     // Notices on by default, but the route not declared: nothing promised (the after-the-fact line still
     // depends on the route's answer).
     let t = setup();
-    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
     cleanup();
     // A route config that doesn't say it's mounted promises nothing either.
     t = setup({ notices: { url: '/api/auth-kit/account-notice' } });
-    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     await heading('Forgot your password?');
     expect(screen.queryByText('We’ll email you a note when your password changes.')).toBeNull();
     cleanup();
     t = setup({ notices: { mounted: true } });
-    await t.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await t.user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await t.user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     expect(await screen.findByText('We’ll email you a note when your password changes.')).toBeTruthy();
     cleanup();
@@ -587,7 +589,7 @@ describe('trouble signing in', () => {
     auth.signIn.mockResolvedValue(CODE_SENT);
     const { user } = setup({ codeLifetimeMinutes: 10, notices: { mounted: true } });
     await enterEmail(user);
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await user.click(screen.getByRole('button', { name: 'I forgot my password' }));
     expect(await screen.findByText('We’ll email you a note when your password changes.')).toBeTruthy();
     // The address was typed already, so the button doesn't ask again.
@@ -599,14 +601,14 @@ describe('trouble signing in', () => {
     await user.click(screen.getByRole('button', { name: 'Send a new code' }));
     await heading('Check your email');
     expect(auth.signIn).toHaveBeenLastCalledWith({ username: 'ada@example.org', options: { authFlowType: 'USER_AUTH', preferredChallenge: 'EMAIL_OTP' } });
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await user.click(screen.getByRole('button', { name: 'I can’t use my passkey' }));
     await heading('Can’t use your passkey?');
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
     cleanup();
 
     const second = setup({ emailCodeEnabled: false });
-    await second.user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await second.user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await second.user.click(screen.getByRole('button', { name: 'I can’t use my passkey' }));
     await heading('Can’t use your passkey?');
     expect(screen.queryByRole('button', { name: 'Email me a code' })).toBeNull();
@@ -947,7 +949,7 @@ describe('emailed code (the backstop) and joining', () => {
     expect(screen.getByText('Don’t create a passkey on a shared computer.')).toBeTruthy();
     // The first credential is required: no way to skip it.
     expect(screen.queryByRole('button', { name: /Not now|Skip|Later/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Trouble signing in?' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Help signing in' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Create a passkey' }));
     expect(auth.associateWebAuthnCredential).toHaveBeenCalledTimes(1);
 
@@ -1457,7 +1459,7 @@ describe('"Back" (0.1.18): the screen before, as it was', () => {
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await heading('Enter your password');
     // And through Trouble signing in?: help, then the triage list, then where it started.
-    await user.click(screen.getByRole('button', { name: 'Trouble signing in?' }));
+    await user.click(screen.getByRole('button', { name: 'Help signing in' }));
     await heading('Trouble signing in?');
     await user.click(screen.getByRole('button', { name: 'I didn’t get a code' }));
     expect(root().getAttribute('data-auth-kit-view')).toBe('help');
@@ -1573,7 +1575,7 @@ describe('register A5a: Continue opens the passkey prompt only where this browse
     expect(screen.queryByText('Recommended')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use a password' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Email me a code' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Trouble signing in?' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Help signing in' })).toBeTruthy();
     expect(browser.get).not.toHaveBeenCalled();
     expect(allAuthCalls()).toBe(0);
   });

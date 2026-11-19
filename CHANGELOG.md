@@ -2,6 +2,30 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.19-alpha.1] - 2026-11-19
+
+The card's help link reads "Help", and Yokum magnetic v2 keeps the site's name above the card on every screen size, at one size on every sign-in screen, wrapping a long name to two lines (ADR 0024 and 0021, amended 2026-11-19). Pre-release. No breaking changes; a locked Yokum magnetic v1 draws exactly as before.
+
+### Changed
+
+- **"Help"** is the card's foot link (register E4e), where it said "Trouble signing in?". Screen readers hear "Help signing in" (`SIGN_IN.troubleLabel`; `SIGN_IN.trouble` is now `'Help'`). It opens the same triage list, still headed "Trouble signing in?", and the same help screens; the action is still `trouble`. Sites with their own tests that find the link by name: the button's accessible name is now "Help signing in".
+
+### Added
+
+- **Yokum magnetic v2** (`styleVersion: 2`, the newest; v1 is unchanged, and every site that locked it keeps it):
+  - The site's name sits in the band above the card on phones too, where v1 put it below the card and it shrank, then went out, as later screens grew. On wide screens the band's top is fixed (v1's moved by a few pixels when a tall card grew the page on a short window). So the name keeps one size and place on every sign-in screen.
+  - A name that would be small on one line (under 24px on a phone, 32px on a wide screen) wraps to two lines, broken at the most balanced space. A name over 80 letters, or one under 10px even on two lines, is left out whole (v1 cut it at 80 letters), and the card's heading names the site.
+  - The same seed draws the same filings as v1. Moving to v2 is the site owner's choice: `npm run backdrop:set -- yokum-magnetic:<seed>:2 --owner-chose`.
+- **`nameRoom`** on a style version (v2: 64): the room, in CSS px, the scene should leave above the card for the name. `<Backdrop>` and the preview's `renderBackdrop` set it on their root as `--ak-backdrop-name-room` when the style letters the name and there is a `siteName`.
+- **Frozen layouts:** `frozen.json` also pins where each Yokum magnetic version letters the name over a battery of screens, cards, and names (`yokum-magnetic@1:names`, `yokum-magnetic@2:names`).
+- The scene test (`test/screenshots/scene.spec.ts`) now checks that the name shows above the card on the first screen and keeps its size and place on every later one, at five desktop and five phone sizes (now including 1280×560, 320×568, and 360×640) and four site names (one long enough to wrap).
+
+### Migration
+
+1. `npx auth-kit upgrade 0.1.19-alpha.1`. `authKitStyles` is unchanged since 0.1.18: there's nothing to copy.
+2. **Leave the name room above the card** (README, "Lay the scene out"). The template: `padding: max(calc(56px + var(--ak-backdrop-name-room, 0px)), calc((100dvh - 450px) / 2)) var(--gutter) 72px;`, and on phones `padding: calc(24px + var(--ak-backdrop-name-room, 0px)) var(--gutter) 40px;`. On any backdrop but Yokum magnetic v2 the variable is unset and nothing moves.
+3. On Yokum magnetic, when the site's owner chooses v2: `npm run backdrop:set -- yokum-magnetic:<seed>:2 --owner-chose` (the seed stays the same).
+
 ## [0.1.18-alpha.1] - 2026-11-19
 
 Every screen after the email step has Back; "How do you want to sign in?" says who is signing in and what a first sign-in chooses, then three equal rows with the emailed code first; the passkey retry is bold only where this browser remembers a passkey; and on Yokum magnetic a taller screen never covers the site's name (ADR 0024 and 0021, amended 2026-11-19). Pre-release. No breaking changes to the API; the screens change.

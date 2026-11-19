@@ -75,7 +75,9 @@ export const SIGN_IN = {
   differentEmail: 'Use a different email address',
   forgotPassword: 'Forgot your password?',
   lostAuthenticator: 'Lost your authenticator app?',
-  trouble: 'Trouble signing in?',
+  // The card's foot link (register E4e, shipped in 0.1.19): short and quiet. Its accessible name says what it's for.
+  trouble: 'Help',
+  troubleLabel: 'Help signing in',
   backToSignIn: 'Back to sign in',
   back: 'Back',
   startAgain: 'Start again',

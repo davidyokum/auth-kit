@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Check your email" [level=1]
 - paragraph: If ada@example.org has an account here, we’ve emailed it a code to reset your password. It works for 1 hour.
 - text: Reset code
@@ -9,5 +10,5 @@
   - listitem:
     - button "Use a different email address"
 - status
-- button "Trouble signing in?"
+- button "Help signing in"
 - paragraph: This site is managed by the NC Office of State Budget and Management

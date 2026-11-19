@@ -67,6 +67,21 @@ describe('<Backdrop>', () => {
     expect(tall.container.firstElementChild?.getAttribute('data-backdrop-site-name')).toBe('shown');
   });
 
+  it('asks the scene for room above the card when the version letters the name there (0.1.19)', () => {
+    const room = (props: Record<string, unknown>) => {
+      const html = renderToString(createElement(Backdrop, { style: 'yokum-magnetic', seed: 'room', ...props } as never, card));
+      return /--ak-backdrop-name-room:\s*([0-9]+px)/.exec(html)?.[1] ?? null;
+    };
+    expect(room({ styleVersion: 2, siteName: 'Example Site' })).toBe('64px');
+    expect(room({ siteName: 'Example Site' })).toBe('64px');
+    // Version 1 doesn't ask (it letters the name below the card on phones); with no name there's nothing to letter.
+    expect(room({ styleVersion: 1, siteName: 'Example Site' })).toBeNull();
+    expect(room({ styleVersion: 2 })).toBeNull();
+    expect(room({ styleVersion: 2, siteName: '  ' })).toBeNull();
+    const html = renderToString(createElement(Backdrop, { style: 'aurora', seed: 'room', siteName: 'Example Site' }, card));
+    expect(html).not.toContain('--ak-backdrop-name-room');
+  });
+
   it('on a touch screen, a swipe that starts on the art plays with it; one on the card scrolls as usual', () => {
     const { container } = render(createElement(Backdrop, { style: 'yokum-magnetic', seed: 'touch', siteName: 'Example Reports' }, card));
     const root = container.firstElementChild!;

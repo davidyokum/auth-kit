@@ -103,6 +103,13 @@ export interface StyleVersion {
    */
   readonly settlesAt?: number;
   /**
+   * Styles that letter the site's name above the card (Yokum magnetic v2): the room, in CSS px, the
+   * scene should leave above the card so the name always fits there. The Backdrop sets it as
+   * `--ak-backdrop-name-room` on its root (0.1.19); the scene adds it to the card's top padding (README,
+   * "Lay the scene out").
+   */
+  readonly nameRoom?: number;
+  /**
    * The drawing code is ready (`colors` and `create` work). Each registered style's code is loaded on
    * first use (`load()`), so a site downloads only the style it shows; a version declared with
    * `defineVersion` is ready at once.
@@ -123,6 +130,7 @@ export interface StyleVersionMeta {
   readonly maxPixelRatio: number;
   readonly stillTime: number;
   readonly settlesAt?: number;
+  readonly nameRoom?: number;
 }
 
 export interface StyleVersionSpec<C> {
@@ -131,6 +139,7 @@ export interface StyleVersionSpec<C> {
   readonly maxPixelRatio: number;
   readonly stillTime: number;
   readonly settlesAt?: number;
+  readonly nameRoom?: number;
   colors(palette: BackdropPalette): C;
   create(setup: StyleSetup, colors: C): StyleInstance;
 }
@@ -143,12 +152,14 @@ export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
   if (!Number.isInteger(spec.version) || spec.version < 1) throw new Error(`auth-kit/backdrops: style version ${spec.version} must be a positive integer.`);
   if (!(spec.fps >= 0 && spec.fps <= MAX_FPS)) throw new Error(`auth-kit/backdrops: fps ${spec.fps} must be between 0 and ${MAX_FPS}.`);
   if (spec.settlesAt !== undefined && !(spec.settlesAt > 0 && spec.settlesAt <= spec.stillTime)) throw new Error(`auth-kit/backdrops: settlesAt ${spec.settlesAt} must be after 0 and no later than stillTime.`);
+  if (spec.nameRoom !== undefined && !(Number.isInteger(spec.nameRoom) && spec.nameRoom > 0 && spec.nameRoom <= 200)) throw new Error(`auth-kit/backdrops: nameRoom ${spec.nameRoom} must be a whole number of CSS px from 1 to 200.`);
   return Object.freeze({
     version: spec.version,
     fps: spec.fps,
     maxPixelRatio: spec.maxPixelRatio,
     stillTime: spec.stillTime,
     ...(spec.settlesAt !== undefined && { settlesAt: spec.settlesAt }),
+    ...(spec.nameRoom !== undefined && { nameRoom: spec.nameRoom }),
     loaded: true,
     load: () => Promise.resolve(),
     colors: (palette: BackdropPalette) => spec.colors(palette),
@@ -156,7 +167,7 @@ export function defineVersion<C>(spec: StyleVersionSpec<C>): StyleVersion {
   });
 }
 
-const META_KEYS = ['version', 'fps', 'maxPixelRatio', 'stillTime', 'settlesAt'] as const;
+const META_KEYS = ['version', 'fps', 'maxPixelRatio', 'stillTime', 'settlesAt', 'nameRoom'] as const;
 
 /**
  * Declares a version whose drawing code loads on first use: `meta` is what the renderer needs to plan

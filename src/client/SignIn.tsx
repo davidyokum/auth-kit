@@ -83,7 +83,7 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   accountCreation?: AccountCreationSettings;
   /** The invite-only line: a "Need access?" link to who to ask (default), or the plain sentence. */
   inviteLine?: 'sentence' | 'link';
-  /** "Trouble signing in?" inside the card (the default, register E5) or just below it. */
+  /** "Help" (the help screen) inside the card (the default, register E5) or just below it. */
   troubleLink?: 'inside' | 'below';
   /** How long an emailed code works, in minutes: the same value as the preset's (register A7). Default 10. */
   codeLifetimeMinutes?: number;
@@ -252,7 +252,7 @@ export function nextTrail(trail: readonly View[], current: View, next: View): Vi
   return [...trail, current];
 }
 
-/** The views that carry "Trouble signing in?" (Card Studio: every sign-in screen, not setup or help). */
+/** The views that carry "Help" (Card Studio: every sign-in screen, not setup or help). */
 const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'password', 'totp', 'email-code', 'reset-code', 'reset-password']);
 
 /**
@@ -261,7 +261,7 @@ const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'pass
  * then the authenticator code) and "Email me a code instead" (the backstop) are always offered.
  * Then the steps after sign-in: the authenticator for password users, the required "Choose how
  * you'll sign in next time" after an invite or a sign-up, and a one-time "Create a passkey on this
- * device?". "Trouble signing in?" opens the triage list and its six help screens.
+ * device?". "Help" opens the triage list ("Trouble signing in?") and its six help screens.
  *
  * Until someone proves a factor, every address sees the same screens in the same order, whether it
  * has an account or not and whatever factors that account has (ADR 0018).
