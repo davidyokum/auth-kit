@@ -19,7 +19,7 @@ On Yokum magnetic, where the art already letters the site's name, the card says 
 
 ### Migration
 
-None: `npx auth-kit upgrade 0.1.17-alpha.1`. A site that wants the name on the card anyway passes `siteNameOnCard="always"`.
+`npx auth-kit upgrade 0.1.17-alpha.1`, then copy `authKitStyles` again (four new rules at the end, the `data-auth-kit-site-…` heading swap; a site whose copy is stale always names the site, and the template's styles unit test fails until it's copied). A site that wants the name on the card anyway passes `siteNameOnCard="always"`.
 
 ## [0.1.16-alpha.2] - 2026-11-14
 
