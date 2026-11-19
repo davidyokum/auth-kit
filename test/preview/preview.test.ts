@@ -15,6 +15,7 @@ import {
   PREVIEW_ACTIONS,
   PREVIEW_MARKER,
   PREVIEW_SCREENS,
+  PREVIEW_SIMPLE_SCREENS,
   PreviewSpecError,
   type PreviewActionInfo,
   type PreviewSpec,
@@ -319,3 +320,43 @@ describe('the spec', () => {
     expect(() => resolvePreviewSpec({ sampleUser: { email: 'nope' } })).toThrow(/sampleUser\.email/);
   });
 });
+
+describe('Simple sign-in (ADR 0029)', () => {
+  const SIMPLE = { signIn: { mode: 'simple', stay: 30 } } as const;
+  const SIMPLE_ALL = PREVIEW_SIMPLE_SCREENS.flatMap((sc) => sc.states.map((st) => ({ screen: sc.id, state: st.id })));
+
+  it('has only the code screens', () => {
+    expect(PREVIEW_SIMPLE_SCREENS.map((sc) => sc.id)).toEqual(['email', 'email-code', 'finishing', 'access-help', 'request-access', 'trouble', 'help', 'signed-out']);
+    expect(PREVIEW_SIMPLE_SCREENS.find((sc) => sc.id === 'help')!.states.map((st) => st.id)).toEqual(['code', 'email', 'else']);
+    expect(() => resolvePreviewSpec({ ...SIMPLE, screen: 'choose' })).toThrow(/a Simple site .* has no "choose" screen/);
+    expect(() => resolvePreviewSpec({ ...SIMPLE, screen: 'help', state: 'password' })).toThrow(/has no "help password" screen/);
+    expect(() => resolvePreviewSpec({ ...SIMPLE, accountCreation: 'open' })).toThrow(PreviewSpecError);
+    expect(() => resolvePreviewSpec({ ...SIMPLE, emailCodeEnabled: false })).toThrow(PreviewSpecError);
+    expect(() => resolvePreviewSpec({ signIn: { mode: 'code' } as never })).toThrow(/signIn.mode/);
+  });
+
+  it.each(SIMPLE_ALL)('$screen/$state draws with no passkey, password, or authenticator words, and every control reports', ({ screen, state }) => {
+    const { stage, onAction, onEffect } = draw({ ...SIMPLE, screen, state, accountCreation: screen === 'request-access' ? 'request' : 'invite' });
+    expect(stage.textContent).not.toMatch(/passkey|password|authenticator/i);
+    for (const control of controls(stage)) {
+      const calls = onAction.mock.calls.length;
+      if (control instanceof HTMLFormElement) fireEvent.submit(control);
+      else fireEvent.click(control);
+      expect(onAction.mock.calls.length).toBe(calls + 1);
+    }
+    expectNothingHappened(onEffect);
+  });
+
+  it('Continue leads to the emailed code, and Back from it to the email step', async () => {
+    const user = userEvent.setup();
+    const { onAction, getByLabelText, getByRole } = draw({ ...SIMPLE, screen: 'email' });
+    await user.type(getByLabelText('Email address'), 'grace@example.org');
+    await user.click(getByRole('button', { name: 'Email me a code' }));
+    expect(onAction).toHaveBeenLastCalledWith('continue', expect.objectContaining({ next: { screen: 'email-code' }, label: 'Email me a code' }));
+    cleanup();
+    const code = draw({ ...SIMPLE, screen: 'email-code' });
+    fireEvent.click(code.getByRole('button', { name: /^Back/ }));
+    expect(code.onAction).toHaveBeenLastCalledWith('back', expect.objectContaining({ next: { screen: 'email', state: 'typed' } }));
+  });
+});
+

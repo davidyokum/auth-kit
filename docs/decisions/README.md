@@ -32,3 +32,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0026](0026-smooth-backdrops.md) | Smooth backdrops: up to 60 frames a second; Contours v2 drifts smoothly and follows the pointer |
 | [0027](0027-authenticator-setup-that-works.md) | Authenticator setup that works: a QR code built in, Copy that copies, the setup link on phones only |
 | [0028](0028-the-owner-decides-and-the-kit-deploys.md) | The owner decides, the kit deploys: a first visit that's one code, and owner, deploy, and upgrade commands |
+| [0029](0029-simple-sign-in-code-only.md) | Simple sign-in: an emailed code every time, and nothing else; "Add several at once" on the People page |

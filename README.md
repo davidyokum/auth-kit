@@ -472,6 +472,45 @@ Checked against `@aws-amplify/auth` 6.21 (via `aws-amplify` 6.22) and AWS's docu
 
 To check on the first sandbox deploy: passkey sign-in and registration on the relying-party domain, the emailed-code and TOTP paths end to end, that `GetUserAuthFactors` from the browser passes the site's CSP, and step-up with a passkey in Safari (ending the local session adds a round trip before the passkey prompt, which may outlast the click's user activation).
 
+### 6a. Sign-in modes: Full, or Simple (code only)
+
+Each site picks one ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)):
+
+- **Full: code, passkey, password** (the default). A passkey, a password plus an authenticator app, or an emailed code; a new account chooses a passkey or a password after its first code.
+- **Simple: code only.** Email, then an emailed code, every time. No passkeys, passwords, authenticator apps, or SMS. For small sites whose members sign in a handful of times; access is the People page's invite list.
+
+One setting, passed everywhere the mode matters (the template keeps it in `site.config.ts`):
+
+```ts
+// lib/site.ts
+import type { SignInSettings } from 'auth-kit/client';
+export const signIn: SignInSettings = { mode: 'simple', stay: 30 }; // or { mode: 'full' }
+```
+
+| Where | What to pass | What Simple does there |
+|---|---|---|
+| The preset (`authOptions`) | `signIn` | `AllowedFirstAuthFactors: ['EMAIL_OTP']`, no WebAuthn, the refresh token lasts the `stay`. Refuses `refreshTokenMinutes`, an admin pool, and `accountCreation` `domains` or `open` |
+| `createServerAuth` | `signIn` | No first-credential rule (an emailed code is everyone's only credential); `requireFirstCredential: true` is refused |
+| `<SignIn>` | `signIn` | "Email me a code" sends it, for every address alike; no other way in; the code is the whole sign-in; help about codes only ("check your spam or junk folder") |
+| `<MyAccount>` | `signIn` | "How you sign in": "You sign in with a code we email you." and "You stay signed in on this device for 30 days." No passkey, authenticator, or password sections |
+| `createSesInviteMailer` | `site.signIn` | The invite's last step: "Enter the 8-digit code we email you. That's all: there's no password or app to set up." (`createPeopleActions({ signIn })` for another mailer) |
+| `configureAuthClient`, `amplifyCookieRuntimeOptions`, `amplifyAdapterRefresh` | `signInSession(signIn, tier)` | `refreshTokenMinutes` from the `stay`; with `stay: 'browser'`, `cookies: 'browser'` too |
+
+`stay` is how long a sign-in lasts on one device, from the sign-in: a whole number of days (1 to 30 on Tier 2, 1 on Tier 3; default 30) or `'browser'`, "every visit": cookies with no lifetime, which end when the browser quits, behind a 12-hour refresh token.
+
+```ts
+const session = signInSession(signIn, 2); // { refreshTokenMinutes: 43200, browserOnly: false }
+configureAuthClient(outputs, { refreshTokenMinutes: session.refreshTokenMinutes, ...(session.browserOnly && { cookies: 'browser' }) });
+// lib/amplify-server.ts: amplifyCookieRuntimeOptions({ refreshTokenMinutes: session.refreshTokenMinutes, … })
+// proxy.ts: amplifyAdapterRefresh({ runWithAmplifyServerContext, fetchAuthSession }, session.browserOnly ? { cookies: 'browser' } : {})
+```
+
+A Simple site has no `/account/sign-in-method` page (nobody is ever sent there) and no authenticator setup page.
+
+**Simple to Full** is a settings change and a deploy: the pool and app client update in place (no replacement; a test checks it), every account stays, the emailed code keeps working, and each person's next sign-in asks for a passkey or a password. **Full to Simple isn't offered:** an account with an authenticator app can't receive emailed codes, so it would be locked out.
+
+**"Add several at once"** (every site): `people.inviteMany` / `forms.inviteMany`, and `<InviteForm inviteMany={forms.inviteMany} />` (or `<InviteManyForm>` alone). Up to 50 pasted addresses as Member or an app role; each one is the ordinary invite, with its own audit entry and email. Admin roles stay one at a time.
+
 ### 7. Localhost: personas and "Sign in as…"
 
 ```sh

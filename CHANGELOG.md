@@ -2,6 +2,27 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [Unreleased] (planned 0.1.20-alpha.1)
+
+Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. Pre-release. No breaking changes: every site stays Full until it sets `signIn`.
+
+### Added
+
+- **`signIn`**, one setting for how people sign in: `{ mode: 'full' }` (the default) or `{ mode: 'simple', stay }`, where `stay` is `'browser'` or a whole number of days (1 to the tier's ceiling; default 30). Pass the same value to the preset (`authOptions.signIn`), `createServerAuth`, `<SignIn>`, `<MyAccount>`, `createSesInviteMailer`'s `site`, and `createPeopleActions`.
+  - **The preset:** on Simple, the pool's only first factor is `EMAIL_OTP`, there are no WebAuthn settings, and the app client's refresh token lasts the `stay` (12 hours for `'browser'`). It refuses `refreshTokenMinutes` alongside it, an admin pool, and `accountCreation` `domains` or `open`. `applyAuthStandard` returns `signInMode`.
+  - **The server:** on Simple, `requireFirstCredential` defaults to off, and `true` is refused.
+  - **The card:** on Simple, "Email me a code" sends the code for every address alike, no other way in is offered, the code is the whole sign-in, and the help screens are about codes only (`SIMPLE_SIGN_IN`, `helpScreen(topic, c, { simple: true })`, `contactLines(c, { simple: true })`, `CONTACT.neverSendCode`).
+  - **My account:** on Simple, "How you sign in" with the stay (`MY_ACCOUNT.signingInHeading`, `signingInCode`, `staySignedIn`) in place of the passkey, authenticator, and password sections, which aren't read either.
+  - **The invite email:** on Simple, step 3 says the code is all there is (`InviteEmailContent.signInMode`, `InviteEmail.signInMode`).
+  - **"Every visit":** `configureAuthClient(outputs, { cookies: 'browser' })` and `amplifyAdapterRefresh(deps, { cookies: 'browser' })` write token cookies with no lifetime (`browserSessionSetCookie` in `auth-kit/server`; deletions are left alone).
+  - **Helpers** (`auth-kit/client`, `auth-kit/server`, `auth-kit/amplify`): `SIGN_IN_MODE_LABEL`, `normalizeSignIn`, `signInSession` (the refresh-token minutes and whether cookies end with the browser), `stayRefreshTokenMinutes`, `stayWords`, `maxStayDays`, `SignInConfigError`, and the types.
+  - **Preview mode:** `signIn` in the spec draws the Simple card; `PREVIEW_SIMPLE_SCREENS` lists its screens, and naming another throws.
+- **"Add several at once"** on the People page: `people.inviteMany`, `forms.inviteMany`, `<InviteManyForm>`, and `inviteMany` on `<InviteForm>`. Up to 50 pasted addresses (`INVITE_MANY_MAX`), as Member or an app role, each the ordinary invite with its own audit entry and email. Nothing is sent for a list with a bad entry, a list over the limit, or an unconfirmed address outside the usual domains; an address that already has an account is skipped and named; a failure stops the rest and says which weren't sent.
+
+### Migration
+
+Nothing for a Full site. To make a site Simple: set `signIn` in each place above, pass `signInSession(signIn, tier)`'s minutes to `configureAuthClient` and `amplifyCookieRuntimeOptions` (and `cookies: 'browser'` with `stay: 'browser'`), drop the `/account/sign-in-method` and authenticator setup pages, and deploy. A Full site can't move to Simple (an account with an authenticator app couldn't sign in); a Simple site moves to Full by changing the setting and deploying.
+
 ## [0.1.19-alpha.1] - 2026-11-19
 
 The card's help link reads "Help", and Yokum magnetic v2 keeps the site's name above the card on every screen size, at one size on every sign-in screen, wrapping a long name to two lines (ADR 0024 and 0021, amended 2026-11-19). Pre-release. No breaking changes; a locked Yokum magnetic v1 draws exactly as before.

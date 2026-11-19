@@ -349,7 +349,9 @@ function simpleHelpScreen(topic: HelpTopic, c: CopyContext): HelpScreen {
       };
     case 'else':
       return helpScreen('else', c);
-    default:
+    case 'passkey':
+    case 'password':
+    case 'totp':
       // Not offered on a Simple site; a stale link lands on the code help.
       return simpleHelpScreen('code', c);
   }

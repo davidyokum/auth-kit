@@ -408,6 +408,27 @@ const SCREENS: readonly ScreenDef[] = [
 const BY_ID: ReadonlyMap<string, ScreenDef> = new Map(SCREENS.map((s) => [s.id, s]));
 
 /**
+ * The screens a Simple site has (ADR 0029): the email step, the emailed code, the trouble list and
+ * its code-only help, and the access screens. Every other screen is for passkeys, passwords, or
+ * authenticators, which a Simple site doesn't have.
+ */
+const SIMPLE_SCREEN_IDS: ReadonlySet<string> = new Set(['email', 'email-code', 'finishing', 'access-help', 'request-access', 'trouble', 'help', 'signed-out']);
+const SIMPLE_HELP_STATES: ReadonlySet<string> = new Set(['code', 'email', 'else']);
+
+/** The screens and states a Simple site has, in flow order. */
+export const PREVIEW_SIMPLE_SCREENS: readonly PreviewScreen[] = Object.freeze(
+  SCREENS.filter((s) => SIMPLE_SCREEN_IDS.has(s.id)).map((s) =>
+    Object.freeze({
+      id: s.id,
+      label: s.label,
+      group: s.group,
+      component: s.component,
+      states: Object.freeze(s.states.filter((st) => s.id !== 'help' || SIMPLE_HELP_STATES.has(st.id)).map((st) => Object.freeze({ ...st }))),
+    }),
+  ),
+);
+
+/**
  * State IDs a release has retired, and the state each now draws. Hosts store IDs, so a retired one keeps
  * working. v0.1.10-alpha.1: the name step's two buttons ("Create account", "Finish") became one, Continue
  * (register A6).
@@ -476,7 +497,7 @@ const COMMON: Readonly<Record<string, Target>> = {
 
 /** What differs by screen. */
 const BY_SCREEN: Readonly<Record<string, Readonly<Record<string, Target | ((r: ResolvedPreviewSpec) => Target)>>>> = {
-  email: { continue: (r) => (!r.passkeysEnabled ? to('password') : r.remembered ? to('passkey') : to('choose')) },
+  email: { continue: (r) => (r.signIn.mode === 'simple' ? to('email-code') : !r.passkeysEnabled ? to('password') : r.remembered ? to('passkey') : to('choose')) },
   passkey: { 'try-again': to('passkey'), back: (r) => (r.remembered || !r.passkeysEnabled ? to('email', 'typed') : to('choose')) },
   password: { 'submit-password': to('totp'), back: (r) => (r.passkeysEnabled ? to('choose') : to('email', 'typed')) },
   totp: { 'submit-totp': SIGNED_IN, back: to('password') },
@@ -524,6 +545,11 @@ export function resolvePreviewSpec(spec: PreviewSpec): ResolvedPreviewSpec {
   const base = resolvePreviewBase(spec);
   const found = findScreen(base.screen, base.state);
   if ('problem' in found) throw new PreviewSpecError(found.problem);
+  if (base.signIn.mode === 'simple' && (!SIMPLE_SCREEN_IDS.has(found.screen.id) || (found.screen.id === 'help' && !SIMPLE_HELP_STATES.has(found.state)))) {
+    throw new PreviewSpecError(
+      `a Simple site (signIn.mode 'simple') has no "${found.screen.id}${found.screen.id === 'help' ? ` ${found.state}` : ''}" screen: it has no passkeys, passwords, or authenticators. Screens: ${PREVIEW_SIMPLE_SCREENS.map((s) => s.id).join(', ')}.`,
+    );
+  }
   return { ...base, state: found.state };
 }
 

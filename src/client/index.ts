@@ -66,6 +66,8 @@ export {
   SignInConfigError,
   normalizeSignIn,
   stayWords,
+  signInSession,
+  stayRefreshTokenMinutes,
   type SignInMode,
   type SignInSettings,
   type SimpleStay,

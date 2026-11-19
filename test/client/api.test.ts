@@ -236,7 +236,7 @@ describe('configureAuthClient', () => {
 
   it("Simple sign-in's every visit: cookies that end when the browser quits (an explicit undefined expires)", () => {
     configureAuthClient({}, { refreshTokenMinutes: 720, cookies: 'browser' });
-    const options = cognitoUserPoolsTokenProvider.setKeyValueStorage.mock.calls[0]![0].options;
+    const options = (cognitoUserPoolsTokenProvider.setKeyValueStorage.mock.calls[0]![0] as { options: { expires?: number } }).options;
     expect(Object.hasOwn(options, 'expires')).toBe(true);
     expect(options.expires).toBeUndefined();
   });

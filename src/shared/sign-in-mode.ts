@@ -107,3 +107,21 @@ export function stayWords(stay: SimpleStay): string {
   if (stay === 'browser') return 'until you quit your browser';
   return `for ${stay} ${stay === 1 ? 'day' : 'days'}`;
 }
+
+/**
+ * How long a sign-in lasts, for the three places that must agree: the preset's app client, the
+ * server's cookie options (`amplifyCookieRuntimeOptions`), and the browser's (`configureAuthClient`).
+ * On Full, the tier's ceiling (or the preset's `refreshTokenMinutes`); on Simple, the `stay`.
+ * `browserOnly`: the token cookies end when the browser quits (`stay: 'browser'`), so pass
+ * `cookies: 'browser'` to `configureAuthClient` and `amplifyAdapterRefresh`.
+ *
+ * ```ts
+ * const session = signInSession(site.signIn, 2); // { refreshTokenMinutes: 43200, browserOnly: false }
+ * ```
+ */
+export function signInSession(input: SignInSettings | undefined, tier: AuthTier = 2, fullRefreshTokenMinutes?: number): { refreshTokenMinutes: number; browserOnly: boolean } {
+  const signIn = normalizeSignIn(input, tier);
+  if (signIn.stay !== null) return { refreshTokenMinutes: stayRefreshTokenMinutes(signIn.stay), browserOnly: signIn.stay === 'browser' };
+  return { refreshTokenMinutes: fullRefreshTokenMinutes ?? SESSION_POLICY.refreshTokenMinutesMax[tier], browserOnly: false };
+}
+

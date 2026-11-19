@@ -157,4 +157,4 @@ export {
   type RoleMatrixRow,
   type AuthTier,
 } from '../shared/policy.js';
-export { SIGN_IN_MODE_LABEL, SignInConfigError, normalizeSignIn, type SignInMode, type SignInSettings, type SimpleStay } from '../shared/sign-in-mode.js';
+export { SIGN_IN_MODE_LABEL, SignInConfigError, normalizeSignIn, signInSession, stayRefreshTokenMinutes, type SignInMode, type SignInSettings, type SimpleStay } from '../shared/sign-in-mode.js';

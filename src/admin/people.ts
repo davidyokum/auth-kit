@@ -622,7 +622,7 @@ export function createPeopleActions<G extends string, C extends string>(config: 
 
   /** The addresses in pasted text: `Name <address>` gives the address; separators are commas, semicolons, and white space. */
   function addressesOf(value: unknown): string[] {
-    const pieces = typeof value === 'string' ? [value] : Array.isArray(value) && value.every((v) => typeof v === 'string') ? (value as string[]) : null;
+    const pieces = typeof value === 'string' ? [value] : Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : null;
     if (!pieces) throw new InputError('Paste the email addresses to invite.');
     const raw = pieces
       .join('\n')

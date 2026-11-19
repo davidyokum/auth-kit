@@ -66,6 +66,7 @@ export {
   SIMPLE_STAY_POLICY,
   SignInConfigError,
   normalizeSignIn,
+  signInSession,
   maxStayDays,
   stayRefreshTokenMinutes,
   type SignInMode,

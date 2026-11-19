@@ -18,6 +18,7 @@
 export { AuthKitPreview, previewKey, type AuthKitPreviewProps } from './Preview.js';
 export {
   PREVIEW_SCREENS,
+  PREVIEW_SIMPLE_SCREENS,
   PREVIEW_ACTIONS,
   SAMPLE_SETUP_KEY,
   findScreen,
