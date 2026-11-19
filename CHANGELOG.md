@@ -6,6 +6,10 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. Pre-release. No breaking changes: every site stays Full until it sets `signIn`.
 
+### Changed
+
+- **No chevron on the links under a form** (ADR 0024, amended 2026-11-19): "Use a password instead", "Email me a code instead", "Send a new code", "Use a different email address", and every other link in slot `alts` are the leading icon and the words, without the trailing right-pointing chevron. On the emailed-code screen it pointed the opposite way from "Use a different email address"'s back arrow. The rows keep their full width and 44px height. The choice screen's rows and the help topics keep their chevrons. `authKitStyles` is unchanged; sites with their own tests that count a link's icons see one fewer.
+
 ### Added
 
 - **`signIn`**, one setting for how people sign in: `{ mode: 'full' }` (the default) or `{ mode: 'simple', stay }`, where `stay` is `'browser'` or a whole number of days (1 to the tier's ceiling; default 30). Pass the same value to the preset (`authOptions.signIn`), `createServerAuth`, `<SignIn>`, `<MyAccount>`, `createSesInviteMailer`'s `site`, and `createPeopleActions`.

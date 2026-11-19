@@ -329,7 +329,13 @@ export interface AltLink {
   disabled?: boolean;
 }
 
-/** The other ways in, as a short list of link buttons with icons. */
+/**
+ * The other ways in, as a short list of link buttons: the icon, then the words. No chevron at the end
+ * (0.1.20): the leading icon already says where a link goes ("Use a different email address" leads
+ * with a back arrow, "Send a new code" with a refresh), and a right-pointing chevron beside a back
+ * arrow pointed two ways at once. The full-width rows of "How do you want to sign in?" and the help
+ * topics keep theirs: a boxed row that opens the next screen.
+ */
 export function AltLinks(props: { links: readonly AltLink[]; classNames: AuthKitClassNames | undefined }) {
   if (props.links.length === 0) return null;
   return (
@@ -339,7 +345,6 @@ export function AltLinks(props: { links: readonly AltLink[]; classNames: AuthKit
           <button type="button" disabled={l.disabled} onClick={l.onClick} {...tagged(l.onClick)} {...slot(props.classNames, 'linkButton')}>
             <Icon name={l.icon} />
             <span>{l.label}</span>
-            <Icon name="chevron" />
           </button>
         </li>
       ))}
