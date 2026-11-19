@@ -190,6 +190,37 @@ describe('requireUser and the authenticator rule', () => {
     expect(await rejection(totpOff.auth.requireUser({ request: bearer(totpOff.issuer.mintAccessToken({ sub: 'code-only' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
   });
 
+  describe('Simple sign-in: code only (ADR 0029)', () => {
+    it('lets an account with only emailed codes in: on a Simple site that is every account', async () => {
+      const { auth, issuer, cognito } = harness({ signIn: { mode: 'simple', stay: 30 } });
+      cognito.setFactors('member', { configured: ['EMAIL_OTP'], mfa: [] });
+      const user = await auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'member' })) });
+      expect(user.sub).toBe('member');
+      expect((await auth.getUser({ request: bearer(issuer.mintAccessToken({ sub: 'member' })) }))?.sub).toBe('member');
+    });
+
+    it('still refuses a password user without an authenticator (the rule stays on; Simple pools take no passwords)', async () => {
+      const { auth, issuer, cognito } = harness({ signIn: { mode: 'simple' } });
+      cognito.setFactors('pw-only', { configured: ['PASSWORD'], mfa: [] });
+      expect(await rejection(auth.requireUser({ request: bearer(issuer.mintAccessToken({ sub: 'pw-only' })) }))).toBeInstanceOf(MfaEnrollmentRequiredError);
+    });
+
+    it('moving to Full brings the first-credential rule back for the same account', async () => {
+      const full = harness({ signIn: { mode: 'full' } });
+      full.cognito.setFactors('member', { configured: ['EMAIL_OTP'], mfa: [] });
+      expect(await rejection(full.auth.requireUser({ request: bearer(full.issuer.mintAccessToken({ sub: 'member' })) }))).toBeInstanceOf(FirstCredentialRequiredError);
+    });
+
+    it('refuses settings that would lock everyone out or that make no sense', () => {
+      expect(() => harness({ signIn: { mode: 'simple' }, requireFirstCredential: true })).toThrow(/requireFirstCredential: true can't be used with Simple sign-in/);
+      expect(() => harness({ signIn: { mode: 'code' } as never })).toThrow(/signIn.mode must be 'full' or 'simple'/);
+      expect(() => harness({ signIn: { mode: 'full', stay: 7 } as never })).toThrow(/stay is for Simple sign-in only/);
+      expect(() => harness({ signIn: { mode: 'simple', stay: 0 } })).toThrow(/signIn.stay must be/);
+      // Simple's off switch isn't a matrix override: no environment flag is needed for it.
+      expect(() => harness({ signIn: { mode: 'simple' }, requireFirstCredential: false })).not.toThrow();
+    });
+  });
+
   describe('the matrix server mode’s lock (L7: defence in depth)', () => {
     it('a registry symbol of the same name isn’t the sign: it’s module-private', () => {
       vi.stubEnv('AUTH_KIT_MATRIX', '1');

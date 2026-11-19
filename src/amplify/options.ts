@@ -505,6 +505,12 @@ export function normalizeOptions(options: AuthStandardOptions): NormalizedAuthSt
     if (error instanceof AccountCreationConfigError) throw new AuthStandardConfigError(error.message.replace(/^auth-kit: /, ''));
     throw error;
   }
+  if (signIn.mode === 'simple' && allowsSelfSignUp(accountCreation)) {
+    fail(
+      `Simple sign-in is for invited people (the People page's list): accountCreation.mode '${accountCreation.mode}' makes accounts on the sign-up page, which asks for a passkey or a password. ` +
+        "Use 'invite' or 'request', or Full sign-in.",
+    );
+  }
   if (o.adminPool && accountCreation.mode !== 'invite') {
     fail(`An admin pool is invite only: accountCreation.mode '${accountCreation.mode}' would let people make their own admin-pool accounts.`);
   }

@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { safeRedirect } from '../server/redirect.js';
-import { type AccountCreationSettings, domainsInWords, normalizeAccountCreation } from '../shared/account-creation.js';
+import { type AccountCreationSettings, allowsSelfSignUp, domainsInWords, normalizeAccountCreation } from '../shared/account-creation.js';
+import { type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { codeLifetimeMinutes as checkedLifetime } from '../shared/policy.js';
 import { type AuthTheme, type ThemeFamily, resolveTheme } from '../themes/index.js';
 import { AuthenticatorSetup } from './AuthenticatorSetup.js';
@@ -8,7 +9,7 @@ import { tagged, useDriver } from './driver.js';
 import { type AccountNotices, resolveNotices } from './notices.js';
 import type { AccountNoticeEvent } from '../shared/notices.js';
 import { ChooseFirstCredential, type FirstCredential } from './ChooseFirstCredential.js';
-import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
+import { ACCESS_HELP, ACCESS_LINE, CONTACT, type CopyContext, ERRORS, FIRST_VISIT, type HelpTopic, SIGN_IN, SIMPLE_SIGN_IN, STATUS, TROUBLE, contactLines, helpScreen } from './copy.js';
 import { hrefOr } from './href.js';
 import { Icon } from './icons.js';
 import { type ClientAuthFactors, SIGN_IN_AUTOCOMPLETE, type SignInMethod, afterSignInStep, newPasswordProblem, normalizeCode, offersPasskeyHere } from './ladder.js';
@@ -64,8 +65,15 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   theme?: AuthTheme | ThemeFamily;
   /** The help route: the help address in effect, and the owner's name. Required (ADR 0024). */
   help: SignInHelp;
-  /** Passkeys switch on once the site's final domain is live (the relying-party ID). */
+  /** Passkeys switch on once the site's final domain is live (the relying-party ID). Ignored on a Simple site. */
   passkeysEnabled: boolean;
+  /**
+   * How people sign in to the site (ADR 0029): the same `signIn` setting the preset and the server get.
+   * Default Full. On a Simple site (`{ mode: 'simple' }`) Continue emails a code, for every address
+   * alike, and the card never offers or names a passkey, a password, or an authenticator app. A Simple
+   * site is invite only (`accountCreation` 'invite' or 'request') and needs emailed codes.
+   */
+  signIn?: SignInSettings;
   /**
    * The pool's passkey settings: its relying-party ID (`passkeys.relyingPartyId` in `auth-kit/amplify`,
    * or the sandbox's) and the passkey window's timeout in milliseconds. An address without a passkey
@@ -271,7 +279,11 @@ const TROUBLE_VIEWS = new Set<View['name']>(['email', 'choose', 'passkey', 'pass
  * emailed-code steps, which finish; the passkey step has none (the browser's window finishes it).
  */
 export function SignIn(props: SignInProps) {
-  const { classNames, passkeysEnabled, siteName } = props;
+  const { classNames, siteName } = props;
+  // Checked before anything renders, like the hrefs below: a bad setting is the site's, never a visitor's.
+  const simple = normalizeSignIn(props.signIn, 2, 'SignIn signIn').mode === 'simple';
+  /** Passkeys on this card: never on a Simple site (its pool has none). */
+  const passkeysEnabled = props.passkeysEnabled && !simple;
   // The live driver unless a preview holds the card (ADR 0025): every effect below goes through it.
   const driver = useDriver();
   const init = driver.initial('sign-in');
@@ -289,6 +301,10 @@ export function SignIn(props: SignInProps) {
   };
   const words: MessageWords = { siteName, codeLifetimeMinutes: lifetime, helpAddress: props.help.address };
   const emailCodeEnabled = props.emailCodeEnabled ?? true;
+  if (simple && !emailCodeEnabled) throw new Error('auth-kit: SignIn signIn: an emailed code is the only way in on a Simple site, so emailCodeEnabled must stay on.');
+  if (simple && allowsSelfSignUp(accountCreation)) {
+    throw new Error(`auth-kit: SignIn signIn: a Simple site is invite only, but accountCreation.mode is '${accountCreation.mode}'.`);
+  }
   const level = props.headingLevel ?? 1;
   const hint = props.emailHint?.trim() || theme.emailHint;
   // Checked before anything renders: a bad one is the site's misconfiguration, never a visitor's input.
@@ -297,6 +313,8 @@ export function SignIn(props: SignInProps) {
   const passkeyOptions = props.passkey;
   /** An invite's first visit, on a site with emailed codes: Continue is "Email me a code". */
   const firstVisitFlow = props.firstVisit === true && emailCodeEnabled && !props.reauth;
+  /** Continue sends the emailed code: an invite's first visit, or every sign-in on a Simple site (ADR 0029). */
+  const codeFlow = simple || firstVisitFlow;
   /** The first factor last asked for: a passkey sign-in sets this browser's passkey hint (register A5a). */
   const methodRef = useRef<'passkey' | 'password' | 'email-code' | null>(null);
   const notices = useMemo(() => resolveNotices(props.notices, 'SignIn'), [props.notices]);
@@ -385,6 +403,9 @@ export function SignIn(props: SignInProps) {
       pendingNotice.current = null;
       await driver.sendAccountNotice(notices, event);
     }
+    // A Simple site (ADR 0029): the emailed code was the whole sign-in. Nothing is owed after it, and
+    // nothing else is offered (no passkey, no password, no authenticator).
+    if (simple) return finish();
     let factors: ClientAuthFactors | null | undefined;
     try {
       factors = await (props.loadFactors ?? driver.fetchAuthFactors)();
@@ -419,7 +440,7 @@ export function SignIn(props: SignInProps) {
         }
         return finish();
     }
-  }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set, driver]);
+  }, [email, finish, go, notices, passkeysEnabled, props.loadFactors, props.reauth, set, driver, simple]);
 
   /** Shows the screen for the step Cognito returned. */
   const handleStep = useCallback(
@@ -537,7 +558,7 @@ export function SignIn(props: SignInProps) {
     if (!requireEmail()) return;
     // A first visit (an invite's link): the emailed code is the only way in for an account with nothing
     // saved yet, so Continue sends it, for every address alike (register A5a; nothing is revealed).
-    if (firstVisitFlow) return sendEmailCode();
+    if (codeFlow) return sendEmailCode();
     if (!passkeysEnabled) return go({ name: 'password', challenge: false });
     const typed = email;
     void driver.hasPasskeyHint(typed).then((hinted) => {
@@ -730,19 +751,21 @@ export function SignIn(props: SignInProps) {
           {heading(title)}
           {reauthNote}
           {emailField}
-          {firstVisitFlow ? (
+          {firstVisitFlow && !simple ? (
             <p {...slot(classNames, 'small')} data-auth-kit-first-visit="">
               {passkeysEnabled ? SIGN_IN.firstVisitLine : SIGN_IN.firstVisitLineNoPasskey}
             </p>
           ) : null}
           <Actions classNames={classNames}>
             <Button type="submit" disabled={busy} classNames={classNames}>
-              {firstVisitFlow ? SIGN_IN.chooseCode : SIGN_IN.continue}
+              {codeFlow ? SIGN_IN.chooseCode : SIGN_IN.continue}
             </Button>
           </Actions>
           <AltLinks
             links={
-              firstVisitFlow
+              simple
+                ? []
+                : firstVisitFlow
                 ? [...(passkeysEnabled ? [passkeyAlt] : []), passwordAlt]
                 : [...(passkeysEnabled ? [passwordAlt] : []), ...(emailCodeEnabled ? [codeAlt] : [])]
             }
@@ -971,7 +994,7 @@ export function SignIn(props: SignInProps) {
             ]}
             classNames={classNames}
           />
-          <Text classNames={classNames}>{SIGN_IN.codeHelp}</Text>
+          <Text classNames={classNames}>{simple ? SIMPLE_SIGN_IN.codeHelp : SIGN_IN.codeHelp}</Text>
         </form>
       );
       break;
@@ -1260,7 +1283,7 @@ export function SignIn(props: SignInProps) {
           {heading(TROUBLE.heading)}
           <Text classNames={classNames}>{TROUBLE.sub}</Text>
           <ul {...slot(classNames, 'list')}>
-            {TROUBLE.rows.map(([topic, label]) => {
+            {(simple ? SIMPLE_SIGN_IN.troubleRows : TROUBLE.rows).map(([topic, label]) => {
               const open = act(`help-${topic}`, () => go({ name: 'help', topic, askEmail: !looksLikeEmail(email) }));
               return (
                 <li key={topic} {...slot(classNames, 'listItem')}>
@@ -1277,8 +1300,8 @@ export function SignIn(props: SignInProps) {
       break;
     case 'help': {
       // The promise ahead of time only where the site says it mounted the notice route (L5; ADR 0024).
-      const screen = helpScreen(view.topic, c, { securityNotices: notices?.mounted === true });
-      const contact = contactLines(c, { teams: screen.teams === true });
+      const screen = helpScreen(view.topic, c, { securityNotices: notices?.mounted === true, simple });
+      const contact = contactLines(c, { teams: screen.teams === true, simple });
       const action = screen.button;
       const runAction = () => {
         if (!action) return;
@@ -1329,7 +1352,7 @@ export function SignIn(props: SignInProps) {
               </a>
               .{named ? ` ${named}` : ''}
             </p>
-            <p>{CONTACT.neverSend}</p>
+            <p>{simple ? CONTACT.neverSendCode : CONTACT.neverSend}</p>
           </div>
         </div>
       );

@@ -231,6 +231,23 @@ export const TROUBLE = {
   ] as const satisfies readonly (readonly [HelpTopic, string])[],
 } as const;
 
+/**
+ * Simple sign-in (ADR 0029): an emailed code is the only way in, so the card never names passkeys,
+ * passwords, or authenticator apps, and "Trouble signing in?" offers only what can go wrong with a code.
+ */
+export const SIMPLE_SIGN_IN = {
+  /** Under the emailed-code field: the one thing that usually goes wrong. */
+  codeHelp: 'No email after a minute? Check your spam or junk folder, then send a new code.',
+  troubleRows: [
+    ['code', 'I didn’t get a code'],
+    ['email', 'I can’t get into my email'],
+    ['else', 'Something else'],
+  ] as const satisfies readonly (readonly [HelpTopic, string])[],
+} as const;
+
+/** The help topics a Simple site's "Trouble signing in?" offers. */
+export const SIMPLE_HELP_TOPICS: ReadonlySet<HelpTopic> = new Set(SIMPLE_SIGN_IN.troubleRows.map(([topic]) => topic));
+
 /** One help screen: a heading, what to do, and the contact box (every one has it). */
 export interface HelpScreen {
   heading: string;
@@ -244,7 +261,8 @@ export interface HelpScreen {
 }
 
 /** The help screens (Card Studio v4's HELP; David, 2026-10-18: the site helps only with the account on this site). */
-export function helpScreen(topic: HelpTopic, c: CopyContext, options: { securityNotices?: boolean } = {}): HelpScreen {
+export function helpScreen(topic: HelpTopic, c: CopyContext, options: { securityNotices?: boolean; simple?: boolean } = {}): HelpScreen {
+  if (options.simple === true) return simpleHelpScreen(topic, c);
   const itDesk = c.theme.help.itDesk;
   // Who helps when the device or browser itself isn't working (personal sites: the device maker).
   const devDesk = c.theme.help.devDesk;
@@ -307,6 +325,36 @@ export function helpScreen(topic: HelpTopic, c: CopyContext, options: { security
   }
 }
 
+/** The help screens on a Simple site (ADR 0029): codes only, nothing about passkeys, passwords, or authenticators. */
+function simpleHelpScreen(topic: HelpTopic, c: CopyContext): HelpScreen {
+  const itDesk = c.theme.help.itDesk;
+  const site = c.siteName;
+  switch (topic) {
+    case 'code':
+      return {
+        heading: 'Didn’t get a code?',
+        steps: [
+          [`Wait a minute.${c.theme.family === 'osbm' ? ' State email screens messages, which can add a short delay.' : ''}`],
+          [`Check your spam or junk folder for an email from ${site}.${c.theme.family === 'personal' ? '' : ` If it’s held in quarantine, ${itDesk} can release it.`}`],
+          [`Send a new code and use the newest one. It works for ${minutes(c)}.`],
+        ],
+        after: `Still nothing? Make sure you typed the address ${team(c)} invited.`,
+        button: { label: 'Send a new code', action: 'resend-code' },
+      };
+    case 'email':
+      return {
+        heading: 'Can’t get into your email?',
+        intro: `You sign in to ${site} with a code we email you, so you’ll need your email first. We can’t help you get back into it. For that, contact ${itDesk}.`,
+        steps: [[`Moved to a new email address for good? Email ${c.helpAddress} from the new address. After confirming it’s you, ${team(c)} will move your account to it.`]],
+      };
+    case 'else':
+      return helpScreen('else', c);
+    default:
+      // Not offered on a Simple site; a stale link lands on the code help.
+      return simpleHelpScreen('code', c);
+  }
+}
+
 /** The words every contact box shares. */
 export const CONTACT = {
   /** Before the help address: "Email apps-help@…." */
@@ -314,10 +362,12 @@ export const CONTACT = {
   /** "Jordan Lee looks after Example Reports.", in families that name owners. */
   looksAfter: (c: CopyContext) => (namesOwner(c) ? `${c.ownerName} looks after ${c.siteName}.` : null),
   neverSend: 'Never send a password or code.',
+  /** The same warning on a Simple site (ADR 0029), which has no passwords. */
+  neverSendCode: 'Never send anyone your code.',
 } as const;
 
 /** The contact box at the foot of every help screen (Card Studio v4's CONTACT). */
-export function contactLines(c: CopyContext, options: { teams?: boolean } = {}): { lead: string; address: string; lines: string[] } {
+export function contactLines(c: CopyContext, options: { teams?: boolean; simple?: boolean } = {}): { lead: string; address: string; lines: string[] } {
   const named = CONTACT.looksAfter(c);
   return {
     lead: `Need help with your ${c.siteName} account?`,
@@ -325,7 +375,7 @@ export function contactLines(c: CopyContext, options: { teams?: boolean } = {}):
     lines: [
       ...(named ? [named] : []),
       ...(options.teams === true && c.theme.help.teamsCheck && !c.publicSite ? [`Not sure an email is really from us? Ask ${team(c)} on Teams.`] : []),
-      CONTACT.neverSend,
+      options.simple === true ? CONTACT.neverSendCode : CONTACT.neverSend,
     ],
   };
 }
