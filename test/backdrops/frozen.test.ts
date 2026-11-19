@@ -77,8 +77,37 @@ function plotterV1Hash(): string {
   return createHash('sha256').update(out.join('|')).digest('hex');
 }
 
+/**
+ * Where Yokum magnetic letters the site's name, over a battery of screens, cards, and names (0.1.19):
+ * the 360 × 240 scene pins one small layout only, and the name's place is what sites see first.
+ */
+function magneticNamesHash(version: number): string {
+  const out: string[] = [];
+  const names = ['Atlas', 'Example Site', 'Office of Regional Budget and Planning Partners', 'Supercalifragilisticexpialidocious', 'An Example Site '.repeat(6)];
+  const screens: [number, number, number][] = [
+    [320, 568, 88],
+    [393, 852, 88],
+    [393, 852, 24],
+    [768, 1024, 287],
+    [1366, 657, 120],
+    [1440, 900, 225],
+  ];
+  for (const [width, height, top] of screens) {
+    for (const cardHeight of [420, 560]) {
+      for (const siteName of names) {
+        const art = resolveArt({ style: 'yokum-magnetic', seed: 'frozen-seed', styleVersion: version, palette: TEST_PALETTE });
+        const cardWidth = Math.min(380, width - 32);
+        const card = { x: (width - cardWidth) / 2, y: top, width: cardWidth, height: cardHeight };
+        const instance = art.version.create(buildSetup({ art, width, height, pixelRatio: 1, card, motion: true, createLayer: layerFactory(recordingCanvasFactory(), 1), siteName }));
+        out.push(JSON.stringify(instance.siteNameBox?.() ?? null));
+      }
+    }
+  }
+  return createHash('sha256').update(out.join('|')).digest('hex');
+}
+
 async function actualHashes(): Promise<Record<string, string>> {
-  const out: Record<string, string> = { 'kernel@1': kernelV1Hash(), 'plotter@1': plotterV1Hash() };
+  const out: Record<string, string> = { 'kernel@1': kernelV1Hash(), 'plotter@1': plotterV1Hash(), 'yokum-magnetic@1:names': magneticNamesHash(1), 'yokum-magnetic@2:names': magneticNamesHash(2) };
   for (const { style, version } of allStyleVersions()) out[`${style}@${version}`] = await frozenHash(style, version);
   return out;
 }

@@ -402,7 +402,7 @@ export function ContactBox(props: { lead: string; address: string; lines: readon
 export interface CardBottom {
   /** The card's account-creation line (the email step only). */
   access?: ReactNode;
-  /** "Trouble signing in?", inside the card (`troubleLink: 'inside'`). */
+  /** "Help" (the help screen), inside the card (`troubleLink: 'inside'`). */
   trouble?: (() => void) | null;
   /** A back link ("Back to sign in", "Back"). */
   back?: { label: string; onClick: () => void } | null;
@@ -464,9 +464,9 @@ export function monogramOf(siteName: string): string {
 /**
  * The card: one solid surface on the backdrop, themed (the family's colors and the 3:1 edge as CSS
  * custom properties, `themeCssVariables`), marked `data-backdrop-card` so a backdrop keeps its focal
- * points clear of it. Its foot carries the account-creation line, "Trouble signing in?", and the
+ * points clear of it. Its foot carries the account-creation line, "Help", and the
  * family's identity line (E4: identity in the footer, nothing above the heading but the Monogram
- * style's badge, no colored line on top). `troubleBelow` puts "Trouble signing in?" under the card
+ * style's badge, no colored line on top). `troubleBelow` puts "Help" under the card
  * instead. The theme's `cardStyle` (register E5) is on the root as `data-auth-kit-style`.
  */
 export function Card(props: {
@@ -518,7 +518,7 @@ export function Card(props: {
           <div {...slot(props.classNames, 'bottom')}>
             {b.access}
             {b.trouble ? (
-              <button type="button" onClick={b.trouble} {...tagged(b.trouble)} {...slot(props.classNames, 'linkButton')}>
+              <button type="button" onClick={b.trouble} {...tagged(b.trouble)} aria-label={SIGN_IN.troubleLabel} {...slot(props.classNames, 'linkButton')}>
                 <Icon name="help" />
                 {SIGN_IN.trouble}
               </button>
@@ -536,7 +536,7 @@ export function Card(props: {
       </div>
       {props.troubleBelow ? (
         <p {...slot(props.classNames, 'below')}>
-          <button type="button" onClick={props.troubleBelow} {...tagged(props.troubleBelow)} {...slot(props.classNames, 'linkButton')}>
+          <button type="button" onClick={props.troubleBelow} {...tagged(props.troubleBelow)} aria-label={SIGN_IN.troubleLabel} {...slot(props.classNames, 'linkButton')}>
             <Icon name="help" />
             {SIGN_IN.trouble}
           </button>

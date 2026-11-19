@@ -1,5 +1,5 @@
 /**
- * The card never covers the site's name (0.1.18). Yokum magnetic letters the site's name in the band
+ * The card never covers the site's name (0.1.18), and the name keeps one size and place (0.1.19). Yokum magnetic letters the site's name in the band
  * above the card (below it on phones) and lays it out around the card's box. Until 0.1.18 it did that
  * once, around the first (email) card, so a taller later screen grew over the name. Now the renderer
  * lays the art out again when the card's box changes (`followsCard`), and the site's scene keeps the
@@ -12,7 +12,10 @@
  * - the art was laid out around the card as it is now (not the email card);
  * - the name, when the art shows it, is clear of the card (8px or more);
  * - when it doesn't (no room around a tall card), the card's own heading names the site;
- * - the card's top is where the email card's was.
+ * - the card's top is where the email card's was;
+ * - the name shows above the card on the email screen, and is the same size in the same place on every
+ *   later one (0.1.19: magnetic v2 puts it above the card on every width, in the room the scene leaves
+ *   there, `--ak-backdrop-name-room`, and wraps a long name to two lines).
  */
 import { expect, test } from '@playwright/test';
 import { FONT, openHarness } from './harness.js';
@@ -22,18 +25,22 @@ const SCENE_CSS = `
 html, body { margin: 0; }
 body { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 #scene { flex: 1 0 auto; display: flex; flex-direction: column; color-scheme: light; }
-#content { position: relative; z-index: 1; flex: 1 0 auto; display: grid; justify-items: center; align-items: start; padding: max(56px, calc((100dvh - 450px) / 2)) 16px 72px; }
-@media (max-width: 480px) { #content { padding: 24px 16px 40px; } }
+#content { position: relative; z-index: 1; flex: 1 0 auto; display: grid; justify-items: center; align-items: start; padding: max(calc(56px + var(--ak-backdrop-name-room, 0px)), calc((100dvh - 450px) / 2)) 16px 72px; }
+@media (max-width: 480px) { #content { padding: calc(24px + var(--ak-backdrop-name-room, 0px)) 16px 40px; } }
 #content [data-auth-kit-preview] { padding: 0; width: 100%; max-width: var(--ak-card-width, 380px); }
 `;
 
-const SITES = ['Atlas', 'Example Reports', 'Regional Partners Portal'] as const;
+// A long name wraps to two lines where one would be small (0.1.19).
+const SITES = ['Atlas', 'Example Reports', 'Regional Partners Portal', 'Office of Regional Budget and Planning Partners'] as const;
 const VIEWPORTS = [
   { width: 1280, height: 800, device: 'desktop' },
   { width: 1440, height: 900, device: 'desktop' },
   { width: 1366, height: 657, device: 'desktop' },
   { width: 1920, height: 1080, device: 'desktop' },
+  { width: 1280, height: 560, device: 'desktop' },
   { width: 390, height: 844, device: 'phone' },
+  { width: 320, height: 568, device: 'phone' },
+  { width: 360, height: 640, device: 'phone' },
   { width: 375, height: 667, device: 'phone' },
   { width: 430, height: 932, device: 'phone' },
 ] as const;
@@ -59,6 +66,7 @@ async function walk(arg: SceneArgs): Promise<{ checked: number; problems: string
   scene.append(content);
   document.body.append(scene);
 
+  const problems0: string[] = [];
   const spec = (screen: string, state: string, remembered: boolean) => ({ screen, state, remembered, family: 'personal' as const, site: { name: arg.site }, device: arg.device, font: arg.font });
   const card = P.render(content, spec('email', 'typed', false));
   const backdrop = P.renderBackdrop(scene, { style: 'yokum-magnetic', seed: 'scene', family: 'personal', siteName: arg.site, still: true });
@@ -71,9 +79,12 @@ async function walk(arg: SceneArgs): Promise<{ checked: number; problems: string
   };
   await settle();
   const emailTop = card.rect(scene).y;
+  const emailName = backdrop.layout()?.siteName ?? null;
+  if (!emailName) problems0.push(`email: the art doesn't show the name on the first screen`);
+  else if (emailName.y + emailName.height > emailTop - 8) problems0.push(`email: the name (${JSON.stringify(emailName)}) isn't above the card (top ${emailTop})`);
 
   const screens = P.screens.filter((s) => s.component === 'sign-in');
-  const problems: string[] = [];
+  const problems: string[] = problems0;
   let checked = 0;
   for (const s of screens) {
     for (const st of s.states) {
@@ -94,6 +105,8 @@ async function walk(arg: SceneArgs): Promise<{ checked: number; problems: string
         if (Math.abs(live.y - emailTop) > 1 && live.height > 0) problems.push(`${where}: the card's top moved from ${emailTop} to ${live.y}`);
         const name = layout.siteName;
         const heading = card.heading;
+        const same = (a: typeof name, b: typeof name) => (a === null) === (b === null) && (a === null || b === null || (['x', 'y', 'width', 'height'] as const).every((k) => Math.abs(a[k] - b[k]) <= 1));
+        if (emailName && !same(name, emailName)) problems.push(`${where}: the name moved or changed size, from ${JSON.stringify(emailName)} to ${JSON.stringify(name)}`);
         if (name) {
           const gap = 8;
           const clear = name.x + name.width + gap <= live.x || live.x + live.width + gap <= name.x || name.y + name.height + gap <= live.y || live.y + live.height + gap <= name.y;

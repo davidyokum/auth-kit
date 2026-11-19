@@ -1,3 +1,4 @@
+- button "Back"
 - alert:
   - link /That code didn’t work\. Codes change every \d+ seconds, so enter the newest one\./:
     - /url: "#_akp1-r_0_-code"
@@ -10,5 +11,5 @@
 - paragraph:
   - button "Lost your authenticator app?"
 - status
-- button "Trouble signing in?"
+- button "Help signing in"
 - paragraph: This site is managed by the NC Office of State Budget and Management

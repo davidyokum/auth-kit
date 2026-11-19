@@ -5,6 +5,7 @@
  * page a lab view asks for.
  */
 import { BACKDROP_FAMILIES } from '../backdrops/families.js';
+import { nameRoom } from '../backdrops/name-room.js';
 import { type BackdropController, renderBackdrop } from '../backdrops/render.js';
 import { backdropStyle, BACKDROP_STYLES, type BackdropStyleId, isBackdropStyleId } from '../backdrops/styles/registry.js';
 import type { BackdropSubjectOptions } from '../backdrops/subjects.js';
@@ -106,6 +107,13 @@ export function previewBackdrop(host: HTMLElement, options: PreviewBackdropOptio
     host.setAttribute('data-backdrop-error', error);
   };
   const cardOf = () => (current.card !== undefined ? current.card : host.querySelector('[data-backdrop-card]'));
+  // As <Backdrop> does: a version that letters the name above the card asks for room there (0.1.19).
+  const applyNameRoom = () => {
+    const room = nameRoom(current.style, current.styleVersion, current.siteName);
+    if (room === null) host.style.removeProperty('--ak-backdrop-name-room');
+    else host.style.setProperty('--ak-backdrop-name-room', `${room}px`);
+  };
+  applyNameRoom();
 
   try {
     if (!isBackdropStyleId(current.style)) throw new Error(`auth-kit/preview: there's no backdrop style "${String(current.style)}". Styles: ${BACKDROP_STYLES.join(', ')}.`);
@@ -134,6 +142,7 @@ export function previewBackdrop(host: HTMLElement, options: PreviewBackdropOptio
     },
     update(next) {
       current = { ...current, ...next };
+      applyNameRoom();
       if (!controller) return;
       try {
         controller.update({ ...artOptions(current), card: cardOf() });

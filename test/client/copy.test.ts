@@ -428,7 +428,8 @@ describe('Card Studio v4’s words', () => {
     expect(copy.SIGN_IN.codeHelp).toBe('No email after a minute? Check your junk folder, then send a new code. Accounts with an authenticator app can’t get emailed codes. Use your password or passkey instead.');
     expect(copy.SIGN_IN.resetCodeSub(EMAIL)).toBe('If ada@example.org has an account here, we’ve emailed it a code to reset your password. It works for 1 hour.');
     expect(copy.SIGN_IN.offerPasskeyHeading).toBe('Create a passkey on this device?');
-    expect(copy.SIGN_IN.trouble).toBe('Trouble signing in?');
+    expect(copy.SIGN_IN.trouble).toBe('Help');
+    expect(copy.SIGN_IN.troubleLabel).toBe('Help signing in');
     expect(copy.SIGN_IN.checkFailed(personal)).toBe('We couldn’t check how you sign in. Try again. If it keeps happening, email apps-help@example.org.');
     // A password that must be reset reads like a wrong password (L5): no screen of its own.
     expect(Object.keys(copy.SIGN_IN)).not.toContain('mustChooseNewPassword');

@@ -10,5 +10,9 @@ export const yokumMagnetic = defineStyle({
   // The name and the magnet are laid out around the card: lay them out again when it changes (0.1.18).
   followsCard: true,
   // The drawing code loads on first use, in its own chunk.
-  versions: [lazyVersion({ version: 1, fps: 30, maxPixelRatio: 2, stillTime: 2, settlesAt: 1 }, () => import('./v1.js').then((m) => m.yokumMagneticV1))],
+  versions: [
+    lazyVersion({ version: 1, fps: 30, maxPixelRatio: 2, stillTime: 2, settlesAt: 1 }, () => import('./v1.js').then((m) => m.yokumMagneticV1)),
+    // v2 (0.1.19): the name always sits above the card, one size on every sign-in screen; long names wrap.
+    lazyVersion({ version: 2, fps: 30, maxPixelRatio: 2, stillTime: 2, settlesAt: 1, nameRoom: 64 }, () => import('./v2.js').then((m) => m.yokumMagneticV2)),
+  ],
 });
