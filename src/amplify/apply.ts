@@ -52,7 +52,8 @@ export interface AppliedAuthStandard {
   signInMode: 'full' | 'simple';
   allowedFirstAuthFactors: string[];
   explicitAuthFlows: string[];
-  mfaConfiguration: 'OPTIONAL' | 'ON';
+  /** OFF on a Simple pool (ADR 0029). */
+  mfaConfiguration: 'OPTIONAL' | 'ON' | 'OFF';
   deletionProtection: 'ACTIVE' | 'INACTIVE';
   userPoolTier: 'ESSENTIALS' | 'PLUS';
   tags: Record<string, string>;
@@ -331,22 +332,28 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
   // Best first: passkey; password (+ authenticator code, required by the app); emailed code as backstop.
   // Admin pools: no emailed codes. PASSWORD stays allowed there because a new admin has to sign in once
   // (with a one-time password and a TOTP enrollment) before Cognito lets them register a passkey.
-  // Simple sign-in (ADR 0029): the emailed code alone. Widening this list later (the move to Full) is an
-  // in-place update of the pool's sign-in policy; every account keeps working.
+  // Simple sign-in (ADR 0029): the emailed code is the only way in. Cognito refuses a sign-in policy
+  // without PASSWORD ("Password should be configured as one of the allowed first auth factors"), so it
+  // stays listed, but nobody can have a password: invites are created without one, recovery is
+  // admin-only (no "forgot password" to set one), and the card never asks. Widening this later (the move
+  // to Full) is an in-place update of the pool's sign-in policy; every account keeps working.
   const simple = o.signIn.mode === 'simple';
   const passkeysOnPool = o.passkeys !== null && !simple;
   const allowedFirstAuthFactors = simple
-    ? ['EMAIL_OTP']
+    ? ['PASSWORD', 'EMAIL_OTP']
     : [...(passkeysOnPool ? ['WEB_AUTHN'] : []), 'PASSWORD', ...(o.adminPool ? [] : ['EMAIL_OTP'])];
   cfnUserPool.policies = {
     passwordPolicy: { ...PASSWORD_POLICY },
     signInPolicy: { allowedFirstAuthFactors },
   };
 
-  // MFA is set once per pool. OPTIONAL with TOTP for everyday pools; ON for admin pools.
-  const mfaConfiguration = o.adminPool ? 'ON' : 'OPTIONAL';
+  // MFA: OPTIONAL with TOTP for everyday pools; ON for admin pools. OFF on Simple pools, so nobody holding
+  // a token can enrol an authenticator, which would stop emailed codes and lock the account out. The
+  // move to Full turns it to OPTIONAL in place. Amplify's outputs read this property (mfa_configuration
+  // NONE), which is how createServerAuth checks that the server's signIn matches the pool.
+  const mfaConfiguration = o.adminPool ? 'ON' : simple ? 'OFF' : 'OPTIONAL';
   cfnUserPool.mfaConfiguration = mfaConfiguration;
-  cfnUserPool.enabledMfas = ['SOFTWARE_TOKEN_MFA'];
+  cfnUserPool.enabledMfas = simple ? undefined : ['SOFTWARE_TOKEN_MFA'];
 
   let relyingPartyId: string | null = null;
   if (o.passkeys && passkeysOnPool) {
@@ -358,9 +365,10 @@ export function applyAuthStandard(auth: AuthResourceLike, options: AuthStandardO
     cfnUserPool.addPropertyOverride('WebAuthnFactorConfiguration', 'MULTI_FACTOR_WITH_USER_VERIFICATION');
   }
 
-  // Admin pools recover through an admin only; everyday pools by verified email.
+  // Admin pools recover through an admin only; everyday pools by verified email. Simple pools are
+  // admin-only too: there is no password to recover, and "forgot password" would let someone set one.
   cfnUserPool.accountRecoverySetting = {
-    recoveryMechanisms: o.adminPool ? [{ name: 'admin_only', priority: 1 }] : [{ name: 'verified_email', priority: 1 }],
+    recoveryMechanisms: o.adminPool || simple ? [{ name: 'admin_only', priority: 1 }] : [{ name: 'verified_email', priority: 1 }],
   };
 
   // SES from a verified domain identity. Amplify's senders.email derives an address identity from

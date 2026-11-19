@@ -261,6 +261,7 @@ const OPTION_KEYS = new Set<string>([
   'requireTotpForPasswordUsers',
   'requireFirstCredential',
   'signIn',
+  'poolSignInMode',
   'matrixServerMode',
   'factorLookup',
   'factorCheckTtlSeconds',
@@ -313,6 +314,17 @@ function validateServerAuthOptions<G extends string, C extends string>(options: 
     problems.push(error.message.replace(/^auth-kit: /, ''));
   }
   const simple = signIn?.mode === 'simple';
+  // The pool and the server must agree on the mode (ADR 0029): a server told Simple on a Full pool would
+  // let every code-only account skip the first-credential step (register A1); a server told Full on a
+  // Simple pool would send everyone to a setup page the site doesn't have.
+  const poolMode: unknown = options.poolSignInMode;
+  if (poolMode !== undefined && poolMode !== 'full' && poolMode !== 'simple') problems.push("poolSignInMode must be 'full' or 'simple'");
+  else if (poolMode !== undefined && signIn !== null && poolMode !== signIn.mode) {
+    const name = (m: string) => (m === 'simple' ? 'Simple' : 'Full');
+    problems.push(
+      `signIn is ${name(signIn.mode)} but the deployed pool is ${name(poolMode)} (amplify_outputs.json). Pass the same signIn (the template's site.signIn) to authOptions and createServerAuth, and deploy the backend before the app`,
+    );
+  }
   if (simple && options.requireFirstCredential === true) {
     problems.push("requireFirstCredential: true can't be used with Simple sign-in (signIn.mode 'simple'): an emailed code is the only way in, so nobody could ever meet it");
   }

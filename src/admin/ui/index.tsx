@@ -37,6 +37,7 @@ import {
   PEOPLE_FORM_FIELDS as F,
   PENDING_REQUESTS_SHOWN,
   INVITE_MANY_MAX,
+  type InviteManyResult,
   type AccessRequestList,
   type AccessRequestRow,
   type ActionResult,
@@ -45,6 +46,8 @@ import {
   type PeopleList,
   type PersonRow,
 } from '../types.js';
+import { parseInviteList } from '../invite-list.js';
+import { type SignInSettings, normalizeSignIn } from '../../shared/sign-in-mode.js';
 
 export interface Viewer {
   sub: string;
@@ -730,6 +733,8 @@ export interface InviteFormProps {
   resourceAccess?: ReactNode;
   /** `forms.inviteMany`: adds "Add several at once" under the form (`InviteManyForm`). */
   inviteMany?: FormAction;
+  /** The site's sign-in mode (ADR 0029): on Simple, the invite's words leave out the passkey step. */
+  signIn?: SignInSettings;
 }
 
 /**
@@ -743,7 +748,7 @@ export function InviteForm(props: InviteFormProps): ReactNode {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<string>(MEMBER_ROLE);
   const [result, run, pending] = useActionState(props.action, null);
-  const detail = peopleActionDetails(props.inviteMode).invite;
+  const detail = peopleActionDetails(props.inviteMode, { signInMode: normalizeSignIn(props.signIn).mode }).invite;
   const domain = email.includes('@') ? email.slice(email.lastIndexOf('@') + 1).toLowerCase() : '';
   const domains = (props.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
   const outside = domain !== '' && domains.length > 0 && !domains.includes(domain);
@@ -815,10 +820,17 @@ export function InviteManyForm(props: InviteManyFormProps): ReactNode {
   const [result, run, pending] = useActionState(props.action, null);
   const [text, setText] = useState('');
   const [role, setRole] = useState<string>(MEMBER_ROLE);
-  const count = countAddresses(text);
+  const found = addressesIn(text);
+  const count = found.length;
   const memberOption = roleOptions([]).find((o) => o.role === MEMBER_ROLE);
   const options: RolePickerOption[] = [...(memberOption ? [{ ...memberOption, available: true }] : []), ...(props.appRoles ?? []).map(appRoleOption)];
   const domains = (props.inviteDomains ?? []).map((d) => d.toLowerCase().replace(/^@/, ''));
+  // The addresses to confirm, named: worked out as the list is typed, or as the server listed them.
+  const refusedOutside = result !== null && 'outside' in result ? (result as InviteManyResult).outside : undefined;
+  const outside =
+    domains.length > 0
+      ? found.filter((e) => !domains.includes(e.slice(e.lastIndexOf('@') + 1)))
+      : (refusedOutside ?? []).filter((e) => found.includes(e));
   return (
     <details className="ak-invite-many">
       <summary>Add several at once</summary>
@@ -836,10 +848,14 @@ export function InviteManyForm(props: InviteManyFormProps): ReactNode {
             <p className="ak-note ak-muted">Everyone in the list joins as Member. Give admin roles one person at a time.</p>
           </>
         )}
-        {domains.length > 0 ? (
+        {outside.length > 0 ? (
           <label className="ak-field ak-warn">
-            <input type="checkbox" name={F.confirmOutsideDomain} />
-            <span>Some addresses may be outside the usual domains ({domains.join(', ')}). An invite to a mistyped address is a live account for whoever owns that inbox. I’ve checked them.</span>
+            <input type="checkbox" name={F.confirmedOutside} value={outside.join('\n')} required />
+            <span>
+              {outside.length === 1 ? 'This address is' : `These ${outside.length} addresses are`} outside the usual domains
+              {domains.length > 0 ? ` (${domains.join(', ')})` : ''}: {outside.join(', ')}. An invite to a mistyped address is a live account for whoever owns that inbox. I’ve checked{' '}
+              {outside.length === 1 ? 'it' : 'them'}.
+            </span>
           </label>
         ) : null}
         <button type="submit" className="ak-button ak-button-primary" disabled={pending || count === 0}>
@@ -851,10 +867,10 @@ export function InviteManyForm(props: InviteManyFormProps): ReactNode {
   );
 }
 
-/** About how many addresses the pasted text holds (the server does the real check). */
-function countAddresses(text: string): number {
-  const found = text.replace(/[^<>\n]*<([^<>]*)>/g, ' $1 ').split(/[\s,;]+/).filter((t) => t.includes('@'));
-  return new Set(found.map((t) => t.toLowerCase())).size;
+/** The addresses the pasted text holds, lowercased and without repeats, read as the server reads them (the server does the real check). */
+function addressesIn(text: string): string[] {
+  const parsed = parseInviteList(text);
+  return [...new Set(parsed.addresses.filter((t) => t.includes('@')).map((t) => t.toLowerCase()))];
 }
 
 // ---- Lost passkey -------------------------------------------------------------------------------

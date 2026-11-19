@@ -185,8 +185,9 @@ export interface AuthStandardOptions {
   refreshTokenMinutes?: number;
   /**
    * How people sign in (ADR 0029). Default `{ mode: 'full' }`: passkey, password plus authenticator,
-   * or emailed code. `{ mode: 'simple', stay }` ("Simple: code only"): the emailed code is the pool's
-   * only first factor, and `stay` (`'browser'` or 1 to 30 days; 1 on Tier 3; default 30) sets the
+   * or emailed code. `{ mode: 'simple', stay }` ("Simple: code only"): the emailed code is the only way
+   * in (PASSWORD stays listed because Cognito requires it; recovery is admin-only and MFA is OFF, so
+   * nobody can set one or enrol an authenticator), and `stay` (`'browser'` or 1 to 30 days; 1 on Tier 3; default 30) sets the
    * refresh token. `passkeys` may still be given (the site's final address, kept for a later move to
    * Full) and is not applied to the pool until then. Not for admin pools.
    */

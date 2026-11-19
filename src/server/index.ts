@@ -64,7 +64,7 @@ export {
   type UserAuthFactors,
   type LiveUserState,
 } from './cognito.js';
-export { resolvePoolConfig, poolConfigFromAmplifyOutputs, type PoolConfig, type ResolvedPoolConfig, type AmplifyOutputsAuth } from './config.js';
+export { resolvePoolConfig, poolConfigFromAmplifyOutputs, poolSignInModeFromAmplifyOutputs, type PoolConfig, type ResolvedPoolConfig, type AmplifyOutputsAuth } from './config.js';
 export {
   amplifyCookieTokens,
   amplifyCookieNames,
@@ -95,6 +95,7 @@ export {
   type OriginCheckRequest,
   type OriginCheckOptions,
   browserSessionSetCookie,
+  browserSessionRunner,
 } from './cookies.js';
 export {
   AuthError,

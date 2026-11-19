@@ -6,7 +6,7 @@
  * - `full` (the default): "Full: code, passkey, password". A passkey, a password plus an
  *   authenticator, or an emailed code; a new account chooses a passkey or a password after its first code.
  * - `simple`: "Simple: code only". An emailed code every time, and nothing else: no passkeys, no
- *   passwords, no authenticators. The pool's only first factor is `EMAIL_OTP`. The site picks how long a
+ *   passwords, no authenticators. An emailed code is the only way in (the pool lists PASSWORD because Cognito requires it, but nobody can set one). The site picks how long a
  *   sign-in lasts on one device (`stay`): until the browser quits, or a whole number of days.
  *
  * A Simple site moves to Full by changing this setting and deploying: the pool keeps every account,

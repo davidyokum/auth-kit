@@ -9,8 +9,9 @@ import {
   StepUpRequiredError,
   UnauthenticatedError,
 } from '../../src/server/index.js';
+import { poolConfigFromAmplifyOutputs } from '../../src/server/config.js';
 import { amplifyCookiePersona, tamperToken } from '../../src/testing/index.js';
-import { CLIENT_ID, bearer, harness } from '../helpers.js';
+import { CLIENT_ID, POOL_ID, bearer, harness } from '../helpers.js';
 
 async function rejection(promise: Promise<unknown>): Promise<unknown> {
   try {
@@ -218,6 +219,22 @@ describe('requireUser and the authenticator rule', () => {
       expect(() => harness({ signIn: { mode: 'simple', stay: 0 } })).toThrow(/signIn.stay must be/);
       // Simple's off switch isn't a matrix override: no environment flag is needed for it.
       expect(() => harness({ signIn: { mode: 'simple' }, requireFirstCredential: false })).not.toThrow();
+    });
+
+    it('refuses a signIn that disagrees with the deployed pool (amplify_outputs.json)', () => {
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'full' })).toThrow(/signIn is Simple but the deployed pool is Full/);
+      expect(() => harness({ poolSignInMode: 'simple' })).toThrow(/signIn is Full but the deployed pool is Simple/);
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'code' as never })).toThrow(/poolSignInMode must be/);
+      expect(() => harness({ signIn: { mode: 'simple' }, poolSignInMode: 'simple' })).not.toThrow();
+      expect(() => harness({ poolSignInMode: 'full' })).not.toThrow();
+    });
+
+    it('reads the pool’s mode from amplify_outputs.json: MFA off is a Simple pool', () => {
+      const outputs = (mfa?: string) => ({ auth: { user_pool_id: POOL_ID, user_pool_client_id: CLIENT_ID, ...(mfa !== undefined && { mfa_configuration: mfa }) } });
+      expect(poolConfigFromAmplifyOutputs(outputs('NONE')).poolSignInMode).toBe('simple');
+      expect(poolConfigFromAmplifyOutputs(outputs('OPTIONAL')).poolSignInMode).toBe('full');
+      expect(poolConfigFromAmplifyOutputs(outputs('REQUIRED')).poolSignInMode).toBe('full');
+      expect(poolConfigFromAmplifyOutputs(outputs())).not.toHaveProperty('poolSignInMode');
     });
   });
 

@@ -79,10 +79,14 @@ export function standardAuthProps(options: AuthStandardOptions, extras: Standard
     // and the app requires TOTP of every password user (auth-kit/server's requireUser).
     // Admin pools need MFA ON, but defineAuth rejects passkeys combined with mode REQUIRED (it doesn't
     // model FactorConfiguration), so applyAuthStandard sets MfaConfiguration ON on the L1 resource.
+    // Simple pools (ADR 0029): MFA OFF, so no authenticator can be enrolled (it would stop emailed codes).
     multifactor:
-      o.adminPool && !o.passkeys ? { mode: 'REQUIRED', totp: true } : { mode: 'OPTIONAL', totp: true },
-    // Admin pools recover through an admin only (Cognito's admin_only); everyday pools by email.
-    accountRecovery: o.adminPool ? 'NONE' : 'EMAIL_ONLY',
+      o.signIn.mode === 'simple'
+        ? { mode: 'OFF' }
+        : o.adminPool && !o.passkeys ? { mode: 'REQUIRED', totp: true } : { mode: 'OPTIONAL', totp: true },
+    // Admin pools recover through an admin only (Cognito's admin_only); everyday pools by email. Simple
+    // pools are admin-only too: no password exists to recover, and "forgot password" would create one.
+    accountRecovery: o.adminPool || o.signIn.mode === 'simple' ? 'NONE' : 'EMAIL_ONLY',
     groups: o.groups,
     senders: {
       email: {

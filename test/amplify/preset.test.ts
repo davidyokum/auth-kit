@@ -894,10 +894,14 @@ describe('Simple sign-in: code only (ADR 0029)', () => {
     const { template, applied } = synth(SIMPLE);
     const t = template();
     t.hasResourceProperties('AWS::Cognito::UserPool', {
-      Policies: Match.objectLike({ SignInPolicy: { AllowedFirstAuthFactors: ['EMAIL_OTP'] } }),
+      // Cognito requires PASSWORD in the list; nobody on a Simple pool can have one (see below).
+      Policies: Match.objectLike({ SignInPolicy: { AllowedFirstAuthFactors: ['PASSWORD', 'EMAIL_OTP'] } }),
       WebAuthnRelyingPartyID: Match.absent(),
       WebAuthnFactorConfiguration: Match.absent(),
-      AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'verified_email', Priority: 1 }] },
+      // No "forgot password" to create a password, and no authenticator to stop emailed codes.
+      AccountRecoverySetting: { RecoveryMechanisms: [{ Name: 'admin_only', Priority: 1 }] },
+      MfaConfiguration: 'OFF',
+      EnabledMfas: Match.absent(),
     });
     t.hasResourceProperties('AWS::Cognito::UserPoolClient', { RefreshTokenValidity: 43200, PreventUserExistenceErrors: 'ENABLED' });
     expect(applied.signInMode).toBe('simple');
@@ -931,7 +935,7 @@ describe('Simple sign-in: code only (ADR 0029)', () => {
     expect(after).toEqual(before);
   });
 
-  it('moves to Full in place: same resources, and only the sign-in policy, passkey settings, and refresh token change', () => {
+  it('moves to Full in place: same resources, and only sign-in, MFA, recovery, passkey, and refresh-token settings change', () => {
     const resources = (opts: AuthStandardOptions) => synth(opts).template().toJSON().Resources as Record<string, { Type: string; Properties?: Record<string, unknown> }>;
     const simple = resources({ ...BASE, signIn: { mode: 'simple', stay: 7 } });
     const full = resources(BASE);
@@ -941,7 +945,15 @@ describe('Simple sign-in: code only (ADR 0029)', () => {
     // Every changed property is one CloudFormation updates with no interruption (AWS::Cognito::UserPool and
     // AWS::Cognito::UserPoolClient references, checked 2026-11-19).
     const ALLOWED: Record<string, readonly string[]> = {
-      'AWS::Cognito::UserPool': ['Policies', 'WebAuthnRelyingPartyID', 'WebAuthnUserVerification', 'WebAuthnFactorConfiguration'],
+      'AWS::Cognito::UserPool': [
+        'Policies',
+        'WebAuthnRelyingPartyID',
+        'WebAuthnUserVerification',
+        'WebAuthnFactorConfiguration',
+        'MfaConfiguration',
+        'EnabledMfas',
+        'AccountRecoverySetting',
+      ],
       'AWS::Cognito::UserPoolClient': ['RefreshTokenValidity'],
     };
     const changed: string[] = [];

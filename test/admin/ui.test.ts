@@ -266,7 +266,8 @@ describe('InviteManyForm ("Add several at once", ADR 0029)', () => {
     expect(html).toContain('<details class="ak-invite-many"><summary>Add several at once</summary>');
     expect(html).toContain('<textarea name="emails" required=""');
     expect(html).toContain('Paste up to 50, one per line or separated by commas.');
-    expect(html).toContain('I’ve checked them.');
+    // Nothing is outside yet: the confirmation appears only once it can name the addresses.
+    expect(html).not.toContain('confirmedOutside');
     const many = html.slice(html.indexOf('ak-invite-many'));
     expect(radios(many).map((r) => r.value)).toEqual(['member', 'reviewer']);
     expect(radios(many).find((r) => r.checked)?.value).toBe('member');

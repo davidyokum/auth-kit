@@ -164,6 +164,9 @@ export type DeclineRequestsResult = ActionResult & {
 /** The most addresses one "Add several at once" sends (`inviteMany`). */
 export const INVITE_MANY_MAX = 50;
 
+/** How long one "Add several at once" keeps sending before it stops and names the rest as not sent. */
+export const INVITE_MANY_TIME_BUDGET_MS = 20_000;
+
 /**
  * "Add several at once" (ADR 0029): addresses pasted from a list, one role for all of them. Only
  * Member or an app role: admin roles need a reason and a recent sign-in, one person at a time.
@@ -173,15 +176,23 @@ export interface InviteManyInput {
   emails: string | readonly string[];
   /** Member (the default) or one of the app's own roles. */
   role?: string;
-  /** Required when any address is outside `inviteDomains`. */
-  confirmOutsideDomain?: boolean;
+  /**
+   * The addresses outside `inviteDomains` that the admin has checked: the `outside` list a refusal
+   * returned, sent back. Every outside address must be in it; a bare "yes" confirms nothing.
+   */
+  confirmedOutside?: string | readonly string[];
 }
 
 /** Why "Add several at once" didn't invite an address. */
 export interface InviteManySkip {
   email: string;
-  /** `exists`: it already has an account. `refused`: a guardrail said no. `failed`: the calls failed (the Activity page has the details). `not-sent`: it stopped before this one. */
-  status: 'exists' | 'refused' | 'failed' | 'not-sent';
+  /**
+   * `exists`: it already has an account. `refused`: a guardrail said no. `failed`: the calls failed
+   * (the Activity page has the details). `no-email`: the account was made but the email didn't send
+   * (use Resend). `not-logged`: the invite was sent but its result row wasn't written (it's also in
+   * `invited`). `not-sent`: it stopped before this one (after a failure, or out of time).
+   */
+  status: 'exists' | 'refused' | 'failed' | 'no-email' | 'not-logged' | 'not-sent';
   reason: string;
 }
 
@@ -189,6 +200,8 @@ export interface InviteManySkip {
 export type InviteManyResult = ActionResult & {
   invited?: readonly string[];
   skipped?: readonly InviteManySkip[];
+  /** On the outside-domain refusal: every address outside the usual domains, to confirm by sending back as `confirmedOutside`. */
+  outside?: readonly string[];
 };
 
 export interface InviteInput {
@@ -244,6 +257,7 @@ export const PEOPLE_FORM_FIELDS = {
   confirmOutsideDomain: 'confirmOutsideDomain',
   /** "Add several at once": the pasted addresses. */
   emails: 'emails',
+  confirmedOutside: 'confirmedOutside',
 } as const;
 
 export { MEMBER_ROLE } from '../shared/policy.js';

@@ -760,13 +760,54 @@ describe('add several at once (inviteMany, ADR 0029)', () => {
     expect(await t.people.inviteMany({ emails: 'rev@example.org', role: 'reviewer' })).toMatchObject({ ok: true, invited: ['rev@example.org'] });
   });
 
-  it('asks before inviting outside the usual domains, naming the addresses, and sends nothing until confirmed', async () => {
+  it('asks before inviting outside the usual domains, naming the addresses, and sends nothing until those very addresses are confirmed', async () => {
     const t = setup({ actor: ADMIN, config: { inviteDomains: ['example.org'] } });
     const refused = await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org' });
-    expect(refused).toMatchObject({ ok: false, guardrail: 'domain' });
+    expect(refused).toMatchObject({ ok: false, guardrail: 'domain', outside: ['grace@exmaple.org'] });
     expect(!refused.ok && refused.error).toMatch(/^grace@exmaple.org is outside this site's usual domains \(example.org\)\..*Nothing was sent\.$/);
     expect(t.pool.writes()).toEqual([]);
-    expect(await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org', confirmOutsideDomain: true })).toMatchObject({ ok: true, invited: ['ada@example.org', 'grace@exmaple.org'] });
+    // A bare yes confirms nothing; nor does a confirmation of some other address.
+    expect(await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org', confirmOutsideDomain: true } as never)).toMatchObject({ ok: false, guardrail: 'domain' });
+    expect(await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org, kat@nasa.example', confirmedOutside: 'grace@exmaple.org' })).toMatchObject({
+      ok: false,
+      guardrail: 'domain',
+      error: expect.stringMatching(/^kat@nasa.example is outside/) as unknown,
+      outside: ['grace@exmaple.org', 'kat@nasa.example'],
+    });
+    expect(t.sent).toEqual([]);
+    const sent = await t.people.inviteMany({ emails: 'ada@example.org, grace@exmaple.org', confirmedOutside: ['Grace@Exmaple.org'] });
+    expect(sent).toMatchObject({ ok: true, invited: ['ada@example.org', 'grace@exmaple.org'] });
+    expect(sent.ok && sent.message).toBe('Sent 2 invites as Member. Outside the usual domains, as you confirmed: grace@exmaple.org.');
+    // The audit entry says the address was outside and confirmed.
+    const rows = t.auditLog.rows.filter((r) => r.action === 'people.invite' && r.phase === 'result');
+    expect(rows.map((r) => (r.after as { outsideDomain?: boolean } | null)?.outsideDomain ?? false)).toEqual([false, true]);
+  });
+
+  it('reads pasted lists the way people paste them, without dropping or guessing', async () => {
+    const t = setup({ actor: ADMIN });
+    // A plain address before a Name <address> on the same line is kept (it used to be swallowed).
+    expect(await t.people.inviteMany({ emails: 'alice@example.org, Bob <bob@example.org>' })).toMatchObject({ ok: true, invited: ['alice@example.org', 'bob@example.org'] });
+    // Outlook's "Last, First" <address>, with the comma inside the quotes.
+    const u = setup({ actor: ADMIN });
+    expect(await u.people.inviteMany({ emails: '"Lovelace, Ada" <ada@example.org>; "Hopper, Grace" <grace@example.org>' })).toMatchObject({ ok: true, invited: ['ada@example.org', 'grace@example.org'] });
+    // A name that is itself a different address is refused, not resolved to the bracketed one.
+    const v = setup({ actor: ADMIN });
+    expect(await v.people.inviteMany({ emails: 'boss@example.org <someone@elsewhere.example>' })).toMatchObject({ ok: false, code: 'invalid', error: expect.stringContaining('boss@example.org <someone@elsewhere.example>') as unknown });
+    expect(v.sent).toEqual([]);
+  });
+
+  it('refuses a paste far longer than 50 addresses need, before reading it', async () => {
+    const t = setup({ actor: ADMIN });
+    expect(await t.people.inviteMany({ emails: 'a'.repeat(100_000) })).toMatchObject({ ok: false, code: 'invalid', error: expect.stringContaining('more text than 50 addresses need') as unknown });
+  });
+
+  it('a Simple site’s invite result says nothing about a passkey', async () => {
+    const t = setup({ actor: ADMIN, config: { signIn: { mode: 'simple', stay: 30 } } });
+    const result = await t.people.invite({ email: 'ada@example.org', role: 'member' });
+    expect(result.ok && result.message).toMatch(/^Invite sent to ada@example.org\. They can sign in now with a code sent to that address\. The invite expires/);
+    const full = setup({ actor: ADMIN });
+    const fullResult = await full.people.invite({ email: 'ada@example.org', role: 'member' });
+    expect(fullResult.ok && fullResult.message).toContain('then save a passkey');
   });
 
   it('needs people.manage, like one invite', async () => {
@@ -779,8 +820,19 @@ describe('add several at once (inviteMany, ADR 0029)', () => {
     const t = setup({ actor: ADMIN });
     t.failMail();
     const result = await t.people.inviteMany({ emails: 'ada@example.org grace@example.org' });
-    expect(result).toMatchObject({ ok: false, invited: [], skipped: [{ email: 'ada@example.org', status: 'failed' }, { email: 'grace@example.org', status: 'not-sent' }] });
+    // The account was made but its email didn't send: said so, with Resend, not "wasn't invited".
+    expect(result).toMatchObject({ ok: false, changed: 'partly', invited: [], skipped: [{ email: 'ada@example.org', status: 'no-email' }, { email: 'grace@example.org', status: 'not-sent' }] });
+    expect(!result.ok && result.error).toBe('Nobody was invited. The account was made but the email didn’t send for: ada@example.org. Use Resend for it. One wasn’t invited: grace@example.org. The Activity page says why.');
     expect(t.sent.map((m) => m.email)).toEqual([]);
+  });
+
+  it('stops after its time budget and names the rest as not sent, to send again', async () => {
+    let clock = Date.UTC(2026, 10, 19, 15);
+    const t = setup({ actor: ADMIN, config: { now: () => clock, onChange: () => void (clock += 15_000) } });
+    const result = await t.people.inviteMany({ emails: 'ada@example.org, grace@example.org, kat@example.org, dorothy@example.org' });
+    expect(result).toMatchObject({ ok: true, invited: ['ada@example.org', 'grace@example.org'] });
+    expect(result.skipped?.map((s) => s.status)).toEqual(['not-sent', 'not-sent']);
+    expect(result.ok && result.message).toBe('Sent 2 invites as Member. 2 weren’t invited: kat@example.org, dorothy@example.org. It ran out of time; send those again (anyone already invited is skipped).');
   });
 
   it('the form adapter reads emails, role, and confirmOutsideDomain', async () => {

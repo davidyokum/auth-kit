@@ -144,6 +144,77 @@ export function browserSessionSetCookie(header: string): string {
   return [pair, ...attrs.filter((a) => a !== '' && !/^(max-age|expires)=/i.test(a))].join('; ');
 }
 
+type WrittenCookieOptions = Record<string, unknown> & { maxAge?: unknown; expires?: unknown };
+
+/** Cookie options without a lifetime, unless the write is a deletion (an empty value, Max-Age ≤ 0, or a past Expires). */
+function sessionOnly(value: unknown, options: WrittenCookieOptions | undefined): WrittenCookieOptions | undefined {
+  if (options === undefined) return options;
+  const { maxAge, expires, ...rest } = options;
+  const past = expires instanceof Date ? expires.getTime() <= Date.now() : typeof expires === 'number' || typeof expires === 'string' ? new Date(expires).getTime() <= Date.now() : false;
+  const deleting = value === '' || (typeof maxAge === 'number' && maxAge <= 0) || past;
+  return deleting ? options : rest;
+}
+
+interface SettableCookies {
+  set(...args: unknown[]): unknown;
+}
+
+/** A cookie store whose `set` writes cookies that end with the browser; everything else passes through. */
+function sessionOnlyStore<T extends object>(store: T): T {
+  return new Proxy(store, {
+    get(target, prop) {
+      const value: unknown = Reflect.get(target, prop, target);
+      if (prop === 'set' && typeof value === 'function') {
+        return (...args: unknown[]) => {
+          const set = value as SettableCookies['set'];
+          // set(name, value, options) or set({ name, value, ...options }) (Next's cookie stores take both).
+          if (typeof args[0] === 'object' && args[0] !== null) {
+            const { name, value: v, ...options } = args[0] as WrittenCookieOptions & { name: unknown; value: unknown };
+            return set.call(target, { name, value: v, ...sessionOnly(v, options) });
+          }
+          return set.call(target, args[0], args[1], sessionOnly(args[1], args[2] as WrittenCookieOptions | undefined));
+        };
+      }
+      return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+}
+
+/** The parts of the Next adapter's `runWithAmplifyServerContext` input this wrapper changes. */
+interface ServerContextInput {
+  nextServerContext: null | { cookies?: unknown; request?: unknown; response?: unknown };
+}
+
+/**
+ * Simple sign-in's "every visit" (ADR 0029), for every server write: wraps the Next adapter's
+ * `runWithAmplifyServerContext` so each token cookie it sets has no `Max-Age` and no `Expires` and ends
+ * when the browser quits, whether the write comes from the proxy's refresh, a server action, or a route
+ * handler. The adapter would otherwise give each cookie the runner's `maxAge` (365 days if none).
+ * Deletions pass through unchanged, so signing out still clears them.
+ *
+ * ```ts
+ * const runner = createServerRunner({ config: outputs, runtimeOptions: amplifyCookieRuntimeOptions({ refreshTokenMinutes }) });
+ * export const runWithAmplifyServerContext = session.browserOnly ? browserSessionRunner(runner.runWithAmplifyServerContext) : runner.runWithAmplifyServerContext;
+ * ```
+ */
+export function browserSessionRunner<I extends ServerContextInput, R>(run: (input: I) => R): (input: I) => R {
+  return (input) => {
+    const ctx = input.nextServerContext;
+    if (ctx === null) return run(input);
+    if (typeof ctx.cookies === 'function') {
+      const cookies = ctx.cookies as () => unknown;
+      const wrapped = async () => sessionOnlyStore((await cookies()) as object);
+      return run({ ...input, nextServerContext: { ...ctx, cookies: wrapped } });
+    }
+    const response = ctx.response as { cookies?: unknown } | undefined;
+    if (response && typeof response === 'object' && typeof response.cookies === 'object' && response.cookies !== null) {
+      // NextResponse: its cookie store writes the response's Set-Cookie headers; wrap it on this response.
+      Object.defineProperty(response, 'cookies', { value: sessionOnlyStore(response.cookies), configurable: true });
+    }
+    return run(input);
+  };
+}
+
 /** `Cache-Control` for every private or admin response: rendered per request, never cached. */
 export const PRIVATE_NO_STORE = 'private, no-store';
 
