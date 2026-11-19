@@ -1,3 +1,4 @@
+import { type SignInSettings, normalizeSignIn } from '../shared/sign-in-mode.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -137,9 +138,12 @@ export interface RoutesFromNextBuildOptions {
    * The page the server's page guards send an account with only emailed codes to (`firstCredentialPath`
    * in `auth-kit/server`, default `/account/sign-in-method`). The build must have it, or every new
    * invitee lands on a 404 after their first code. `false` only when the server turns the rule off
-   * (`requireFirstCredential: false`).
+   * (`requireFirstCredential: false`). On a Simple site (`signIn`) the default is `false`: an emailed
+   * code is everyone's only credential, so nobody is sent there.
    */
   firstCredentialPath?: string | false;
+  /** The site's sign-in mode (ADR 0029), the same `signIn` the server gets. */
+  signIn?: SignInSettings;
 }
 
 /** Where the page guards send an account with only emailed codes, unless the site says otherwise. */
@@ -171,12 +175,13 @@ export function routesFromNextBuild(distDir = '.next', options: RoutesFromNextBu
       if (!found.has(path)) found.set(path, { path, kind: path.startsWith('/api/') ? 'route' : 'page' });
     }
   }
-  const chooser = options.firstCredentialPath === undefined ? DEFAULT_FIRST_CREDENTIAL_PATH : options.firstCredentialPath;
+  const simple = normalizeSignIn(options.signIn, 2, 'routesFromNextBuild signIn').mode === 'simple';
+  const chooser = options.firstCredentialPath === undefined ? (simple ? false : DEFAULT_FIRST_CREDENTIAL_PATH) : options.firstCredentialPath;
   if (chooser !== false && found.get(chooser)?.kind !== 'page') {
     throw new Error(
       `auth-matrix: the build has no page at ${chooser}, where the server's page guards send an account with only emailed codes (403 first_credential_required) ` +
         '— every new invitee would land on a 404 after their first code. Add the page (pages.requireUser({ allowFirstCredentialEnrollment: true }) and ChooseFirstCredential), ' +
-        'pass firstCredentialPath if it lives elsewhere, or firstCredentialPath: false only if the server turns the rule off (requireFirstCredential: false).',
+        'pass firstCredentialPath if it lives elsewhere, or signIn if this is a Simple site (ADR 0029), which has no such page.',
     );
   }
   const excluded = (path: string) =>

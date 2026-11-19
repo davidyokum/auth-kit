@@ -481,6 +481,12 @@ describe('routesFromNextBuild', () => {
     expect(routesFromNextBuild(elsewhere, { firstCredentialPath: '/welcome/choose' }).map((r) => r.path)).toContain('/welcome/choose');
     expect(routesFromNextBuild(without, { firstCredentialPath: false })).toHaveLength(2);
   });
+
+  it('a Simple site has no chooser page and needs none (ADR 0029)', () => {
+    const without = fakeBuild({ '/page': '/', '/records/page': '/records' }, null);
+    expect(routesFromNextBuild(without, { signIn: { mode: 'simple', stay: 30 } })).toHaveLength(2);
+    expect(() => routesFromNextBuild(without, { signIn: { mode: 'full' } })).toThrow(/no page at \/account\/sign-in-method/);
+  });
 });
 
 describe('a freshly signed-up Member (sign-up sites, ADR 0023)', () => {

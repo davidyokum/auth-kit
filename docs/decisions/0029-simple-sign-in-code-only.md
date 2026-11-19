@@ -56,7 +56,7 @@ One setting, `signIn`, carries it, in the template's `site.config.ts`, and the s
 
 **Simple to Full** is a settings change and a deploy. CloudFormation updates the pool's sign-in policy, WebAuthn settings, MFA (OFF to OPTIONAL), and account recovery (admin-only to verified email), and the app client's refresh-token lifetime, without replacing either (a test checks that only those properties change), so every account stays and the emailed code keeps working. Each person's next sign-in then asks them to set up a passkey or a password, because Full requires it.
 
-**Full to Simple isn't offered.** An account with an authenticator app can't receive emailed codes (Cognito's rule), so on a pool that takes only emailed codes it would be locked out. A site that wants Simple starts Simple. The preset can't see the deployed pool, so the refusal lives in the template's deploy, which reads the live pool's MFA setting first and stops when it's Full and `signIn` says Simple.
+**Full to Simple isn't offered.** An account with an authenticator app can't receive emailed codes (Cognito's rule), so on a pool that takes only emailed codes it would be locked out. A site that wants Simple starts Simple. The preset can't see the deployed pool, so the refusal lives in the template's build, which reads the branch's deployed outputs before the backend deploys (`mfa_configuration`: NONE is Simple) and stops when the pool is Full and `signIn` says Simple.
 
 ## Consequences
 
