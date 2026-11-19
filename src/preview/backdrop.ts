@@ -110,6 +110,11 @@ export function previewBackdrop(host: HTMLElement, options: PreviewBackdropOptio
         canvas.setAttribute('data-ready', '');
         resolveReady();
       },
+      // As <Backdrop> does: the card's heading leaves the name out of sight while the art shows it.
+      onSiteName: (shown) => {
+        if (shown) host.setAttribute('data-backdrop-site-name', 'shown');
+        else host.removeAttribute('data-backdrop-site-name');
+      },
     });
   } catch (e) {
     fail(e);
@@ -136,6 +141,7 @@ export function previewBackdrop(host: HTMLElement, options: PreviewBackdropOptio
       controller?.destroy();
       controller = null;
       canvas.remove();
+      host.removeAttribute('data-backdrop-site-name');
     },
   };
 }

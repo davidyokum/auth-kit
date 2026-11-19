@@ -32,6 +32,9 @@ import {
   HiddenUsername,
   Note,
   PasswordField,
+  SiteHeadingWords,
+  type SiteNameOnCard,
+  SiteNamedWords,
   StatusRegion,
   Steps,
   type StyleProps,
@@ -117,6 +120,15 @@ export interface SignInProps extends StyleProps, PasswordCheckOptions {
   loadFactors?: () => Promise<ClientAuthFactors>;
   /** Default 1: the sign-in screen is usually the page. */
   headingLevel?: HeadingLevel;
+  /**
+   * Where the card names the site: in the first heading ("Sign in to {Site}") and the account line
+   * ("New to {Site}?"). `auto` (default): when a backdrop behind the card already letters the name
+   * (Yokum magnetic; `<Backdrop>` marks it `data-backdrop-site-name="shown"`), the card says just
+   * "Sign in" and "New here?"; screen readers still hear "Sign in to {Site}". `always`: the card names
+   * the site whatever is behind it. `never`: the page shows the name some other way (a header of its
+   * own). Needs auth-kit's styles (`authKitStyles`); without them the card always names the site.
+   */
+  siteNameOnCard?: SiteNameOnCard;
   renderQrCode?: ((otpauthUri: string) => ReactNode) | false;
   /**
    * The email field's example address (A9): defaults to the family's (`name@osbm.nc.gov`), and a site
@@ -535,7 +547,7 @@ export function SignIn(props: SignInProps) {
   }
 
   const busy = fb.busy;
-  const title = props.reauth ? SIGN_IN.reauthHeading : SIGN_IN.heading(c);
+  const title = props.reauth ? SIGN_IN.reauthHeading : <SiteHeadingWords short={SIGN_IN.headingShort} siteWords={SIGN_IN.headingSiteWords(c)} />;
   const reauthNote = props.reauth ? <Text classNames={classNames}>{SIGN_IN.reauthNote}</Text> : null;
   const summaryField = fb.field === 'email' ? ids.email : fb.field === 'secret' ? ids.password : fb.field === 'code' ? ids.code : fb.field === 'new-password' ? ids.newPassword : undefined;
   const summary = <ErrorSummary error={fb.error} fieldId={summaryField} classNames={classNames} />;
@@ -619,7 +631,7 @@ export function SignIn(props: SignInProps) {
       case 'request':
         return line(
           <>
-            {ACCESS_LINE.newTo(c)}{' '}
+            <SiteNamedWords full={ACCESS_LINE.newTo(c)} short={ACCESS_LINE.newHere} />{' '}
             <a href={requestAccessHref} onClick={requestAccessLink} {...tagged(requestAccessLink)} {...slot(classNames, 'link')}>
               {ACCESS_LINE.requestAccess}
             </a>
@@ -629,7 +641,7 @@ export function SignIn(props: SignInProps) {
       case 'open':
         return line(
           <>
-            {ACCESS_LINE.newTo(c)}{' '}
+            <SiteNamedWords full={ACCESS_LINE.newTo(c)} short={ACCESS_LINE.newHere} />{' '}
             <a href={signUpHref} onClick={signUpLink} {...tagged(signUpLink)} {...slot(classNames, 'link')}>
               {ACCESS_LINE.createAccount}
             </a>
@@ -640,13 +652,17 @@ export function SignIn(props: SignInProps) {
         return (props.inviteLine ?? 'link') === 'link'
           ? line(
               <>
-                {ACCESS_LINE.inviteOnly(c)}{' '}
+                <SiteNamedWords full={ACCESS_LINE.inviteOnly(c)} short={ACCESS_LINE.inviteOnlyHere} />{' '}
                 <button type="button" onClick={needAccess} {...tagged(needAccess)} {...slot(classNames, 'linkButton')}>
                   {ACCESS_LINE.needAccess}
                 </button>
               </>,
             )
-          : line(`${ACCESS_LINE.inviteOnly(c)} ${ACCESS_LINE.askToBeAdded}`);
+          : line(
+              <>
+                <SiteNamedWords full={ACCESS_LINE.inviteOnly(c)} short={ACCESS_LINE.inviteOnlyHere} /> {ACCESS_LINE.askToBeAdded}
+              </>,
+            );
     }
   }
 
@@ -1280,6 +1296,7 @@ export function SignIn(props: SignInProps) {
     <Card
       name="sign-in"
       siteName={siteName}
+      siteNameOnCard={props.siteNameOnCard ?? 'auto'}
       view={view.name}
       theme={theme}
       bottom={bottom}

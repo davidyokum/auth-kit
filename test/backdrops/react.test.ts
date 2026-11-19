@@ -53,6 +53,35 @@ describe('<Backdrop>', () => {
     expect(container.firstElementChild?.hasAttribute('data-backdrop-error')).toBe(false);
   });
 
+  it('says on its root when the art letters the site’s name, from the server’s HTML on', () => {
+    const named = { style: 'yokum-magnetic', seed: 'ssr', siteName: 'Example Reports' } as const;
+    expect(renderToString(createElement(Backdrop, named, card))).toContain('data-backdrop-site-name="shown"');
+    expect(renderToString(createElement(Backdrop, { style: 'yokum-magnetic', seed: 'ssr' }, card))).not.toContain('data-backdrop-site-name');
+    expect(renderToString(createElement(Backdrop, { style: 'aurora', seed: 'ssr', siteName: 'Example Reports' }, card))).not.toContain('data-backdrop-site-name');
+    // In the browser the drawing decides: a 640×400 page has no room around the card for the title.
+    const small = render(createElement(Backdrop, named, card));
+    expect(small.container.firstElementChild?.hasAttribute('data-backdrop-site-name')).toBe(false);
+    cleanup();
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 900 });
+    const tall = render(createElement(Backdrop, named, card));
+    expect(tall.container.firstElementChild?.getAttribute('data-backdrop-site-name')).toBe('shown');
+  });
+
+  it('on a touch screen, a swipe that starts on the art plays with it; one on the card scrolls as usual', () => {
+    const { container } = render(createElement(Backdrop, { style: 'yokum-magnetic', seed: 'touch', siteName: 'Example Reports' }, card));
+    const root = container.firstElementChild!;
+    const swipe = (target: Element) => {
+      fireEvent.touchStart(target, { touches: [{ clientX: 10, clientY: 10 }] });
+      const move = new Event('touchmove', { bubbles: true, cancelable: true });
+      Object.defineProperty(move, 'touches', { value: [{ clientX: 40, clientY: 12 }] });
+      target.dispatchEvent(move);
+      return move.defaultPrevented;
+    };
+    expect(swipe(root)).toBe(true);
+    expect(swipe(screen.getByRole('button', { name: 'Sign in with a passkey' }))).toBe(false);
+    expect(swipe(root.querySelector('[data-backdrop-card]')!)).toBe(false);
+  });
+
   it('leaves clicks to the children', () => {
     const onClick = vi.fn();
     render(createElement(Backdrop, { style: 'ripples', seed: 'click' }, createElement('button', { type: 'button', onClick }, 'Continue')));

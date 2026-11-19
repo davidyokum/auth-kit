@@ -642,6 +642,8 @@ export const yokumMagneticV1 = defineVersion({
         setup.invalidate(4000);
       },
       hot: [physics, drawFilings, drawMagnet, targetOf, angleDelta],
+      // Not part of the drawing (frozen above): tells the card whether the name is on the page.
+      siteNameShown: () => letters > 0,
     };
   },
 });

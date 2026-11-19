@@ -56,6 +56,13 @@ export function plain(line: Rich): string {
 
 export const SIGN_IN = {
   heading: (c: CopyContext) => `Sign in to ${c.siteName}`,
+  /**
+   * The heading in two parts, for a page that already shows the site's name (a backdrop that letters
+   * it, `siteNameOnCard`): "Sign in" on screen, and "to {Site}" kept for screen readers. Joined by
+   * a space, they are `heading`.
+   */
+  headingShort: 'Sign in',
+  headingSiteWords: (c: CopyContext) => `to ${c.siteName}`,
   reauthHeading: 'Confirm it’s you',
   reauthNote: 'For your security, sign in again to continue.',
   emailLabel: 'Email address',
@@ -138,11 +145,15 @@ export const SIGN_IN = {
 /** The card's account-creation line, one per mode, so the card says which one applies (Card Studio's ACCESSLINE; register D1). */
 export const ACCESS_LINE = {
   newTo: (c: CopyContext) => `New to ${c.siteName}?`,
+  /** `newTo` on a page that already shows the site's name (see `SIGN_IN.headingShort`). */
+  newHere: 'New here?',
   requestAccess: 'Request access',
   createAccount: 'Create an account',
   /** Sign-up for approved domains: "… with your nc.gov email address." */
   withDomains: (domains: string) => ` with your ${domains} email address.`,
   inviteOnly: (c: CopyContext) => `New to ${c.siteName}? It’s invite-only.`,
+  /** `inviteOnly` on a page that already shows the site's name. */
+  inviteOnlyHere: 'New here? It’s invite-only.',
   needAccess: 'Need access?',
   askToBeAdded: 'Ask the person who runs it to add you.',
 } as const;

@@ -45,6 +45,7 @@ const GROUPS: Record<string, Record<string, unknown>> = Object.fromEntries(
  */
 const CALLS: Record<string, (c: copy.CopyContext) => unknown[][]> = {
   'SIGN_IN.heading': (c) => [[c]],
+  'SIGN_IN.headingSiteWords': (c) => [[c]],
   'SIGN_IN.totpSub': (c) => [[c]],
   'SIGN_IN.codeSub': (c) => [[c, EMAIL]],
   'SIGN_IN.codeResent': () => [['2:05 PM']],
@@ -410,6 +411,8 @@ describe('Card Studio v4’s words', () => {
 
   it('sign in', () => {
     expect(copy.SIGN_IN.heading(personal)).toBe('Sign in to Example Reports');
+    // The short heading and its site words make the full one (a backdrop that letters the name).
+    expect(`${copy.SIGN_IN.headingShort} ${copy.SIGN_IN.headingSiteWords(personal)}`).toBe(copy.SIGN_IN.heading(personal));
     expect(copy.SIGN_IN.reauthHeading).toBe('Confirm it’s you');
     expect(copy.SIGN_IN.continue).toBe('Continue');
     expect(copy.SIGN_IN.signIn).toBe('Sign in');
@@ -438,6 +441,8 @@ describe('Card Studio v4’s words', () => {
     expect(`${copy.ACCESS_LINE.newTo(personal)} ${copy.ACCESS_LINE.createAccount}${copy.ACCESS_LINE.withDomains('nc.gov')}`).toBe('New to Example Reports? Create an account with your nc.gov email address.');
     expect(copy.ACCESS_LINE.inviteOnly(personal)).toBe('New to Example Reports? It’s invite-only.');
     expect(copy.ACCESS_LINE.askToBeAdded).toBe('Ask the person who runs it to add you.');
+    expect(copy.ACCESS_LINE.newHere).toBe('New here?');
+    expect(copy.ACCESS_LINE.inviteOnlyHere).toBe('New here? It’s invite-only.');
     expect(copy.ACCESS_LINE.needAccess).toBe('Need access?');
     expect(copy.ACCESS_HELP.heading(personal)).toBe('Need access to Example Reports?');
     expect(copy.ACCESS_HELP.sub(personal)).toBe('Example Reports is invite-only. The Example Reports team adds people and sends each one an email invitation.');
