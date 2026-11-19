@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Lost your authenticator app?" [level=1]
 - paragraph: Codes can’t be emailed to accounts that use an authenticator app, so Jordan Lee has to reset it on your Example Reports account. Then you can set up a new one.
 - list:
@@ -14,5 +15,4 @@
 - paragraph: Jordan Lee looks after Example Reports.
 - paragraph: Never send a password or code.
 - status
-- button "Back"
 - paragraph: This site is managed by UNC-Chapel Hill

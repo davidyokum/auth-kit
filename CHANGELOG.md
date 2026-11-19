@@ -2,6 +2,35 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+## [0.1.18-alpha.1] - 2026-11-19
+
+Every screen after the email step has Back; "How do you want to sign in?" says who is signing in and what a first sign-in chooses, then three equal rows with the emailed code first; the passkey retry is bold only where this browser remembers a passkey; and on Yokum magnetic a taller screen never covers the site's name (ADR 0024 and 0021, amended 2026-11-19). Pre-release. No breaking changes to the API; the screens change.
+
+### Changed
+
+- **Back, at the top of the card,** on every sign-in and help screen after the email step: it returns to the screen before, as it was (the address still typed, a sent code still good). It replaces "· Change" after the address and the bottom "Back to sign in" / "Back" on the triage list, the help screens, and "Need access?". Off while a request is out. A passkey screen comes back as "didn't work", never opening the browser's window by itself. Slot `back`.
+- **"How do you want to sign in?"**: "You're signing in as {email}." and "First time signing in? Choose Email me a code. Then you'll set up a passkey or password for faster sign-in next time." (slot `intro`), before the rows. The rows are equal and one line each, in the order Email me a code, Use a passkey, Use a password: no "Recommended" pill, no filled passkey row, no description under it. The line under the rows is gone (it moved into the intro). A first visit draws the same rows. Copy: `SIGN_IN.chooseSigningInAs`, `chooseFirstTimeLead`, `chooseFirstTimeNext`; `chooseRecommended`, `choosePasskeySub`, and `chooseCodeFirstVisit` are deprecated (unused).
+- **The passkey retry follows the browser.** When the prompt closes or finds nothing, and this browser remembers a passkey for the address, the primary button is "Try again with your passkey" with the glowing fingerprint (`SIGN_IN.tryAgainPasskey`; `data-auth-kit-recommended` on the button). Otherwise "Email me a code" is the primary button, Try again is secondary, and "Email me a code instead" leaves the links. While the browser's window is open, nothing changes.
+- **Yokum magnetic lays its name out again when the card changes.** It placed the name (and the magnet) around the first card it saw, so a taller later screen covered the name. A style module may declare `followsCard: true`, and the renderer builds it again once the card's box settles at a new size; Yokum magnetic does. v1 draws exactly as before (its frozen hash is unchanged). Where no band around a tall card has room, the name leaves the art and the card's heading names the site.
+- **Preview mode:** every screen with Back reports the action `back`, and `nextAfter` says where it goes (where that screen usually comes from; `back` elsewhere goes to the email step, typed). The `choose` screen's `first-visit` state now looks like its default.
+
+### Added
+
+- **`controller.layout()`** (`renderBackdrop`, and the preview's `renderBackdrop` handle): the card's box the art was laid out around and where the site's name sits, or null. A style instance may give `siteNameBox()`; Yokum magnetic v1 does.
+- **`nextTrail`** (exported from the `SignIn` module for tests): how Back's trail grows, shortens, and clears.
+- **A browser test that the card never covers the name** (`test/screenshots/scene.spec.ts`): one card walked through every sign-in and help screen on Yokum magnetic, in the template's scene, at four desktop and three phone sizes and three site names.
+
+### Removed
+
+- The CSS for the filled "recommended" choice row and its pill (`[data-auth-kit-slot="way"][data-auth-kit-recommended]…`, `[data-auth-kit-recommended-label]`); the bold retry has rules of its own.
+
+### Migration
+
+1. `npx auth-kit upgrade 0.1.18-alpha.1`.
+2. Copy `authKitStyles` again: the recommended-row rules are gone, and the `back`, `intro`, and bold-retry rules are new (a stale copy draws Back as a bare button; the template's styles unit test fails until it's copied).
+3. **Anchor the scene's card at the top**, so later screens grow down instead of up over the backdrop's name (README, "Lay the scene out so the card's top stays put"). The template: `.auth-scene-content { display: grid; justify-items: center; align-items: start; padding: max(56px, calc((100dvh - 450px) / 2)) var(--gutter) 72px; }`, and on phones `padding: 24px var(--gutter) 40px`.
+4. Sites with their own tests of the sign-in screens: "Back" replaces "Change" and "Back to sign in"; the choice rows are in the order code, passkey, password, and their names have no "Recommended".
+
 ## [0.1.17-alpha.1] - 2026-11-19
 
 On Yokum magnetic, where the art already letters the site's name, the card says just "Sign in". Pre-release. No breaking changes.

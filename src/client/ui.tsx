@@ -70,7 +70,11 @@ export type AuthKitSlot =
   /** A way's label, with "(recommended)" after it on the passkey. */
   | 'wayLabel'
   /** A way's description ("Your face, fingerprint, or device PIN."). */
-  | 'wayDescription';
+  | 'wayDescription'
+  /** "Back" at the top of the card, on every sign-in screen after the email step: the screen before. */
+  | 'back'
+  /** "How do you want to sign in?": who is signing in, and what a first-timer should choose. */
+  | 'intro';
 
 export type AuthKitClassNames = Partial<Record<AuthKitSlot, string>>;
 
@@ -343,15 +347,24 @@ export function AltLinks(props: { links: readonly AltLink[]; classNames: AuthKit
   );
 }
 
-/** "Signing in as {email} · Change" / "for {email} · Change". */
-export function Who(props: { lead: string; email: string; onChange: () => void; disabled?: boolean; classNames: AuthKitClassNames | undefined }) {
+/**
+ * "Signing in as {email}" / "for {email}". With `onChange`, " · Change" after it; the sign-in card
+ * leaves that out since its screens carry "Back" (the address is one or two steps back).
+ */
+export function Who(props: { lead: string; email: string; onChange?: () => void; disabled?: boolean; classNames: AuthKitClassNames | undefined }) {
   return (
     <p {...slot(props.classNames, 'who')}>
-      {props.lead} <strong>{props.email}</strong> <span aria-hidden="true">·</span>{' '}
-      <button type="button" disabled={props.disabled} onClick={props.onChange} {...tagged(props.onChange)} {...slot(props.classNames, 'linkButton')}>
-        {SIGN_IN.change}
-        <span data-auth-kit-sr="">{SHARED.changeEmailSr}</span>
-      </button>
+      {props.lead} <strong>{props.email}</strong>
+      {props.onChange ? (
+        <>
+          {' '}
+          <span aria-hidden="true">·</span>{' '}
+          <button type="button" disabled={props.disabled} onClick={props.onChange} {...tagged(props.onChange)} {...slot(props.classNames, 'linkButton')}>
+            {SIGN_IN.change}
+            <span data-auth-kit-sr="">{SHARED.changeEmailSr}</span>
+          </button>
+        </>
+      ) : null}
     </p>
   );
 }
@@ -464,6 +477,8 @@ export function Card(props: {
   siteName?: string;
   /** Where the card names the site (`SignIn`'s `siteNameOnCard`). Default `always`. */
   siteNameOnCard?: SiteNameOnCard;
+  /** "Back" at the top of the card, before the heading: the screen before this one. */
+  back?: { onClick: () => void; disabled?: boolean } | null;
   bottom?: CardBottom;
   troubleBelow?: (() => void) | null;
   rootRef?: Ref<HTMLDivElement>;
@@ -491,6 +506,12 @@ export function Card(props: {
           <div aria-hidden="true" {...slot(props.classNames, 'monogram')}>
             {monogramOf(props.siteName)}
           </div>
+        ) : null}
+        {props.back ? (
+          <button type="button" disabled={props.back.disabled} onClick={props.back.onClick} {...tagged(props.back.onClick)} {...slot(props.classNames, 'back')}>
+            <Icon name="back" />
+            {SIGN_IN.back}
+          </button>
         ) : null}
         {props.children}
         {hasBottom ? (

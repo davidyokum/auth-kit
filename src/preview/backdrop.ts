@@ -52,6 +52,12 @@ export interface PreviewBackdropHandle {
   /** Why it couldn't draw, when it couldn't (a bad option, no canvas); also on `host` as `data-backdrop-error`. */
   readonly error: string | null;
   update(options: Partial<PreviewBackdropOptions>): void;
+  /**
+   * The card's box the art was laid out around and where the site's name sits, in `host`'s CSS pixels
+   * (`BackdropController.layout`, 0.1.18): null before the first frame. A lab, or a test, checks with it
+   * that the card never covers the name.
+   */
+  layout(): { card: BackdropRect; siteName: BackdropRect | null } | null;
   destroy(): void;
 }
 
@@ -136,6 +142,9 @@ export function previewBackdrop(host: HTMLElement, options: PreviewBackdropOptio
       } catch (e) {
         fail(e);
       }
+    },
+    layout() {
+      return controller?.layout() ?? null;
     },
     destroy() {
       controller?.destroy();

@@ -1,15 +1,19 @@
+- button "Back"
 - heading "How do you want to sign in?" [level=1]
 - paragraph:
-  - text: for
+  - text: You’re signing in as
   - strong: ada@example.org
-  - button "Change email address"
+  - text: .
+- paragraph:
+  - strong: First time signing in?
+  - text: Choose Email me a code. Then you’ll set up a passkey or password for faster sign-in next time.
 - list:
   - listitem:
-    - button "Use a passkey Recommended Your face, fingerprint, or device PIN."
+    - button "Email me a code"
+  - listitem:
+    - button "Use a passkey"
   - listitem:
     - button "Use a password"
-  - listitem:
-    - button "Email me a code"
 - status
 - button "Trouble signing in?"
 - paragraph: This site is managed by the NC Office of State Budget and Management

@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Lost your authenticator app?" [level=1]
 - paragraph: Codes can’t be emailed to accounts that use an authenticator app, so the Example Reports team has to reset it on your Example Reports account. Then you can set up a new one.
 - list:
@@ -13,4 +14,3 @@
   - text: .
 - paragraph: Never send a password or code.
 - status
-- button "Back"

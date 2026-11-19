@@ -456,6 +456,82 @@ describe('register E3: subjects rotate per visit; the seed locks the look; the s
     expect(answers).toEqual([true, false, true]);
   });
 
+  it('a style laid out around the card (Yokum magnetic) lays out again when the card grows, once it settles (0.1.18)', () => {
+    const host = new FakeHost();
+    // A desktop scene: the email card, then a taller screen in the same card, its top where it was.
+    const box = { left: 210, top: 260, width: 380, height: 300 };
+    const card = { getBoundingClientRect: () => ({ ...box, right: box.left + box.width, bottom: box.top + box.height }) };
+    const canvas = new FakeCanvasElement(800, 900);
+    const controller = createBackdropRenderer(canvas as unknown as HTMLCanvasElement, { style: 'yokum-magnetic', seed: 'name', family: 'personal', siteName: 'Example Reports', card } as never, host);
+    const first = controller.layout()!;
+    expect(first.card).toEqual({ x: 210, y: 260, width: 380, height: 300 });
+    expect(first.siteName).not.toBeNull();
+    // Above the card, clear of it.
+    expect(first.siteName!.y + first.siteName!.height).toBeLessThanOrEqual(260);
+    // A change of a few pixels (a font settling) is not a new layout.
+    box.height = 303;
+    for (const fn of host.sizes) fn();
+    host.advance(400);
+    expect(controller.layout()!.card.height).toBe(300);
+    // The card grows: nothing until it settles, then one new layout around the new box.
+    box.height = 470;
+    for (const fn of host.sizes) fn();
+    host.advance(50);
+    box.height = 520;
+    for (const fn of host.sizes) fn();
+    expect(controller.layout()!.card.height).toBe(300);
+    host.advance(400);
+    const second = controller.layout()!;
+    expect(second.card).toEqual({ x: 210, y: 260, width: 380, height: 520 });
+    expect(second.siteName).not.toBeNull();
+    expect(controller.siteNameShown()).toBe(true);
+    controller.destroy();
+  });
+
+  it('on a phone the name sits below the card and moves down with it, or leaves when there is no room', () => {
+    const host = new FakeHost();
+    const box = { left: 16, top: 24, width: 358, height: 380 };
+    const card = { getBoundingClientRect: () => ({ ...box, right: box.left + box.width, bottom: box.top + box.height }) };
+    const canvas = new FakeCanvasElement(390, 844);
+    const shown: boolean[] = [];
+    const controller = createBackdropRenderer(canvas as unknown as HTMLCanvasElement, { style: 'yokum-magnetic', seed: 'name', family: 'personal', siteName: 'Example Reports', card, onSiteName: (v: boolean) => shown.push(v) } as never, host);
+    const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    const first = controller.layout()!;
+    expect(first.siteName).not.toBeNull();
+    expect(first.siteName!.y).toBeGreaterThanOrEqual(24 + 380);
+    box.height = 520;
+    for (const fn of host.sizes) fn();
+    host.advance(400);
+    const second = controller.layout()!;
+    expect(second.card.height).toBe(520);
+    if (second.siteName) {
+      expect(overlaps(second.siteName, second.card)).toBe(false);
+      expect(second.siteName.y).toBeGreaterThan(first.siteName!.y);
+    }
+    // So tall nothing fits below or above: the name leaves the art, and the card's heading says it.
+    box.height = 760;
+    for (const fn of host.sizes) fn();
+    host.advance(400);
+    expect(controller.layout()!.siteName).toBeNull();
+    expect(shown.at(-1)).toBe(false);
+    controller.destroy();
+  });
+
+  it('a style not laid out around the card keeps its picture when the card changes', () => {
+    const host = new FakeHost();
+    const box = { left: 210, top: 100, width: 380, height: 300 };
+    const card = { getBoundingClientRect: () => ({ ...box, right: box.left + box.width, bottom: box.top + box.height }) };
+    const { controller } = setup({ card }, host);
+    const frames = controller.stats().frames;
+    box.height = 520;
+    for (const fn of host.sizes) fn();
+    host.reduced = true;
+    host.advance(400);
+    expect(controller.layout()!.card.height).toBe(300);
+    expect(controller.layout()!.siteName).toBeNull();
+    expect(controller.stats().frames).toBeGreaterThanOrEqual(frames);
+  });
+
   it('a finger is there at once: a quick tap reaches the art without easing in', () => {
     const { canvas, host } = setup({ style: 'yokum-magnetic', seed: 'name', siteName: 'Example Reports', card: { x: 210, y: 220, width: 380, height: 240 } });
     host.advance(2000);

@@ -96,6 +96,12 @@ export interface BackdropController {
   stats(): BackdropStats;
   /** Whether the art shows the site's name right now (`onSiteName`); false while its code is loading. */
   siteNameShown(): boolean;
+  /**
+   * Where the site's name sits, in the target's CSS pixels (styles that letter it; null when it isn't
+   * drawn), and the card's box the art was laid out around. For tests and layout checks: the card never
+   * covers the name (0.1.18).
+   */
+  layout(): { card: BackdropRect; siteName: BackdropRect | null } | null;
   /** Stops everything and removes every listener. */
   destroy(): void;
 }
@@ -103,6 +109,9 @@ export interface BackdropController {
 const MAX_BACKING_PIXELS = 3840 * 2160;
 const IDLE_MS = 5000;
 const RESIZE_DEBOUNCE_MS = 150;
+/** A style that follows the card lays out again once the card's box settles, and only for a real change. */
+const CARD_SETTLE_MS = 120;
+const CARD_MOVE_PX = 4;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 /** Taps on these (or on the card) never reach a style. */
 const CONTROLS = 'a,button,input,select,textarea,label,summary,[role="button"],[role="link"],[contenteditable],[data-backdrop-card]';
@@ -159,6 +168,9 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
   let frameHandle: number | null = null;
   let invalidUntil = 0;
   let resizeTimer: number | null = null;
+  let cardTimer: number | null = null;
+  /** The card's box the style instance was built around (`followsCard` styles build again when it moves). */
+  let builtCard: BackdropRect | null = null;
   let ready = false;
   /** The last answer given to `onSiteName` (null: none yet). */
   let siteNameReported: boolean | null = null;
@@ -261,6 +273,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     const bh = Math.max(1, Math.round(height * ratio));
     const createLayer = layerFactory(host.createCanvas, ratio);
     card = cardRect();
+    builtCard = card;
     instance?.destroy?.();
     instance = art.version.create(
       buildSetup({
@@ -476,10 +489,32 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
     }
   }
 
-  /** Keeps the card's rectangle current (taps on it never reach a style). */
+  function cardMoved(): boolean {
+    if (!builtCard) return false;
+    return (
+      Math.abs(card.x - builtCard.x) > CARD_MOVE_PX ||
+      Math.abs(card.y - builtCard.y) > CARD_MOVE_PX ||
+      Math.abs(card.width - builtCard.width) > CARD_MOVE_PX ||
+      Math.abs(card.height - builtCard.height) > CARD_MOVE_PX
+    );
+  }
+
+  /**
+   * Keeps the card's rectangle current (taps on it never reach a style). A style laid out around the
+   * card (`followsCard`: Yokum magnetic's name and magnet) is laid out again once the card's box settles,
+   * so a taller screen never covers the name (0.1.18).
+   */
   function onCardMove(): void {
     if (destroyed || !instance) return;
     card = cardRect();
+    if (art.module.followsCard !== true || !cardMoved()) return;
+    if (cardTimer !== null) host.clearTimer(cardTimer);
+    cardTimer = host.setTimer(() => {
+      cardTimer = null;
+      if (destroyed || !instance) return;
+      card = cardRect();
+      if (cardMoved()) rebuildAndDraw();
+    }, CARD_SETTLE_MS);
   }
 
   function bindCard(): void {
@@ -576,6 +611,10 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
       else refresh();
     },
     siteNameShown,
+    layout() {
+      if (destroyed || unsupported || !instance || !builtCard) return null;
+      return { card: { ...builtCard }, siteName: art.module.letters === 'site-name' && instance.siteNameShown?.() === true ? (instance.siteNameBox?.() ?? null) : null };
+    },
     stats() {
       return {
         style: art.module.id,
@@ -597,6 +636,7 @@ export function createBackdropRenderer(target: HTMLCanvasElement | SVGElement, i
       destroyed = true;
       stopLoop();
       if (resizeTimer !== null) host.clearTimer(resizeTimer);
+      if (cardTimer !== null) host.clearTimer(cardTimer);
       for (const stop of stops) stop();
       stopPointer();
       stopCard();

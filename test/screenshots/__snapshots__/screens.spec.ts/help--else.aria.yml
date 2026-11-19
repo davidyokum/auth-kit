@@ -1,3 +1,4 @@
+- button "Back"
 - heading "Something else?" [level=1]
 - paragraph: Email us and say what’s happening, and what you see on the screen. We can help with your Example Reports account, but not with your email, device, or apps.
 - paragraph:
@@ -10,5 +11,4 @@
 - paragraph: Not sure an email is really from us? Ask Jordan Lee on Teams.
 - paragraph: Never send a password or code.
 - status
-- button "Back"
 - paragraph: This site is managed by the NC Office of State Budget and Management

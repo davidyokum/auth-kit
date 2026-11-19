@@ -449,7 +449,8 @@ const COMMON: Readonly<Record<string, Target>> = {
   'different-email': to('email', 'typed'),
   'back-to-sign-in': to('email', 'typed'),
   'start-again': to('email', 'typed'),
-  back: to('trouble'),
+  // "Back" at the top of the card (0.1.18): where each screen usually comes from (BY_SCREEN), else the email step.
+  back: to('email', 'typed'),
   'email-help': MAIL,
   'request-access': to('request-access'),
   'create-account': to('sign-up'),
@@ -476,10 +477,10 @@ const COMMON: Readonly<Record<string, Target>> = {
 /** What differs by screen. */
 const BY_SCREEN: Readonly<Record<string, Readonly<Record<string, Target | ((r: ResolvedPreviewSpec) => Target)>>>> = {
   email: { continue: (r) => (!r.passkeysEnabled ? to('password') : r.remembered ? to('passkey') : to('choose')) },
-  passkey: { 'try-again': to('passkey') },
-  password: { 'submit-password': to('totp') },
-  totp: { 'submit-totp': SIGNED_IN },
-  'email-code': { 'submit-code': SIGNED_IN },
+  passkey: { 'try-again': to('passkey'), back: (r) => (r.remembered || !r.passkeysEnabled ? to('email', 'typed') : to('choose')) },
+  password: { 'submit-password': to('totp'), back: (r) => (r.passkeysEnabled ? to('choose') : to('email', 'typed')) },
+  totp: { 'submit-totp': SIGNED_IN, back: to('password') },
+  'email-code': { 'submit-code': SIGNED_IN, back: (r) => (r.passkeysEnabled ? to('choose') : to('email', 'typed')) },
   'new-password': { 'submit-new-password': SIGNED_IN },
   'mfa-setup': { 'submit-authenticator-code': SIGNED_IN },
   'enroll-authenticator': { 'submit-authenticator-code': SIGNED_IN },
@@ -491,12 +492,12 @@ const BY_SCREEN: Readonly<Record<string, Readonly<Record<string, Target | ((r: R
   'totp-setup': { 'submit-authenticator-code': to('done', 'password') },
   'request-access': { 'send-request': to('request-access', 'sent'), 'back-to-sign-in': to('email') },
   // A help screen's "Send a new code" sends one as "Email me a code" does: a first code, not a resend.
-  help: { 'resend-code': to('email-code') },
+  help: { 'resend-code': to('email-code'), back: to('trouble') },
   'sign-up': { continue: to('sign-up-code') },
   'sign-up-code': { 'submit-code': to('sign-up-name'), 'resend-code': to('sign-up-code'), 'different-email': to('sign-up'), 'start-again': to('sign-up') },
   'sign-up-name': { 'submit-name': to('first-credential') },
-  'reset-code': { 'submit-reset-code': to('reset-password') },
-  'reset-password': { 'submit-new-password': to('totp') },
+  'reset-code': { 'submit-reset-code': to('reset-password'), back: to('help', 'password') },
+  'reset-password': { 'submit-new-password': to('totp'), back: to('reset-code') },
 };
 
 /**
