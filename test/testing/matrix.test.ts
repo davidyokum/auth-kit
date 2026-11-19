@@ -374,6 +374,10 @@ describe('authMatrixCases: completeness rules', () => {
     expect(() => authMatrixCases({ personas: without, appRoutes: ['/api/x'], routes: [route], ...simple })).toThrow(/persona "codeOnlyMember" is required/);
     const cases = authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [route], ...simple });
     expect(cases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[200], [200]]);
+    // On an item route it's a member with no access to the item: the second member's answer.
+    const item = { path: '/api/x/:id', expect: { anonymous: 401, member: 200, admin: 200, otherMember: 404 } };
+    const itemCases = authMatrixCases({ personas: { ...without, otherMember: {}, codeOnlyMember: {} }, appRoutes: ['/api/x/[id]'], params: { id: '1' }, routes: [item], ...simple });
+    expect(itemCases.filter((c) => c.persona === 'codeOnlyMember').map((c) => c.expected)).toEqual([[404], [404]]);
     // It may still get no more than a member.
     const more = { path: '/api/x', expect: { anonymous: 401, member: 403, admin: 200, codeOnlyMember: 200 } };
     expect(() => authMatrixCases({ personas: { ...without, codeOnlyMember: {} }, appRoutes: ['/api/x'], routes: [more], ...simple })).toThrow(/succeed where "member" can't/);

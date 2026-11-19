@@ -151,7 +151,8 @@ export interface AuthMatrixOptions {
   /**
    * The site's sign-in mode (ADR 0029), the same `signIn` the server gets. On a Simple site every
    * account has only emailed codes, so `codeOnlyMember` is required, runs against every route, and
-   * by default expects what `member` gets (the server lets it in); a row may not give it more.
+   * by default expects what `member` gets (`otherMember` on item routes: it has no item access); a
+   * row may not give it more.
    */
   signIn?: SignInSettings;
 }
@@ -282,8 +283,9 @@ export function authMatrixCases(options: Omit<AuthMatrixOptions, 'request' | 'ha
     // An account with only emailed codes is refused wherever a signed-in person is needed (M2).
     if (codeOnly) {
       if (route.expect[CODE_ONLY_MEMBER] === undefined) {
-        // On a Simple site an emailed-code-only account is an ordinary member.
-        const fallback = route.exists === false ? 404 : simpleSite ? route.expect.member : codeOnlyDefault(route.expect);
+        // On a Simple site an emailed-code-only account is an ordinary member with no item access of its
+        // own: a second member's answer on item routes, a member's elsewhere.
+        const fallback = route.exists === false ? 404 : simpleSite ? (route.expect[SECOND_MEMBER] ?? route.expect.member) : codeOnlyDefault(route.expect);
         if (fallback !== undefined) expect = { ...expect, [CODE_ONLY_MEMBER]: fallback };
       } else if (asList(route.expect[CODE_ONLY_MEMBER]).some((s) => s >= 200 && s < 300) && !asList(route.expect.member).some((s) => s < 400)) {
         // A redirect (to the chooser) isn't getting in; a 2xx where a member gets nothing is.
