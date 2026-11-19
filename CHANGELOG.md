@@ -2,7 +2,7 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
-## [Unreleased] (planned 0.1.20-alpha.1)
+## [0.1.20-alpha.1] - 2026-11-19
 
 Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. And a first sign-in that can't trap anyone halfway through setting up a passkey or a password ([ADR 0002](docs/decisions/0002-mfa-optional-app-enforced-totp.md), amended 2026-11-19). Pre-release. No breaking changes: every site stays Full until it sets `signIn`.
 
