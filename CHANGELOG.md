@@ -2,6 +2,8 @@
 
 All notable changes to auth-kit. Versions follow [Semantic Versioning](https://semver.org/); `0.x` releases may change APIs between minor versions.
 
+From 0.1.21, every section opens with its release line, which sites' upgrade PRs read ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)): `Upgrade: patch|minor|major. Site steps: none|see Migration. Security: none|<what it fixes>.` A **patch** needs nothing from a site and merges on its own there once checks pass. Anything a site must do (copy a file, new CSS, a prop, a setting) makes it at least a **minor**, with a `### Migration` section. `scripts/check-changelog.mjs` holds every section to it.
+
 ## [0.1.20-alpha.1] - 2026-11-19
 
 Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. And a first sign-in that can't trap anyone halfway through setting up a passkey or a password ([ADR 0002](docs/decisions/0002-mfa-optional-app-enforced-totp.md), amended 2026-11-19). Pre-release. No breaking changes: every site stays Full until it sets `signIn`.

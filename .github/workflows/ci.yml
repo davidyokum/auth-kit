@@ -32,6 +32,8 @@ jobs:
           cache: npm
       # --ignore-scripts: no dependency runs install scripts in CI.
       - run: npm ci --ignore-scripts
+      # Every release section from 0.1.21 opens with "Upgrade: … Site steps: … Security: …" (ADR 0030).
+      - run: node scripts/check-changelog.mjs
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
@@ -121,6 +123,9 @@ jobs:
             echo "Tag $GITHUB_REF_NAME doesn't match package.json version ($expected)." >&2
             exit 1
           fi
+      # Sites' Renovate PRs read this section's first line to decide whether they merge on their own (ADR 0030).
+      - name: The release's CHANGELOG section opens with its release line
+        run: node scripts/check-changelog.mjs --version "$GITHUB_REF_NAME"
       - run: npm run build
       - run: npm run build:preview
       - name: Pack
