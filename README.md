@@ -43,7 +43,9 @@ Commit the lockfile: it pins the tarball's `sha512`, so `npm ci` refuses a tarba
 
 Peer dependencies, all optional, depending on the subpaths you use: `@aws-amplify/backend`, `aws-cdk-lib`, `constructs` (for `auth-kit/amplify`), `next` (for `auth-kit/proxy` and page helpers), `react` and `aws-amplify` (for `auth-kit/client`).
 
-**To move a site to another release**, use `npx auth-kit upgrade <version>`, not `npm install <url>`: it changes only the kit's lines in `package.json` and `package-lock.json` and checks the result with Amplify's npm (below).
+**Sites get every release as a pull request** ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)). Renovate, scoped to auth-kit by the template's `renovate/auth-kit.json`, opens one on each site. The template's "auth-kit upgrade" workflow writes its lockfile lines with the release's own `auth-kit upgrade` and checks the attestation. A patch whose release line says `Site steps: none` merges on its own once every check passes; everything else waits for the owner. Every CHANGELOG section opens with that line: `Upgrade: patch. Site steps: none. Security: none.`
+
+**To move a site to another release by hand**, use `npx auth-kit upgrade <version>`, not `npm install <url>`: it changes only the kit's lines in `package.json` and `package-lock.json` and checks the result with Amplify's npm (below).
 
 ## Commands: owner, deploy, upgrade
 

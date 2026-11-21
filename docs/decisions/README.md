@@ -33,3 +33,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0027](0027-authenticator-setup-that-works.md) | Authenticator setup that works: a QR code built in, Copy that copies, the setup link on phones only |
 | [0028](0028-the-owner-decides-and-the-kit-deploys.md) | The owner decides, the kit deploys: a first visit that's one code, and owner, deploy, and upgrade commands |
 | [0029](0029-simple-sign-in-code-only.md) | Simple sign-in: an emailed code every time, and nothing else; "Add several at once" on the People page |
+| [0030](0030-upgrades-by-pull-request.md) | Upgrades by pull request: Renovate opens one per release on every site; patches with no site steps merge on their own; each release opens with "Upgrade: … Site steps: … Security: …" |
