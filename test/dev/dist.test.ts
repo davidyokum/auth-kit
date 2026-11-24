@@ -70,8 +70,9 @@ describe.runIf(enabled)('the built package', () => {
     for (const entry of ['backdrops/react.js', 'backdrops/picker.js', 'preview/index.js']) expect(readFileSync(join(DIST, entry), 'utf8'), entry).toMatch(/^['"]use client['"];/);
   });
 
-  it("the persona menu is a client component ('use client' first)", () => {
+  it("the persona menu and the ribbon are client components ('use client' first)", () => {
     expect(readFileSync(join(DIST, 'dev', 'menu.js'), 'utf8')).toMatch(/^['"]use client['"];/);
+    expect(readFileSync(join(DIST, 'ribbon', 'index.js'), 'utf8')).toMatch(/^['"]use client['"];/);
   });
 
   it('next.config.ts can load auth-kit/dev and auth-kit/backdrops (Next compiles it to CommonJS and requires it)', () => {

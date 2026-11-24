@@ -4,6 +4,17 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 From 0.1.21, every section opens with its release line, which sites' upgrade PRs read ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)): `Upgrade: patch|minor|major. Site steps: none|see Migration. Security: none|<what it fixes>.` A **patch** needs nothing from a site and merges on its own there once checks pass. Anything a site must do (copy a file, new CSS, a prop, a setting) makes it at least a **minor**, with a `### Migration` section. `scripts/check-changelog.mjs` holds every section to it.
 
+## [0.1.21-alpha.1] - 2026-11-24
+
+Upgrade: patch. Site steps: none. Security: none.
+
+Redesigned `EnvironmentRibbon` (`auth-kit/ribbon`) into a slim 28 px scrollable bar with a `Pin` toggle (`--ak-ribbon-height: 28px`), five distinct environment states, and an 18 px corner badge (`L`, `P`, `?`, `!`) that mounts into `feedback-kit`'s `[data-env-badge-slot]` (or falls back to a 24 px bottom-left badge on sites without `feedback-kit`).
+
+### Changed
+
+- **28 px scrollable/pinnable `EnvironmentRibbon` and five-state palette (`src/dev/ribbon.tsx` and `src/dev/ribbon-model.ts`)**: Replaced the permanently sticky banner with a 28 px bar in document flow (`Pin` keeps it at `top: 0` and sets `--ak-ribbon-height: 28px` on `<html>`), distinguishing calm local placeholder setups (`#3d4757`, `no sandbox yet`, badge `L`), confirmed sandboxes (`#1d4ed8`, badge `L`), preview branches (`#0f766e`, badge `P`), unverified local pools (`#fbd46a` with a `2px #e0a526` window frame, badge `?`), and non-sandbox/live pools (`#b91c1c` stripes with a `3px #b91c1c` window frame, badge `!`).
+- **Corner environment badge and details panel (`[data-env-badge-slot]` and `[data-auth-kit-ui]`)**: Once the unpinned bar scrolls off screen (or is collapsed to badge mode), `EnvironmentRibbon` mounts an 18 px circle (`L`, `P`, `?`, `!`) into `feedback-kit`'s sibling `[data-env-badge-slot]` (or a 24 px standalone badge at `bottom: 16px; left: 16px`), opening a frosted environment details panel on click and closing cleanly on `Escape` or outside click.
+
 ## [0.1.20-alpha.1] - 2026-11-19
 
 Simple sign-in: a site can choose "Simple: code only", an emailed code every time and nothing else, next to "Full: code, passkey, password" ([ADR 0029](docs/decisions/0029-simple-sign-in-code-only.md)). And "Add several at once" on the People page. And a first sign-in that can't trap anyone halfway through setting up a passkey or a password ([ADR 0002](docs/decisions/0002-mfa-optional-app-enforced-totp.md), amended 2026-11-19). Pre-release. No breaking changes: every site stays Full until it sets `signIn`.

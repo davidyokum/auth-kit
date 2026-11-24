@@ -37,7 +37,7 @@ import { devSignInGatesFor, isLoopbackHost } from './gates.js';
 import { decodeJwtPayload, stringClaim } from './jwt.js';
 import { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER, DEV_SIGNIN_MARKER_HEADER } from './marker.js';
 import { type Persona, type PersonaCredentials, parsePersonas, personaCredentialsFromEnv, personaForEmail, personaLabel } from './personas.js';
-import { type EnvironmentRibbonInput, resolveEnvironment } from './ribbon-model.js';
+import { type EnvironmentRibbonInput, isPlaceholderPoolId, resolveEnvironment } from './ribbon-model.js';
 import { cachedSandboxCheck, type SandboxCheckResult } from './sandbox.js';
 
 export interface DevKitOptions {
@@ -273,7 +273,7 @@ export function createDevKit(options: DevKitOptions): DevKit {
       poolId: pool.userPoolId,
       ...(persona ? { persona: personaLabel(persona) } : email ? { signedInAs: `${email} (not a persona)` } : {}),
     };
-    if (environment !== 'local') return { ...base, poolIsSandbox: null };
+    if (environment !== 'local' || isPlaceholderPoolId(pool.userPoolId)) return { ...base, poolIsSandbox: null };
     let check: SandboxCheckResult;
     try {
       check = await sandbox();

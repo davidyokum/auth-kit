@@ -1,10 +1,11 @@
 /**
- * What the environment ribbon says (primer Chapter 8, Figure 8.3). Pure functions with no imports,
- * safe in production builds, server components, and client components alike.
+ * What the environment ribbon and corner badge say (primer Chapter 8, Figure 8.3). Pure functions
+ * with no imports, safe in production builds, server components, and client components alike.
  *
- * Every environment except the live site shows a ribbon naming the environment, the pool, and the
- * signed-in persona, with a `[DEV]` or `[PREVIEW]` tab title and its own favicon. A local app pointed
- * at a pool that isn't a sandbox (or one nobody could check) turns it red.
+ * Every environment except the live site shows a slim 28 px bar naming the environment, the pool,
+ * and the signed-in persona, plus a `[DEV]` or `[PREVIEW]` tab title and its own favicon. Once the
+ * bar scrolls off screen (unless pinned), an environment badge (`L`, `P`, `?`, or `!`) sits on
+ * `feedback-kit`'s `[data-env-badge-slot]` (or alone in the bottom-left corner when absent).
  */
 
 export type RibbonEnvironment = 'local' | 'preview' | 'production';
@@ -14,10 +15,10 @@ export interface EnvironmentRibbonInput {
   poolId: string;
   /**
    * `true` when the pool is tagged `Environment=sandbox`, `false` when it isn't, and `null` when
-   * nobody could check (no AWS credentials, a network error). Only matters locally.
+   * nobody could check (no AWS credentials, a network error, or placeholder outputs). Only matters locally.
    */
   poolIsSandbox: boolean | null;
-  /** Why the check couldn't run, shown when `poolIsSandbox` is `null`. */
+  /** Why the check couldn't run, shown when `poolIsSandbox` is `null` on a non-placeholder pool. */
   poolCheckError?: string | null;
   /** The signed-in persona's label ("Admin Content"); shown as "Admin Content (test)". */
   persona?: string | null;
@@ -27,12 +28,16 @@ export interface EnvironmentRibbonInput {
   branch?: string | null;
 }
 
-export type RibbonTone = 'local' | 'preview' | 'danger' | 'none';
+export type RibbonTone = 'local' | 'preview' | 'caution' | 'danger' | 'none';
+
+export type EnvironmentBadgeLetter = 'L' | 'P' | '?' | '!';
+
+export type RibbonBarVariant = 'calm' | 'sandbox' | 'preview' | 'caution' | 'danger';
 
 export interface EnvironmentRibbonModel {
   show: boolean;
   tone: RibbonTone;
-  /** The bold first part: "LOCAL", "PREVIEW", "LOCAL · NOT A SANDBOX POOL". */
+  /** The bold first part: "LOCAL", "PREVIEW", "LOCAL · POOL NOT CHECKED", "LOCAL · NOT A SANDBOX POOL". */
   heading: string;
   /** The rest, in order. */
   details: string[];
@@ -41,28 +46,106 @@ export interface EnvironmentRibbonModel {
   titlePrefix: '' | '[DEV] ' | '[PREVIEW] ';
 }
 
-function model(tone: RibbonTone, heading: string, details: (string | null | undefined | false)[], titlePrefix: EnvironmentRibbonModel['titlePrefix']): EnvironmentRibbonModel {
+export interface EnvironmentBadgeModel {
+  letter: EnvironmentBadgeLetter;
+  barVariant: RibbonBarVariant;
+  tooltip: string;
+  summary: string;
+  frame: 'none' | 'caution' | 'danger';
+}
+
+/** True when `poolId` is the template's non-existent placeholder pool (before `npm run sandbox`). */
+export function isPlaceholderPoolId(poolId: string | null | undefined): boolean {
+  const trimmed = (poolId ?? '').trim();
+  return trimmed === '' || /_PlaceholderPool$/i.test(trimmed);
+}
+
+function model(
+  tone: RibbonTone,
+  heading: string,
+  details: (string | null | undefined | false)[],
+  titlePrefix: EnvironmentRibbonModel['titlePrefix'],
+): EnvironmentRibbonModel {
   const kept = details.filter((d): d is string => typeof d === 'string' && d.length > 0);
   return { show: true, tone, heading, details: kept, label: [heading, ...kept].join(' · '), titlePrefix };
 }
 
 /** What the ribbon shows. The live site shows nothing. */
 export function environmentRibbonModel(input: EnvironmentRibbonInput): EnvironmentRibbonModel {
-  if (input.environment === 'production') return { show: false, tone: 'none', heading: '', details: [], label: '', titlePrefix: '' };
-  const who = input.persona ? `signed in as ${input.persona} (test)` : input.signedInAs ? `signed in as ${input.signedInAs}` : null;
+  if (input.environment === 'production') {
+    return { show: false, tone: 'none', heading: '', details: [], label: '', titlePrefix: '' };
+  }
+  const who = input.persona
+    ? `signed in as ${input.persona} (test)`
+    : input.signedInAs
+      ? `signed in as ${input.signedInAs}`
+      : null;
   if (input.environment === 'preview') {
     return model('preview', 'PREVIEW', [input.branch && `branch ${input.branch}`, `pool ${input.poolId}`, 'production build', who], '[PREVIEW] ');
   }
-  if (input.poolIsSandbox === true) return model('local', 'LOCAL', [`sandbox pool ${input.poolId}`, who ?? 'signed out'], '[DEV] ');
+  if (input.poolIsSandbox === true) {
+    return model('local', 'LOCAL', [`sandbox pool ${input.poolId}`, who ?? 'signed out'], '[DEV] ');
+  }
   if (input.poolIsSandbox === false) {
     return model('danger', 'LOCAL · NOT A SANDBOX POOL', [input.poolId, "may hold real people's accounts", 'dev sign-in off', who], '[DEV] ');
   }
+  if (isPlaceholderPoolId(input.poolId) && !input.poolCheckError) {
+    return model('local', 'LOCAL', ['no sandbox yet', who ?? 'dev sign-in off'], '[DEV] ');
+  }
   return model(
-    'danger',
+    'caution',
     'LOCAL · POOL NOT CHECKED',
     [input.poolId, `couldn't confirm it's a sandbox${input.poolCheckError ? ` (${input.poolCheckError})` : ''}`, 'dev sign-in off', who],
     '[DEV] ',
   );
+}
+
+/** Visual badge, bar palette, tooltip, and window-frame spec for non-live environments. */
+export function environmentBadgeModel(input: EnvironmentRibbonInput): EnvironmentBadgeModel | null {
+  if (input.environment === 'production') return null;
+  if (input.environment === 'preview') {
+    return {
+      letter: 'P',
+      barVariant: 'preview',
+      tooltip: input.branch ? `Preview: branch ${input.branch}` : 'Preview build',
+      summary: input.branch ? `Preview · branch ${input.branch}` : 'Preview build',
+      frame: 'none',
+    };
+  }
+  if (input.poolIsSandbox === true) {
+    return {
+      letter: 'L',
+      barVariant: 'sandbox',
+      tooltip: 'Local: Your sandbox',
+      summary: 'Local · Your sandbox',
+      frame: 'none',
+    };
+  }
+  if (input.poolIsSandbox === false) {
+    return {
+      letter: '!',
+      barVariant: 'danger',
+      tooltip: 'Danger: Pointed at a live or non-sandbox pool',
+      summary: 'Local · Not a sandbox pool',
+      frame: 'danger',
+    };
+  }
+  if (isPlaceholderPoolId(input.poolId) && !input.poolCheckError) {
+    return {
+      letter: 'L',
+      barVariant: 'calm',
+      tooltip: 'Local: No sandbox yet',
+      summary: 'Local · No sandbox yet',
+      frame: 'none',
+    };
+  }
+  return {
+    letter: '?',
+    barVariant: 'caution',
+    tooltip: "Local: Safety check couldn't run",
+    summary: "Local · Safety check couldn't run",
+    frame: 'caution',
+  };
 }
 
 export interface ResolveEnvironmentInput {
@@ -93,15 +176,24 @@ export function resolveEnvironment(input: ResolveEnvironmentInput = {}): RibbonE
 
 // ---- Tab title and favicon ----------------------------------------------------------------------
 
-/** Ribbon colors. White text passes WCAG AA on each. */
+/** Ribbon and favicon colors. */
 export const RIBBON_COLORS = {
+  calm: '#3d4757',
   local: '#1d4ed8',
-  preview: '#b45309',
+  preview: '#0f766e',
+  caution: '#d97706',
   danger: '#b91c1c',
   viewAs: '#6d28d9',
 } as const;
 
-const FAVICON_LETTER: Record<keyof typeof RIBBON_COLORS, string> = { local: 'L', preview: 'P', danger: '!', viewAs: 'V' };
+const FAVICON_LETTER: Record<keyof typeof RIBBON_COLORS, string> = {
+  calm: 'L',
+  local: 'L',
+  preview: 'P',
+  caution: '?',
+  danger: '!',
+  viewAs: 'V',
+};
 
 /** A favicon for one mode: a colored square with a letter, as an SVG data URL. */
 export function environmentFavicon(tone: keyof typeof RIBBON_COLORS): string {

@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 
 // Entries that are React client modules. Rollup's tree-shaking pass drops module-level directives,
 // so `'use client'` is put back after the build.
-const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui', 'preview/index'];
+const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'ribbon/index', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui', 'preview/index'];
 
 async function restoreUseClient(): Promise<void> {
   for (const entry of CLIENT_ENTRIES) {

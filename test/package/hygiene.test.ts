@@ -19,7 +19,7 @@ function files(dir: string): string[] {
 }
 
 // Placeholder IDs used in docs and tests. Anything else shaped like a real ID fails the test.
-const PLACEHOLDER_POOL_IDS = new Set(['us-east-1_TestPool1', 'us-east-1_OtherPool2', 'us-east-1_AbCdEf123', 'us-east-1_EXAMPLE']);
+const PLACEHOLDER_POOL_IDS = new Set(['us-east-1_TestPool1', 'us-east-1_OtherPool2', 'us-east-1_AbCdEf123', 'us-east-1_EXAMPLE', 'us-east-1_PlaceholderPool']);
 
 describe('the public repo holds no secrets or real identifiers', () => {
   const all = files(ROOT);
