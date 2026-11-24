@@ -226,16 +226,18 @@ describe('module boundaries: what ships cannot carry dev sign-in', () => {
   const importsOf = (file: string) =>
     [...readFileSync(join(ROOT, file), 'utf8').matchAll(/^\s*(?:import|export)\s[^'"]*?from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1] ?? '');
 
-  it('auth-kit/ribbon imports only the pure model and React', () => {
-    expect(importsOf('src/dev/ribbon.tsx')).toEqual(['react', './ribbon-model.js', './ribbon-model.js']);
+  it('auth-kit/ribbon imports only the pure model, its client ribbon module, and React', () => {
+    expect(importsOf('src/dev/ribbon.tsx')).toEqual(['react', './ribbon-model.js', './ribbon-client.js', './ribbon-model.js']);
+    expect(importsOf('src/dev/ribbon-client.tsx')).toEqual(['react', './ribbon-model.js']);
     expect(importsOf('src/dev/ribbon-model.ts')).toEqual([]);
   });
 
-  it('the marker lives only in dev-only modules', () => {
-    for (const file of ['src/dev/ribbon.tsx', 'src/dev/ribbon-model.ts']) {
+  it('the marker lives only in dev-only modules, and only ribbon-client carries use client', () => {
+    for (const file of ['src/dev/ribbon.tsx', 'src/dev/ribbon-client.tsx', 'src/dev/ribbon-model.ts']) {
       expect(readFileSync(join(ROOT, file), 'utf8')).not.toMatch(/auth-kit-dev-sign-in|marker\.js|DEV_SIGNIN_MARKER/);
     }
     expect(readFileSync(join(ROOT, 'src/dev/menu.tsx'), 'utf8').startsWith("'use client';")).toBe(true);
-    expect(readFileSync(join(ROOT, 'src/dev/ribbon.tsx'), 'utf8').startsWith("'use client';")).toBe(true);
+    expect(readFileSync(join(ROOT, 'src/dev/ribbon-client.tsx'), 'utf8').startsWith("'use client';")).toBe(true);
+    expect(readFileSync(join(ROOT, 'src/dev/ribbon.tsx'), 'utf8').startsWith("'use client';")).toBe(false);
   });
 });

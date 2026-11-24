@@ -1,6 +1,6 @@
 {
   "name": "auth-kit",
-  "version": "0.1.21-alpha.1",
+  "version": "0.1.21-alpha.2",
   "description": "Shared login and authorization for David Yokum's Amplify sites (passkey-first Cognito, server-side checks, admin module, localhost kit)",
   "license": "MIT",
   "author": "David Yokum",
@@ -104,6 +104,10 @@
     "./ribbon": {
       "types": "./dist/ribbon/index.d.ts",
       "import": "./dist/ribbon/index.js"
+    },
+    "./ribbon/client": {
+      "types": "./dist/ribbon/client.d.ts",
+      "import": "./dist/ribbon/client.js"
     },
     "./backdrops": {
       "types": "./dist/backdrops/index.d.ts",

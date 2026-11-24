@@ -36,7 +36,7 @@ describe.runIf(enabled)('the built package', () => {
   });
 
   it('no subpath that ships loads a file with either dev marker (sign-in, matrix server mode)', () => {
-    for (const entry of ['server/index.js', 'proxy/index.js', 'client/index.js', 'admin/index.js', 'admin/ui.js', 'admin/cdk.js', 'amplify/index.js', 'amplify/pre-sign-up.js', 'ribbon/index.js', 'backdrops/index.js', 'backdrops/react.js']) {
+    for (const entry of ['server/index.js', 'proxy/index.js', 'client/index.js', 'admin/index.js', 'admin/ui.js', 'admin/cdk.js', 'amplify/index.js', 'amplify/pre-sign-up.js', 'ribbon/index.js', 'ribbon/client.js', 'backdrops/index.js', 'backdrops/react.js']) {
       for (const file of graph(join(DIST, entry))) {
         const code = readFileSync(file, 'utf8');
         expect(code.includes(DEV_SIGNIN_MARKER) || code.includes(MATRIX_SERVER_MARKER) || code.includes(BACKDROP_PICKER_MARKER) || code.includes(PREVIEW_MARKER), `${entry} → ${file}`).toBe(false);
@@ -70,9 +70,10 @@ describe.runIf(enabled)('the built package', () => {
     for (const entry of ['backdrops/react.js', 'backdrops/picker.js', 'preview/index.js']) expect(readFileSync(join(DIST, entry), 'utf8'), entry).toMatch(/^['"]use client['"];/);
   });
 
-  it("the persona menu and the ribbon are client components ('use client' first)", () => {
+  it("the persona menu and ribbon/client are client components, while ribbon/index stays server-callable", () => {
     expect(readFileSync(join(DIST, 'dev', 'menu.js'), 'utf8')).toMatch(/^['"]use client['"];/);
-    expect(readFileSync(join(DIST, 'ribbon', 'index.js'), 'utf8')).toMatch(/^['"]use client['"];/);
+    expect(readFileSync(join(DIST, 'ribbon', 'client.js'), 'utf8')).toMatch(/^['"]use client['"];/);
+    expect(readFileSync(join(DIST, 'ribbon', 'index.js'), 'utf8')).not.toMatch(/^['"]use client['"];/);
   });
 
   it('next.config.ts can load auth-kit/dev and auth-kit/backdrops (Next compiles it to CommonJS and requires it)', () => {

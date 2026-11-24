@@ -4,6 +4,14 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 From 0.1.21, every section opens with its release line, which sites' upgrade PRs read ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)): `Upgrade: patch|minor|major. Site steps: none|see Migration. Security: none|<what it fixes>.` A **patch** needs nothing from a site and merges on its own there once checks pass. Anything a site must do (copy a file, new CSS, a prop, a setting) makes it at least a **minor**, with a `### Migration` section. `scripts/check-changelog.mjs` holds every section to it.
 
+## [0.1.21-alpha.2] - 2026-11-24
+
+Upgrade: patch. Site steps: none. Security: none.
+
+### Fixed
+
+- **`auth-kit/ribbon` React Server Components split (`src/dev/ribbon.tsx` and `src/dev/ribbon-client.tsx`)**: Kept `auth-kit/ribbon`'s barrel free of `'use client'` while isolating `<EnvironmentRibbon />` in `./ribbon-client.js` (`auth-kit/ribbon/client`) so `environmentRibbonModel`, `environmentMetadata`, and `resolveEnvironment` remain directly callable inside Next.js `generateMetadata()` and Server Components.
+
 ## [0.1.21-alpha.1] - 2026-11-24
 
 Upgrade: patch. Site steps: none. Security: none.

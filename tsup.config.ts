@@ -1,9 +1,11 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { defineConfig } from 'tsup';
 
 // Entries that are React client modules. Rollup's tree-shaking pass drops module-level directives,
-// so `'use client'` is put back after the build.
-const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'ribbon/index', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui', 'preview/index'];
+// so `'use client'` is put back after the build. `ribbon/index` stays WITHOUT `'use client'` so its
+// pure helpers (`environmentRibbonModel`, `environmentMetadata`) remain server-callable in RSC, while
+// `ribbon/client` and any shared chunk defining `EnvironmentRibbon` carry `'use client'`.
+const CLIENT_ENTRIES = ['client/index', 'dev/menu', 'ribbon/client', 'admin/ui', 'backdrops/react', 'backdrops/picker', 'resources/ui', 'preview/index'];
 
 async function restoreUseClient(): Promise<void> {
   for (const entry of CLIENT_ENTRIES) {
@@ -11,6 +13,15 @@ async function restoreUseClient(): Promise<void> {
     const code = await readFile(file, 'utf8');
     if (code.startsWith("'use client';")) continue;
     await writeFile(file, `'use client';\n${code}`);
+  }
+  const distEntries = await readdir('dist');
+  for (const name of distEntries) {
+    if (!/^chunk-.*\.js$/.test(name)) continue;
+    const chunkPath = `dist/${name}`;
+    const code = await readFile(chunkPath, 'utf8');
+    if (code.includes('function EnvironmentRibbon(') && !code.startsWith("'use client';")) {
+      await writeFile(chunkPath, `'use client';\n${code}`);
+    }
   }
 }
 
@@ -35,6 +46,7 @@ export default defineConfig({
     'dev/index': 'src/dev/index.ts',
     'dev/menu': 'src/dev/menu.tsx',
     'ribbon/index': 'src/dev/ribbon.tsx',
+    'ribbon/client': 'src/dev/ribbon-client.tsx',
     'backdrops/index': 'src/backdrops/index.ts',
     'backdrops/react': 'src/backdrops/react.tsx',
     // Dev only: carries the backdrop picker marker that check-prod-build looks for.
