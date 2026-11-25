@@ -51,4 +51,12 @@ export const SITE_SETTINGS_TABLE_SCHEMA = {
 export const SITE_SETTING = {
   /** The Super admin's override of the help address (`createSignInHelp`). */
   signInHelp: 'sign-in-help',
+  /** Guarded Role Builder overrides and custom roles (`createSiteSettingsRolePolicyStore`, ADR 0031). */
+  rolePolicy: 'admin-role-policy',
+  /** Optional first name, last name, and title directory metadata per account (`createDirectoryProfileStore`). */
+  peopleProfiles: 'admin-people-profiles',
+  /** Privacy-safe, throttled first-party usage ledger (`createUsageLedgerStore`). */
+  usageLedger: 'admin-usage-ledger',
+  /** Optional custom welcome paragraph on outgoing invitation emails (`createInviteWelcomeStore`). */
+  inviteWelcomeNote: 'invite-welcome-note',
 } as const;

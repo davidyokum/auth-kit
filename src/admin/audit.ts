@@ -524,17 +524,20 @@ export function createDynamoAuditLog(options: DynamoAuditLogOptions): AuditLogSt
     validateActionFilter(query.action);
     const part = partitionFor(query);
     const { from, to } = rangeBounds(query);
-    const names: Record<string, string> = { '#p': part.keyName, '#s': AUDIT_TABLE_SCHEMA.sortKey };
+    const names: Record<string, string> = { '#p': part.keyName };
     const values: Record<string, AttributeValue> = { ':p': S(part.keyValue) };
     let condition = '#p = :p';
     if (from !== undefined && to !== undefined) {
+      names['#s'] = AUDIT_TABLE_SCHEMA.sortKey;
       condition += ' AND #s BETWEEN :from AND :to';
       values[':from'] = S(from);
       values[':to'] = S(to);
     } else if (from !== undefined) {
+      names['#s'] = AUDIT_TABLE_SCHEMA.sortKey;
       condition += ' AND #s >= :from';
       values[':from'] = S(from);
     } else if (to !== undefined) {
+      names['#s'] = AUDIT_TABLE_SCHEMA.sortKey;
       condition += ' AND #s <= :to';
       values[':to'] = S(to);
     }

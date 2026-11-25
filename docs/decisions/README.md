@@ -34,3 +34,4 @@ Short records of the choices behind auth-kit: what was decided, why, and what it
 | [0028](0028-the-owner-decides-and-the-kit-deploys.md) | The owner decides, the kit deploys: a first visit that's one code, and owner, deploy, and upgrade commands |
 | [0029](0029-simple-sign-in-code-only.md) | Simple sign-in: an emailed code every time, and nothing else; "Add several at once" on the People page |
 | [0030](0030-upgrades-by-pull-request.md) | Upgrades by pull request: Renovate opens one per release on every site; patches with no site steps merge on their own; each release opens with "Upgrade: … Site steps: … Security: …" |
+| [0031](0031-guarded-role-builder-and-admin-mode.md) | Guarded Staged Role Builder and Universal Admin Mode: code-locked governance core, live-enforced operational tabs/actions, and SiteSettingsTable directory/usage stores |

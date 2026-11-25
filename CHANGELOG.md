@@ -4,6 +4,19 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 From 0.1.21, every section opens with its release line, which sites' upgrade PRs read ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)): `Upgrade: patch|minor|major. Site steps: none|see Migration. Security: none|<what it fixes>.` A **patch** needs nothing from a site and merges on its own there once checks pass. Anything a site must do (copy a file, new CSS, a prop, a setting) makes it at least a **minor**, with a `### Migration` section. `scripts/check-changelog.mjs` holds every section to it.
 
+## [0.1.21-alpha.3] - 2026-11-25
+
+Upgrade: patch. Site steps: none. Security: none.
+
+### Fixed
+
+- **DynamoDB audit log queries without time bounds (`src/admin/audit.ts`)**: Omitted unused `#s` from `ExpressionAttributeNames` when neither `since` nor `until` is supplied so real AWS DynamoDB queries never fail with `ValidationException: Value provided in ExpressionAttributeNames unused in expressions: keys: {#s}`.
+
+### Added
+
+- **Guarded Staged Role Builder engine (`src/admin/role-policy.ts`, ADR 0031)**: Exported `validateRolePolicyDraft`, `parseStoredRolePolicy`, `resolveEffectiveRoleCapabilities`, and `createSiteSettingsRolePolicyStore` from `auth-kit/admin` so sites can keep `Owner`, `Admin`, and administration permissions strictly code-locked while managing editable operational tabs/actions and custom roles in `SiteSettingsTable` with full audit logging.
+- **`SiteSettingsTable` Admin Mode stores (`src/admin/directory-store.ts`)**: Exported `createDirectoryProfileStore` (`firstName`, `lastName`, `title`), `createUsageLedgerStore` (throttled first-party sign-in and page-visit ledger), and `createInviteWelcomeStore` (audited invite welcome paragraph override), plus matching `SITE_SETTING` keys and `ACCOUNT_AUDIT_ACTIONS`.
+
 ## [0.1.21-alpha.2] - 2026-11-24
 
 Upgrade: patch. Site steps: none. Security: none.

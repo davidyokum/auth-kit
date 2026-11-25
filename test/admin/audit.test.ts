@@ -144,6 +144,24 @@ describe('DynamoDB audit log: queries', () => {
     expect(fake.mock.commandCalls(QueryCommand).at(-1)!.args[0].input).toMatchObject({ IndexName: 'byTarget' });
   });
 
+  it('omits #s from ExpressionAttributeNames when neither since nor until is provided (real DynamoDB ValidationException regression)', async () => {
+    const { fake, log } = dynamo();
+    await seed(log, 3);
+    await log.list({ limit: 10 });
+    const unbounded = fake.mock.commandCalls(QueryCommand).at(-1)!.args[0].input;
+    expect(unbounded.KeyConditionExpression).toBe('#p = :p');
+    expect(unbounded.ExpressionAttributeNames).toEqual({ '#p': AUDIT_TABLE_SCHEMA.partitionKey });
+    expect(unbounded.ExpressionAttributeNames).not.toHaveProperty('#s');
+
+    await log.list({ since: '2026-10-17T00:00:00.000Z', limit: 10 });
+    const bounded = fake.mock.commandCalls(QueryCommand).at(-1)!.args[0].input;
+    expect(bounded.KeyConditionExpression).toBe('#p = :p AND #s >= :from');
+    expect(bounded.ExpressionAttributeNames).toEqual({
+      '#p': AUDIT_TABLE_SCHEMA.partitionKey,
+      '#s': AUDIT_TABLE_SCHEMA.sortKey,
+    });
+  });
+
   it('filters by action (exact or prefix) and time, keeping the page full', async () => {
     const { log } = dynamo();
     await seed(log, 30);

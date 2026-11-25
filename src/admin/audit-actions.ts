@@ -27,6 +27,9 @@ export const ACCOUNT_AUDIT_ACTIONS = {
   requestOwnEmailChange: 'account.requestEmailChange',
   changeOwnEmail: 'account.changeEmail',
   signInHelp: 'settings.signInHelp',
+  rolePolicy: 'settings.rolePolicy',
+  personProfile: 'people.updateProfile',
+  inviteWelcomeNote: 'settings.inviteWelcomeNote',
 } as const;
 
 /** The system actors account creation writes as. */

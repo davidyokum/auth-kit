@@ -235,6 +235,9 @@ const DONE: Readonly<Record<string, string>> = {
   'account.requestEmailChange': 'asked to change their own email address',
   'account.changeEmail': 'changed their own email address',
   'settings.signInHelp': 'changed the sign-in help address',
+  'settings.rolePolicy': 'updated the role policy',
+  'people.updateProfile': 'updated the directory profile for',
+  'settings.inviteWelcomeNote': 'updated the invite email welcome note',
 };
 
 const TRIED: Readonly<Record<string, string>> = {
@@ -262,6 +265,9 @@ const TRIED: Readonly<Record<string, string>> = {
   'account.requestEmailChange': 'tried to ask to change their own email address',
   'account.changeEmail': 'tried to change their own email address',
   'settings.signInHelp': 'tried to change the sign-in help address',
+  'settings.rolePolicy': 'tried to update the role policy',
+  'people.updateProfile': 'tried to update the directory profile for',
+  'settings.inviteWelcomeNote': 'tried to update the invite email welcome note',
 };
 
 /** How the Activity page names a system actor. */
@@ -392,6 +398,8 @@ export function describeActivity(
     case 'account.requestEmailChange':
     case 'account.changeEmail':
     case 'settings.signInHelp':
+    case 'settings.rolePolicy':
+    case 'settings.inviteWelcomeNote':
       // The actor acted on themselves, or on a setting: the verb says it all.
       target = '';
       break;
