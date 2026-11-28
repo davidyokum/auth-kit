@@ -4,6 +4,14 @@ All notable changes to auth-kit. Versions follow [Semantic Versioning](https://s
 
 From 0.1.21, every section opens with its release line, which sites' upgrade PRs read ([ADR 0030](docs/decisions/0030-upgrades-by-pull-request.md)): `Upgrade: patch|minor|major. Site steps: none|see Migration. Security: none|<what it fixes>.` A **patch** needs nothing from a site and merges on its own there once checks pass. Anything a site must do (copy a file, new CSS, a prop, a setting) makes it at least a **minor**, with a `### Migration` section. `scripts/check-changelog.mjs` holds every section to it.
 
+## [0.1.21-alpha.4] - 2026-11-28
+
+Upgrade: patch. Site steps: none. Security: none.
+
+### Fixed
+
+- **`PersonaMenu` leaves `/sign-in` after local persona sign-in (`src/dev/menu.tsx`)**: When signing into a test persona from `/sign-in` (or `/sign-up`, `/signed-out`), `PersonaMenu`'s default handler now navigates to the safe `?next=` destination (falling back to `/`) via `safeRedirect` instead of calling `window.location.reload()` on the sign-in screen. Signing out or switching personas on other routes still reloads in place.
+
 ## [0.1.21-alpha.3] - 2026-11-25
 
 Upgrade: patch. Site steps: none. Security: none.

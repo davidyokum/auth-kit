@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PersonaMenu } from '../../src/dev/menu.js';
+import { PersonaMenu, postSignInDestination } from '../../src/dev/menu.js';
 import {
   EnvironmentRibbon,
   environmentBadgeModel,
@@ -219,6 +219,23 @@ describe('components (server-rendered and interactive badge slot)', () => {
 
   it('PersonaMenu renders nothing until the dev route answers', () => {
     expect(renderToStaticMarkup(createElement(PersonaMenu))).toBe('');
+  });
+
+  it('postSignInDestination leaves /sign-in for safe next (or /) on persona sign-in, and reloads elsewhere', () => {
+    expect(postSignInDestination('analyst', { pathname: '/sign-in', search: '?next=%2F%3Ftab%3Dlibrary%26cycle%3D2027-29' })).toBe(
+      '/?tab=library&cycle=2027-29',
+    );
+    expect(postSignInDestination('analyst', { pathname: '/sign-in', search: '' })).toBe('/');
+    expect(postSignInDestination('analyst', { pathname: '/sign-in/', search: '?next=%2Fadmin' })).toBe('/admin');
+    expect(postSignInDestination('analyst', { pathname: '/signed-out', search: '' })).toBe('/');
+    expect(postSignInDestination('analyst', { pathname: '/sign-up', search: '?next=%2Fdashboard' })).toBe('/dashboard');
+    // Rejects open redirects and sign-in loops.
+    expect(postSignInDestination('analyst', { pathname: '/sign-in', search: '?next=https%3A%2F%2Fevil.example' })).toBe('/');
+    expect(postSignInDestination('analyst', { pathname: '/sign-in', search: '?next=%2F%2Fevil.example' })).toBe('/');
+    expect(postSignInDestination('analyst', { pathname: '/sign-in', search: '?next=%2Fsign-in%3Ffoo%3D1' })).toBe('/');
+    // Reloads in place when signing out or already on an app page.
+    expect(postSignInDestination(null, { pathname: '/sign-in', search: '?next=%2Fadmin' })).toBeNull();
+    expect(postSignInDestination('analyst', { pathname: '/workbench', search: '?tab=desk' })).toBeNull();
   });
 });
 

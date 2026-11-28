@@ -8,7 +8,29 @@
  * gate refused) the menu renders nothing; the dev server's console says which gate.
  */
 import { type CSSProperties, type ReactElement, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { safeRedirect } from '../server/redirect.js';
 import { DEV_SIGN_IN_ROUTE, DEV_SIGNIN_MARKER } from './marker.js';
+
+const AUTH_ENTRY_PATHS = new Set(['/sign-in', '/sign-up', '/signed-out']);
+
+/**
+ * Where the default `PersonaMenu` handler navigates after a persona change, or `null` to reload in
+ * place. Signing into a persona from `/sign-in` (or `/sign-up`, `/signed-out`) leaves the auth
+ * screen for its safe `?next=` destination (falling back to `/`) instead of reloading the sign-in
+ * form while already authenticated.
+ */
+export function postSignInDestination(
+  persona: string | null,
+  location: Pick<Location, 'pathname' | 'search'>,
+): string | null {
+  if (persona === null) return null;
+  const normalized = location.pathname.replace(/\/+$/, '') || '/';
+  if (!AUTH_ENTRY_PATHS.has(normalized)) return null;
+  const params = new URLSearchParams(location.search);
+  const target = safeRedirect(params.get('next'), '/');
+  const targetPath = (target.split(/[?#]/, 1)[0] ?? '/').replace(/\/+$/, '') || '/';
+  return AUTH_ENTRY_PATHS.has(targetPath) ? '/' : target;
+}
 
 interface MenuPersona {
   key: string;
@@ -26,7 +48,7 @@ interface MenuData {
 export interface PersonaMenuProps {
   /** Default `/api/dev/sign-in`. */
   route?: string;
-  /** After a sign-in or sign-out succeeds. Default: reload the page, so every component sees the new session. */
+  /** After a sign-in or sign-out succeeds. Default: leave `/sign-in` (to safe `next` or `/`) on sign-in, otherwise reload the page so every component sees the new session. */
   onChange?: (persona: string | null) => void;
   /** Default "Sign in as…". */
   label?: string;
@@ -110,7 +132,12 @@ export function PersonaMenu(props: PersonaMenuProps): ReactElement | null {
 
   const done = useCallback(
     (persona: string | null) => {
-      if (props.onChange) props.onChange(persona);
+      if (props.onChange) {
+        props.onChange(persona);
+        return;
+      }
+      const destination = postSignInDestination(persona, window.location);
+      if (destination !== null) window.location.assign(destination);
       else window.location.reload();
     },
     [props],
